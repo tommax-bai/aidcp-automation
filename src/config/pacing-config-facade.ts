@@ -29,7 +29,7 @@ import type {
   PacingConfigRowView,
   PacingConfigSetResult,
   PanelPacingConfig,
-} from '../panel/types.js';
+} from 'aidcp-kernel/kernel/config-panel-ports.js';
 
 export interface PacingConfigFacadeDeps {
   store: PacingConfigStore;
