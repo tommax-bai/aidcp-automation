@@ -21,13 +21,9 @@
     "test:feishu": "tsx --env-file=.env src/cli/test-feishu.ts"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.66.0",
-    "@resvg/resvg-js": "2.6.2",
-    "ali-oss": "^6.23.0",
+    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#3761197813e9768dd53a4abfbb7cf5b3d8cb0ce6",
     "pg": "^8.13.1",
-    "satori": "0.26.0",
-    "ws": "^8.18.0",
-    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#3761197813e9768dd53a4abfbb7cf5b3d8cb0ce6"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
