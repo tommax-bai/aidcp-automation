@@ -19,9 +19,9 @@ import type {
 } from '../comm/protocol.js';
 import { CommandPreemptedError, isPreemptionReason, type PreemptionReason } from '../comm/preemption.js';
 import type { PlatformId } from '../platform/index.js';
-import type { PublishMetadata } from '../kernel/publish-pipeline-types.js';
+import type { PublishMetadata } from 'aidcp-kernel/kernel/publish-pipeline-types.js';
 import { buildPublishCommandPlan } from './platform-profile.js';
-import { validatePublishSchedule } from '../kernel/schedule-policy.js';
+import { validatePublishSchedule } from 'aidcp-kernel/kernel/schedule-policy.js';
 import {
   DEFAULT_FILL_BUDGET,
   isContentTooLong,

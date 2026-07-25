@@ -27,7 +27,7 @@ import type {
   OffboardCleanupGrantOperations,
   OffboardGrantReason,
   OffboardGrantState,
-} from '../kernel/offboard-cleanup-grant-types.js';
+} from 'aidcp-kernel/kernel/offboard-cleanup-grant-types.js';
 
 const PLATFORM = 'wechat_channels';
 

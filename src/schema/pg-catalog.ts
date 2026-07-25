@@ -13,8 +13,8 @@
 
 // 最小查询接口的单一定义处已上移 kernel（`../kernel/schema-capability-contract.ts`，随 SchemaEnsurer
 // 端口一并进 kernel，any→kernel 恒允许）；此处原样 re-export，保住同层既有 import 路径。
-export type { SchemaQueryable } from '../kernel/schema-capability-contract.js';
-import type { SchemaQueryable } from '../kernel/schema-capability-contract.js';
+export type { SchemaQueryable } from 'aidcp-kernel/kernel/schema-capability-contract.js';
+import type { SchemaQueryable } from 'aidcp-kernel/kernel/schema-capability-contract.js';
 
 export interface TableColumns {
   /** 库里实际存在的表名 */

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
 import type {
   DelegatedActionFamily,
   DelegatedExecutionTarget,

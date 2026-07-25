@@ -19,7 +19,7 @@ import type {
   ConfigMirrorBumpRequest,
   ConfigMirrorBumpResult,
   ConfigMirrorBumpSink,
-} from '../kernel/config-mirror-bump-types.js';
+} from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import type { InternalHttpClient, InternalHttpServer } from './internal-http.js';
 
 /** 路由名。server / client 两侧共用，防漂移。 */

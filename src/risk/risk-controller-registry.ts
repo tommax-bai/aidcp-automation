@@ -1,4 +1,4 @@
-import type { DeploymentTarget } from '../deployment-target.js';
+import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 import { RiskController } from './risk-controller.js';
 import { isRiskStateNotOwnedError } from './ownership.js';
 import type { AccountNurtureProvider, QuotaProvider, RiskState, RiskStore } from './types.js';

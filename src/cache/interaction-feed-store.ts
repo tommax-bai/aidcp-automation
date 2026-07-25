@@ -16,9 +16,9 @@
  */
 
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
 import { ensureCapabilitySchema } from '../schema/schema-capability.js';
-import type { FeedAction } from '../kernel/feed-action.js';
+import type { FeedAction } from 'aidcp-kernel/kernel/feed-action.js';
 
 const { Pool } = pg;
 

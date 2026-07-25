@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
 import { ensureCapabilitySchema } from '../schema/schema-capability.js';
 
 const { Pool } = pg;
@@ -7,7 +7,7 @@ const { Pool } = pg;
 // 纯数据模型类型 + 哨兵错误已抬入 kernel（src/kernel/facebook-group-types.ts），供 api 侧面板 / 配置视图
 // 跨边界共导；这里等值再导出，让既有 `from '../comment-agent/facebook-group-store'` 的类型 / 错误导入面
 // （automation 内部消费方、scheduler 等）逐字不变。存储实现（pg 读写、DbRow 映射）留本文件。
-import { FacebookGroupScopeError } from '../kernel/facebook-group-types.js';
+import { FacebookGroupScopeError } from 'aidcp-kernel/kernel/facebook-group-types.js';
 import type {
   FacebookGroupJoinGating,
   FacebookGroupMembershipStatus,
@@ -27,7 +27,7 @@ import type {
   FacebookGroupScopedTargetCount,
   FacebookGroupImportResult,
   FacebookGroupAccountProgress,
-} from '../kernel/facebook-group-types.js';
+} from 'aidcp-kernel/kernel/facebook-group-types.js';
 export { FacebookGroupScopeError };
 export type {
   FacebookGroupJoinGating,

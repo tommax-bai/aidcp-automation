@@ -6,7 +6,7 @@ import {
   validateFinalReplyText,
   validateReplyConfig,
 } from './reply-config.js';
-import { readJobConfig, readPublishedConfig, type ReplyConfigReader } from '../kernel/interaction-reply-contract.js';
+import { readJobConfig, readPublishedConfig, type ReplyConfigReader } from 'aidcp-kernel/kernel/interaction-reply-contract.js';
 import { automaticReplyContentEligible } from './reply-auto-send.js';
 import type { InteractionStore } from './interaction-store.js';
 import {
@@ -24,7 +24,7 @@ import {
   type RiskTag,
   type ReplyPreviewResult,
   type ScopedJobContext,
-} from '../kernel/interaction-types.js';
+} from 'aidcp-kernel/kernel/interaction-types.js';
 
 // ReplyPreviewResult 已抬入 kernel（供 api 只读预览路径经窄端口消费）；这里等值再导出，
 // 让本仓内既有 automation 消费方（send-orchestrator）无感。

@@ -1,5 +1,5 @@
 import { RISK_ACTIONS, type CounterEvent, type RiskAction, type RiskWindow } from './types.js';
-import { nextShanghaiDayStartMs, shanghaiDayStartMs } from '../time/shanghai-day.js';
+import { nextShanghaiDayStartMs, shanghaiDayStartMs } from 'aidcp-kernel/time/shanghai-day.js';
 
 const WINDOW_MS: Record<RiskWindow, number> = {
   minute: 60_000,

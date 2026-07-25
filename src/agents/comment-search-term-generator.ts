@@ -16,8 +16,8 @@
  * 非事件驱动：由评论任务编排（src/comment-agent/）命令式调用 generate()，不订阅 EventBus。
  */
 
-import type { Soul } from '../kernel/soul-types.js';
-import type { LlmCallOpts } from '../kernel/llm-contract.js';
+import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
+import type { LlmCallOpts } from 'aidcp-kernel/kernel/llm-contract.js';
 import type { RoleName } from '../event-bus/types.js';
 import { XHS_COMMENT_PROFILE, type CommentPlatformProfile } from '../platform/index.js';
 

@@ -10,7 +10,7 @@ import type {
   PublishSourceReference,
   TitleSelection,
   ImageReferenceAudit,
-} from '../../kernel/publish-pipeline-types.js';
+} from 'aidcp-kernel/kernel/publish-pipeline-types.js';
 import type { PipelineContext } from '../pipeline-context.js';
 import type {
   ApprovalWriteResult,
@@ -18,9 +18,9 @@ import type {
   PublishApprovalCardData,
   PublishApprovalPayload,
 } from '../../comm/feishu-card-contract.js';
-import { clampTitle, firstSentence } from '../../kernel/title-clamp.js';
+import { clampTitle, firstSentence } from 'aidcp-kernel/kernel/title-clamp.js';
 import { publishProfileForPlatform } from '../platform-profile.js';
-import { checkWritingLanguage } from '../../kernel/writing-language.js';
+import { checkWritingLanguage } from 'aidcp-kernel/kernel/writing-language.js';
 
 /**
  * PublishExecutor —— 生成候审段的出口角色（change decouple-publish-generation-from-dispatch）。

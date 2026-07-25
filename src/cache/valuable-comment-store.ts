@@ -9,7 +9,7 @@
  */
 
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
 import { ensureCapabilitySchema } from '../schema/schema-capability.js';
 
 const { Pool } = pg;
@@ -33,8 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_valuable_comments_topics ON valuable_comments USI
 // topicKeysFromTitle（无 LLM 主题键派生）与 ValuableCommentInput（纯数据模型）已抬入 kernel
 // （src/kernel/valuable-comment-types.ts），供 content 侧精选评估角色跨边界共导；这里等值再导出，
 // 让本仓内既有 automation 消费方（comment-composer / role-dispatcher / server 组合根）无感。
-import { topicKeysFromTitle } from '../kernel/valuable-comment-types.js';
-import type { ValuableCommentInput } from '../kernel/valuable-comment-types.js';
+import { topicKeysFromTitle } from 'aidcp-kernel/kernel/valuable-comment-types.js';
+import type { ValuableCommentInput } from 'aidcp-kernel/kernel/valuable-comment-types.js';
 export { topicKeysFromTitle };
 export type { ValuableCommentInput };
 

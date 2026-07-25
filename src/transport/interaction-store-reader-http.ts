@@ -13,7 +13,7 @@
  * 允许引 kernel：`to === kernel` 恒 allowed；本文件对 kernel 契约的 import 不产生需豁免的跨层边。
  */
 import type { InternalHttpClient, InternalHttpServer } from './internal-http.js';
-import type { InteractionStoreReaderPort } from '../kernel/interaction-types.js';
+import type { InteractionStoreReaderPort } from 'aidcp-kernel/kernel/interaction-types.js';
 
 type P<M extends keyof InteractionStoreReaderPort> = Parameters<InteractionStoreReaderPort[M]>;
 type R<M extends keyof InteractionStoreReaderPort> = Awaited<ReturnType<InteractionStoreReaderPort[M]>>;

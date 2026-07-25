@@ -26,7 +26,8 @@
     "ali-oss": "^6.23.0",
     "pg": "^8.13.1",
     "satori": "0.26.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#d65f0083ca51302030e0fd180d21b56d18b740c5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

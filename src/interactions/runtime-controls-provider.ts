@@ -1,4 +1,4 @@
-import type { InteractionRuntimeControlsPayload, RuntimeControls } from '../kernel/interaction-types.js';
+import type { InteractionRuntimeControlsPayload, RuntimeControls } from 'aidcp-kernel/kernel/interaction-types.js';
 
 export interface RuntimeControlsProjectionDeps {
   getRuntimeControls(accountId: string): Promise<RuntimeControls>;

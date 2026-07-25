@@ -8,8 +8,8 @@ import { validateDelegatedTaskIntent } from './types.js';
 // DelegatedTaskConfirmationSummary（纯投影摘要）、DelegatedTaskServiceError（typed error）、
 // DelegatedTaskServicePort（读写窄面）已抬入 kernel，供 api 侧消费方跨边界共导；这里等值再导出，
 // 让既有 `from '../delegated-task/service'` 的导入面（automation 内部消费方）逐字不变。
-import type { DelegatedTaskConfirmationSummary, DelegatedTaskServicePort } from '../kernel/delegated-task-types.js';
-import { DelegatedTaskServiceError } from '../kernel/delegated-task-types.js';
+import type { DelegatedTaskConfirmationSummary, DelegatedTaskServicePort } from 'aidcp-kernel/kernel/delegated-task-types.js';
+import { DelegatedTaskServiceError } from 'aidcp-kernel/kernel/delegated-task-types.js';
 export type { DelegatedTaskConfirmationSummary };
 export { DelegatedTaskServiceError };
 

@@ -16,7 +16,7 @@ import type { RoleDispatcher, SessionBudgetAction, SessionUsageSnapshot } from '
 import type { EdgeSession } from '../comm/ws-server.js';
 import type { ResumeGateVerdict } from '../comm/browser-standby.js';
 import type { RiskController } from '../risk/index.js';
-import type { DeploymentTarget } from '../deployment-target.js';
+import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 import type { AccountOwnershipPort } from '../risk/ownership.js';
 import {
   isOrchestrationCapabilitySupported,

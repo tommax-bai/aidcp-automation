@@ -25,8 +25,8 @@
  * 那是「拒绝启动」而不是「静默双写」，方向正确；强制释放步骤见 docs/deployment-environments.md。
  */
 import pg from 'pg';
-import type { DeploymentTarget } from '../deployment-target.js';
-import { pgOwnerUrlEnvVar } from '../kernel/pg-owner-connection-resolver.js';
+import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
+import { pgOwnerUrlEnvVar } from 'aidcp-kernel/kernel/pg-owner-connection-resolver.js';
 import { pgRiskConfigFromEnv } from './pg-risk-store.js';
 
 const { Client } = pg;

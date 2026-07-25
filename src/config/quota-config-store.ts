@@ -36,8 +36,8 @@
  */
 
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
-import { writeWithMirrorBump, type MirrorVersionBumper } from '../kernel/config-mirror-bump-types.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
+import { writeWithMirrorBump, type MirrorVersionBumper } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import { COOLDOWN_ACTIONS } from '../risk/action-cooldown.js';
 import { MINUTE_BURST_CAP, deriveWindowQuotas } from '../risk/quotas.js';
 import {

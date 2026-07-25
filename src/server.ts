@@ -30,7 +30,7 @@ import { PLATFORM_CREDENTIALS, resolvePlatformCredentialEnvValue } from './confi
 import { randomUUID } from 'node:crypto';
 import { TokenUsageStore } from './metrics/token-usage-store.js';
 import { createBillingPriceRefresh } from './metrics/billing-price-refresh.js';
-import { shanghaiDayStartMs } from './time/shanghai-day.js';
+import { shanghaiDayStartMs } from 'aidcp-kernel/time/shanghai-day.js';
 import { SimplePlanner } from './planner/index.js';
 // automation 归属 store 仍取自 automation 桶；content / api 归属 store 按其真实归属直连具体文件
 // （composition→任意层恒允许，不新增跨边界豁免；随 cache/index 按层拆桶同步调整，见该文件说明）。
@@ -292,9 +292,9 @@ import {
   createDelegatedExecutorRouter,
   type DelegatedTask,
 } from './delegated-task/index.js';
-import { parseDeploymentTarget } from './deployment-target.js';
+import { parseDeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 import { runSchemaContractGate, takePendingSchemaGateAlert } from './schema/schema-gate.js';
-import { isSchemaCapabilityError } from './kernel/schema-capability-contract.js';
+import { isSchemaCapabilityError } from 'aidcp-kernel/kernel/schema-capability-contract.js';
 import { ensureCapabilitySchema } from './schema/schema-capability.js';
 import { DelegatedTaskNotificationGate, delegatedTaskFailureReceipt } from './delegated-task/notification.js';
 import { omitUnsupportedUsageMetrics, platformRegistryEntry } from './platform/index.js';
@@ -337,9 +337,9 @@ import {
   DEFAULT_ACCOUNT_PROJECTION_REFRESH_MS,
   PgAccountProjectionStore,
 } from './transport/account-projection-store.js';
-import type { AccountRosterSourcePort } from './kernel/account-projection-types.js';
-import type { RiskReadPort } from './kernel/risk-read-types.js';
-import type { PanelAutomationReader } from './kernel/panel-automation-types.js';
+import type { AccountRosterSourcePort } from 'aidcp-kernel/kernel/account-projection-types.js';
+import type { RiskReadPort } from 'aidcp-kernel/kernel/risk-read-types.js';
+import type { PanelAutomationReader } from 'aidcp-kernel/kernel/panel-automation-types.js';
 import { PgPanelAutomationRead } from './risk/panel-automation-read.js';
 import {
   emitRiskCommand,
@@ -370,7 +370,7 @@ import {
   INTERACTION_AUDIT_OUTBOX_TOPIC,
   INTERACTION_AUDIT_RELAY_CONSUMER,
   decodeInteractionAuditEvent,
-} from './kernel/interaction-audit-outbox.js';
+} from 'aidcp-kernel/kernel/interaction-audit-outbox.js';
 /** automation 内部只读 API 的默认监听端口（可由 AIDCP_AUTOMATION_PORT 覆盖）；api 侧 base URL 由 AIDCP_AUTOMATION_URL 指定。 */
 const DEFAULT_AUTOMATION_READ_API_PORT = 8093;
 /** api 进程内部 API 的默认监听端口（可由 `AIDCP_API_PORT` 覆盖）。 */
@@ -389,11 +389,11 @@ import {
   ConfigMirrorBumpHttpClient,
   registerConfigMirrorBumpRoutes,
 } from './transport/config-mirror-bump-http.js';
-import type { ConfigMirrorBumpSink } from './kernel/config-mirror-bump-types.js';
+import type { ConfigMirrorBumpSink } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import { allowsTransportWhenGateUnknown } from './config/mirror-stop-work.js';
 import { noteMirrorStaleRefusal } from './config-mirror-freshness.js';
 import { automationOperationDescriptorFor } from './comm/operation-registry.js';
-import { resolveOwnerPgConfig } from './kernel/pg-owner-connection-resolver.js';
+import { resolveOwnerPgConfig } from 'aidcp-kernel/kernel/pg-owner-connection-resolver.js';
 import { ModelConfigStore } from './config/model-config-store.js';
 import { RoleConfigStore } from './config/role-config-store.js';
 import { createRoleConfigPanel } from './config/role-config-facade.js';
@@ -470,18 +470,18 @@ import { InteractionScopeInternalApi } from './interactions/interaction-scope-in
 import { buildInteractionPermissionOverview } from './interactions/interaction-panel-permissions.js';
 // 互动域环境授权闸的 api 属主实现（Block③ L3 反方向收口）：持 api 池、自开事务，经 kernel 端口注入 automation。
 import { PgInteractionAuthGate } from './interactions/interaction-auth-gate.js';
-import type { InteractionAuthGate } from './kernel/interaction-auth-gate-types.js';
+import type { InteractionAuthGate } from 'aidcp-kernel/kernel/interaction-auth-gate-types.js';
 // 组合根直接构造 content 的回复生成实现，并作为 ReplyAiPort 注入 ReplyWorkflow（automation 编排层只持接口）。
 import { ReplyAiService } from './interactions/reply-ai.js';
 import { projectRuntimeControls } from './interactions/runtime-controls-provider.js';
 // change offboard-saga → Block③ L3：离场**执行台账**的属主侧操作，由组合根注入（拆进程时换成内部 HTTP）。
 import { PgOffboardMaterializationOps } from './interactions/offboard-write-adapter.js';
-import type { OffboardMaterializationOperations } from './kernel/offboard-materialization-types.js';
+import type { OffboardMaterializationOperations } from 'aidcp-kernel/kernel/offboard-materialization-types.js';
 // Block③ L3：离场写适配器的**读侧配对**——api 的客户环境生命周期经 kernel 端口向 automation 取只读投影。
 import { PgClientEnvAutomationRead } from './interactions/client-env-automation-read.js';
 import { PgOffboardCleanupGrantOps } from './interactions/offboard-cleanup-grant-ops.js';
-import type { OffboardCleanupGrantOperations } from './kernel/offboard-cleanup-grant-types.js';
-import type { ClientEnvAutomationReader } from './kernel/client-env-automation-types.js';
+import type { OffboardCleanupGrantOperations } from 'aidcp-kernel/kernel/offboard-cleanup-grant-types.js';
+import type { ClientEnvAutomationReader } from 'aidcp-kernel/kernel/client-env-automation-types.js';
 import { InteractionApiWrites } from './interactions/interaction-api-writes.js';
 
 function readEnvString(name: string): string | undefined {

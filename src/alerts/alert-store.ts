@@ -12,7 +12,7 @@
  */
 
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
 import type { AlertSeverity } from './alert-notification.js';
 import { ensureCapabilitySchema } from '../schema/schema-capability.js';
 

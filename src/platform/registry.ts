@@ -15,7 +15,7 @@ export type {
   NoteSupport,
   CommentPlatformProfile,
   PlatformRegistryEntry,
-} from '../kernel/platform-types.js';
+} from 'aidcp-kernel/kernel/platform-types.js';
 import type {
   PlatformId,
   ScheduledAutomationAction,
@@ -26,7 +26,7 @@ import type {
   NoteSupport,
   CommentPlatformProfile,
   PlatformRegistryEntry,
-} from '../kernel/platform-types.js';
+} from 'aidcp-kernel/kernel/platform-types.js';
 
 /**
  * 账号排期动作全集：Cloud 目录投影与写入校验共同消费，不能从其它能力词推导。

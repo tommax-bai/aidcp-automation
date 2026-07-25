@@ -46,7 +46,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { PG_OWNERS, type PgOwner } from '../kernel/pg-owner-connection-resolver.js';
+import { PG_OWNERS, type PgOwner } from 'aidcp-kernel/kernel/pg-owner-connection-resolver.js';
 import { LEDGER_MIGRATION_NAME } from './migration-files.js';
 import { compareVersions, parseMigrationHeader, versionOf, type MigrationFile } from './migration-plan.js';
 

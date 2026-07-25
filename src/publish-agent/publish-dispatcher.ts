@@ -17,10 +17,10 @@
 
 import type { DispatchDraft } from './publish-log-store.js';
 import type { CommandSequencer } from './command-sequencer.js';
-import { ApprovalUnreadableError, type ApprovalBlockedReason, type ApprovalVoidReason } from '../kernel/publish-approval-contract.js';
+import { ApprovalUnreadableError, type ApprovalBlockedReason, type ApprovalVoidReason } from 'aidcp-kernel/kernel/publish-approval-contract.js';
 import { EdgeTaskLeaseError, type EdgeTaskLeaseClient } from '../comm/edge-task-lease-client.js';
 import type { EdgeTaskPriority } from '../comm/protocol.js';
-import type { DeploymentTarget } from '../deployment-target.js';
+import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 
 /** 下发段所需的落库读写子集。 */
 export interface DispatchStore {

@@ -2,7 +2,7 @@ import type { InteractionStore } from './interaction-store.js';
 import type { InteractionMetrics } from './metrics.js';
 import { riskActionForChannel, type InteractionRiskController } from './send-orchestrator.js';
 import type { ReplyWorkflow } from './reply-workflow.js';
-import { readJobConfig, type ReplyConfigReader } from '../kernel/interaction-reply-contract.js';
+import { readJobConfig, type ReplyConfigReader } from 'aidcp-kernel/kernel/interaction-reply-contract.js';
 import type {
   InteractionChannel,
   InteractionAuthStatusPayload,
@@ -11,8 +11,8 @@ import type {
   InteractionReplyResultPayload,
   InteractionSyncAckPayload,
   InteractionSyncBatchPayload,
-} from '../kernel/interaction-types.js';
-import { InteractionError } from '../kernel/interaction-types.js';
+} from 'aidcp-kernel/kernel/interaction-types.js';
+import { InteractionError } from 'aidcp-kernel/kernel/interaction-types.js';
 
 export class InteractionInboxService {
   constructor(private readonly deps: {

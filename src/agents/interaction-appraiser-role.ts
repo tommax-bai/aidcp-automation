@@ -15,10 +15,10 @@ import { BaseRole } from './base-role.js';
 import type { RoleOptions } from './base-role.js';
 import type { SessionContext } from './session-context.js';
 import type { NoteData } from './content-curator-role.js';
-import { tieredInterests } from '../kernel/persona-format.js';
+import { tieredInterests } from 'aidcp-kernel/kernel/persona-format.js';
 import type { RoleName, ReadingDonePayload } from '../event-bus/types.js';
 import { mandatoryInteractionPrompt } from './mandatory-interaction.js';
-import { likeAffinityLabel, noteLikeAffinityGuidance, resolveLikeAffinity } from '../kernel/like-affinity.js';
+import { likeAffinityLabel, noteLikeAffinityGuidance, resolveLikeAffinity } from 'aidcp-kernel/kernel/like-affinity.js';
 
 /**
  * 收藏硬数值阈值（engagement-restraint）：仅当笔记「收藏数 / 点赞数 ≥ 此比例」（默认 1/3）才收藏。

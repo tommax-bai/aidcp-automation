@@ -25,7 +25,7 @@ import type {
   OffboardProjection,
   OffboardProjectionReason,
   OffboardProjectionState,
-} from '../kernel/client-env-automation-types.js';
+} from 'aidcp-kernel/kernel/client-env-automation-types.js';
 
 /** 离场记录的裸行形状（属主表列名口径）。 */
 interface OffboardDbRow {

@@ -32,8 +32,8 @@ import type {
   MaterializeEnvironmentOffboardInput,
   MaterializeEnvironmentOffboardOutcome,
   OffboardMaterializationOperations,
-} from '../kernel/offboard-materialization-types.js';
-import type { OffboardProjection } from '../kernel/client-env-automation-types.js';
+} from 'aidcp-kernel/kernel/offboard-materialization-types.js';
+import type { OffboardProjection } from 'aidcp-kernel/kernel/client-env-automation-types.js';
 
 type Queryable = Pick<pg.Pool, 'query'> | Pick<pg.PoolClient, 'query'>;
 

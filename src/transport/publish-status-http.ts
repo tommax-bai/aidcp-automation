@@ -14,7 +14,7 @@
  * 允许引 kernel：`to === kernel` 恒 allowed；本文件对 kernel 契约的 import 不产生需豁免的跨层边。
  */
 import type { InternalHttpClient, InternalHttpServer } from './internal-http.js';
-import type { PublishQueueStatus, PublishStatusReader } from '../kernel/publish-status-types.js';
+import type { PublishQueueStatus, PublishStatusReader } from 'aidcp-kernel/kernel/publish-status-types.js';
 
 /** 端口方法对应的内部 HTTP 路由名。server / client 两侧共用，防漂移。 */
 export const PUBLISH_STATUS_ROUTES = {

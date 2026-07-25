@@ -11,7 +11,7 @@
  * 只对**已物化**的 controller 做（账号量级几十），且只查当日窗口总量（走
  * `idx_risk_counters_account_action_time`）。绝不因对账而物化新 controller。
  */
-import { shanghaiDayStartMs } from '../time/shanghai-day.js';
+import { shanghaiDayStartMs } from 'aidcp-kernel/time/shanghai-day.js';
 import type { RiskControllerRegistry } from './risk-controller-registry.js';
 import { RISK_ACTIONS, type ActionQuota, type RiskAction } from './types.js';
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { resolveEnvPgConfig } from '../kernel/pg-config.js';
-import { qualifiedObjectName } from '../kernel/schema-name.js';
+import { resolveEnvPgConfig } from 'aidcp-kernel/kernel/pg-config.js';
+import { qualifiedObjectName } from 'aidcp-kernel/kernel/schema-name.js';
 import {
   INTERACTION_PLATFORM,
   InteractionError,
@@ -30,16 +30,16 @@ import {
   type ListResult,
   type ReplyPreviewContext,
   type DetailResult,
-} from '../kernel/interaction-types.js';
+} from 'aidcp-kernel/kernel/interaction-types.js';
 import type {
   InteractionAuthGate,
   InteractionAuthGateDenial,
   InteractionAuthWriteReceipt,
-} from '../kernel/interaction-auth-gate-types.js';
+} from 'aidcp-kernel/kernel/interaction-auth-gate-types.js';
 import {
   INTERACTION_AUDIT_OUTBOX_TOPIC,
   type InteractionAuditEventRecord,
-} from '../kernel/interaction-audit-outbox.js';
+} from 'aidcp-kernel/kernel/interaction-audit-outbox.js';
 import { emitOutboxEvent } from '../transport/event-outbox.js';
 import { classifyInteractionSchema, type InteractionSchemaMode } from './schema-capability.js';
 

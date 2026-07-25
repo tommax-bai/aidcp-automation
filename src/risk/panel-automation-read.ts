@@ -15,8 +15,8 @@
  */
 
 import pg from 'pg';
-import { SHANGHAI_DAY_START_SQL } from '../time/shanghai-day.js';
-import type { FeedAction } from '../kernel/feed-action.js';
+import { SHANGHAI_DAY_START_SQL } from 'aidcp-kernel/time/shanghai-day.js';
+import type { FeedAction } from 'aidcp-kernel/kernel/feed-action.js';
 import type {
   PanelAccountActionTotal,
   PanelActionTotal,
@@ -25,7 +25,7 @@ import type {
   PanelInteractionProjection,
   PanelLikeViewTotal,
   PanelRiskStateProjection,
-} from '../kernel/panel-automation-types.js';
+} from 'aidcp-kernel/kernel/panel-automation-types.js';
 
 export interface PgPanelAutomationReadOptions {
   /** automation 属主池（组合根注入）。 */

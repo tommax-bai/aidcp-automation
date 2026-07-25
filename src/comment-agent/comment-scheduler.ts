@@ -14,8 +14,8 @@
  */
 
 import type { EventBus } from '../event-bus/index.js';
-import type { Soul } from '../kernel/soul-types.js';
-import type { PersonaBinding } from '../kernel/persona-binding.js';
+import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
+import type { PersonaBinding } from 'aidcp-kernel/kernel/persona-binding.js';
 import { PERSONA_UNAVAILABLE_REASON } from '../config/mirror-stop-work.js';
 import { CommentSearchTermGenerator, type RoleLlmLike } from '../agents/comment-search-term-generator.js';
 import { CommentTargetPicker, type CommentCandidateCard } from '../agents/comment-target-picker.js';
@@ -32,9 +32,9 @@ import { buildEdgeCommentSteps, type EdgePusher, type CommentDedup } from './edg
 import { buildFacebookEdgeSteps } from './facebook-edge-steps.js';
 import { buildComposeAndApprove, type AutoApproveCommentNotification, type PostProcessorLike } from './compose-approve.js';
 import { sendAutoApproveNotificationBestEffort } from './auto-approve-notification.js';
-import type { ContentScheduleApprovalMode } from '../kernel/content-schedule-mode.js';
+import type { ContentScheduleApprovalMode } from 'aidcp-kernel/kernel/content-schedule-mode.js';
 import type { CuratedSampleForTerms } from '../agents/comment-search-term-generator.js';
-import type { CuratedContentTypeFilter } from '../kernel/curated-content-types.js';
+import type { CuratedContentTypeFilter } from 'aidcp-kernel/kernel/curated-content-types.js';
 import {
   XHS_COMMENT_PROFILE,
   commentProfileForPlatform,
@@ -43,7 +43,7 @@ import {
   type CommentPlatformProfile,
 } from '../platform/index.js';
 import { validateFacebookComment } from './facebook-comment-validators.js';
-import type { EffectiveFacebookCommentConfig } from '../kernel/facebook-comment-config-types.js';
+import type { EffectiveFacebookCommentConfig } from 'aidcp-kernel/kernel/facebook-comment-config-types.js';
 import type { FacebookCommentAuditRow, FacebookCommentOutcome } from './facebook-comment-audit-store.js';
 import { EdgeTaskLeaseError, type EdgeTaskLeaseClient } from '../comm/edge-task-lease-client.js';
 import type { EdgeTaskPriority } from '../comm/protocol.js';

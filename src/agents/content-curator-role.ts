@@ -15,10 +15,10 @@ import type { RoleOptions } from './base-role.js';
 import type { SessionContext } from './session-context.js';
 import type { RoleName } from '../event-bus/types.js';
 import { XHS_COMMENT_PROFILE, type CommentPlatformProfile } from '../platform/registry.js';
-import type { Soul } from '../kernel/soul-types.js';
+import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import type { MandatoryInteractionContext } from '../event-bus/types.js';
 import { mandatoryInteractionContext, mandatoryInteractionPrompt } from './mandatory-interaction.js';
-import type { NoteData } from '../kernel/note-detail.js';
+import type { NoteData } from 'aidcp-kernel/kernel/note-detail.js';
 
 // NoteData 纯数据模型抬入 kernel（change decouple-longtail-sweep）供 content 侧评估角色跨边界共导；
 // 本文件等值再导出，令 automation 侧既有消费方无感。

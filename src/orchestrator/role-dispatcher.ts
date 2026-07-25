@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { PersonaBinding } from '../kernel/persona-binding.js';
+import type { PersonaBinding } from 'aidcp-kernel/kernel/persona-binding.js';
 import {
   CONFIG_MIRROR_STALE_REASON,
   PERSONA_UNAVAILABLE_REASON,
@@ -35,7 +35,7 @@ import {
   type NoteScopedAction,
   type Surface,
 } from '../platform/index.js';
-import type { LlmCallOpts } from '../kernel/llm-contract.js';
+import type { LlmCallOpts } from 'aidcp-kernel/kernel/llm-contract.js';
 import { SessionContext } from '../agents/session-context.js';
 import { ContentEvaluator } from '../agents/content-evaluator.js';
 import { FeedScroller } from '../agents/feed-scroller.js';
@@ -80,7 +80,7 @@ import { ExcursionResumer } from '../agents/excursion-resumer.js';
 import type { EdgeTaskLease, EdgeTaskLeaseClient } from '../comm/edge-task-lease-client.js';
 import { isPreemptionReason } from '../comm/preemption.js';
 import type { BaseRole, RoleOptions } from '../agents/base-role.js';
-import type { Soul } from '../kernel/soul-types.js';
+import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import { computeDwellMs, computeThinkMs, computeFeedFloorMs, effectiveTempo, type PacingFloorProvider } from '../risk/pacing.js';
 import { SearchFrequencyLimiter } from '../risk/search-frequency-limiter.js';
 import { InteractionGuard, isGuardedInteraction, type GuardAction } from '../risk/interaction-guard.js';
@@ -220,7 +220,7 @@ export interface ViewQuotaDecision {
 
 // MandatoryCommentOutcome 与 MandatoryCommentOutcomeNoticeInput 纯数据模型抬入 kernel
 // （change decouple-longtail-sweep）供飞书卡片层跨边界共导；本文件从 kernel 导入并等值再导出，令既有消费方无感。
-import type { MandatoryCommentOutcome, MandatoryCommentOutcomeNoticeInput } from '../kernel/mandatory-comment-notice.js';
+import type { MandatoryCommentOutcome, MandatoryCommentOutcomeNoticeInput } from 'aidcp-kernel/kernel/mandatory-comment-notice.js';
 export type { MandatoryCommentOutcome, MandatoryCommentOutcomeNoticeInput };
 
 interface PendingCommentDelivery {

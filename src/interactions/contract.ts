@@ -12,7 +12,7 @@ import {
   type RiskTag,
   type SyncMessage,
   type SyncThread,
-} from '../kernel/interaction-types.js';
+} from 'aidcp-kernel/kernel/interaction-types.js';
 
 const CHANNELS = new Set<InteractionChannel>(['comment', 'dm']);
 const MESSAGE_TYPES = new Set<InteractionMessageType>(['text', 'image', 'unknown']);

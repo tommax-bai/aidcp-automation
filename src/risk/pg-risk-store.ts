@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { DEFAULT_PG_CONFIG } from '../cache/index.js';
-import { SHANGHAI_DAY_START_SQL } from '../time/shanghai-day.js';
-import { parseDeploymentTarget, type DeploymentTarget } from '../deployment-target.js';
+import { SHANGHAI_DAY_START_SQL } from 'aidcp-kernel/time/shanghai-day.js';
+import { parseDeploymentTarget, type DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 import { RiskStateNotOwnedError, type OwnershipMode } from './ownership.js';
 import { RISK_ACTIONS } from './types.js';
 import type {

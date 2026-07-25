@@ -3,7 +3,7 @@
 // 桶反向依赖 api、且任何导入方经本桶就能跨层拿到 api 属主文件（「经桶跨层」反模式）。这些 api 文件由需要方
 // 直接从各自具体文件导入：唯一进程内消费者是组合根 src/server.ts（composition，MAY 导入任何层）。
 // 参照已落地的 src/cache/index.ts 按层收口桶拆法。
-export * from '../kernel/interaction-types.js';
+export * from 'aidcp-kernel/kernel/interaction-types.js';
 export * from './contract.js';
 export * from './interaction-store.js';
 export * from './schema-capability.js';

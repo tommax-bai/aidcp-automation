@@ -14,7 +14,7 @@
  * 允许引 kernel：`to === kernel` 恒 allowed；本文件对 kernel 契约的 import 不产生需豁免的跨层边。
  */
 import type { InternalHttpClient, InternalHttpServer } from './internal-http.js';
-import type { CuratedContentReader } from '../kernel/curated-content-types.js';
+import type { CuratedContentReader } from 'aidcp-kernel/kernel/curated-content-types.js';
 
 /** 每个端口方法对应的内部 HTTP 路由名。server / client 两侧共用，防漂移。 */
 export const CURATED_CONTENT_ROUTES = {

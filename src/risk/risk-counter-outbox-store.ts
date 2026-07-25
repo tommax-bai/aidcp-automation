@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { DEFAULT_PG_CONFIG } from '../cache/index.js';
-import type { DeploymentTarget } from '../deployment-target.js';
+import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 import type { RiskAction } from './types.js';
 
 const { Pool } = pg;

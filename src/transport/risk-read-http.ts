@@ -20,7 +20,7 @@ import type {
   RiskStateView,
   WindowQuotasView,
   SlowStartViewData,
-} from '../kernel/risk-read-types.js';
+} from 'aidcp-kernel/kernel/risk-read-types.js';
 
 /** 每个端口方法对应的内部 HTTP 路由名。server / client 两侧共用，防漂移。 */
 export const RISK_READ_ROUTES = {

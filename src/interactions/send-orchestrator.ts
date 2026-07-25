@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { makeEnvelope } from '../comm/protocol.js';
 import type { EdgePusher } from '../comm/ws-server.js';
 import { automaticReplyContentEligible } from './reply-auto-send.js';
-import { readJobConfig, type ReplyConfigReader } from '../kernel/interaction-reply-contract.js';
-import { validateFinalReplyText } from '../kernel/interaction-reply-contract.js';
+import { readJobConfig, type ReplyConfigReader } from 'aidcp-kernel/kernel/interaction-reply-contract.js';
+import { validateFinalReplyText } from 'aidcp-kernel/kernel/interaction-reply-contract.js';
 import type { InteractionStore } from './interaction-store.js';
 import type { InteractionMetrics } from './metrics.js';
 import type { ReplyPreviewResult } from './reply-workflow.js';
@@ -19,7 +19,7 @@ import {
   type ReplyConfigSnapshot,
   type RuntimeControls,
   type ScopedJobContext,
-} from '../kernel/interaction-types.js';
+} from 'aidcp-kernel/kernel/interaction-types.js';
 
 export interface InteractionRiskController {
   explain(action: 'comment' | 'dm_reply'): { allowed: boolean; reason?: string };

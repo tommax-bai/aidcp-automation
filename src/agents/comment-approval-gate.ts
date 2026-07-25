@@ -49,7 +49,7 @@ export interface CommentApprovalPort {
 
 // CommentApprovalNoticeInput 纯输入数据模型抬入 kernel（change decouple-longtail-sweep）供飞书卡片层跨边界共导；
 // 本文件从 kernel 导入并等值再导出，令既有消费方无感。
-import type { CommentApprovalNoticeInput } from '../kernel/comment-approval-notice.js';
+import type { CommentApprovalNoticeInput } from 'aidcp-kernel/kernel/comment-approval-notice.js';
 export type { CommentApprovalNoticeInput };
 
 export interface CommentApprovalGateOptions extends RoleOptions {

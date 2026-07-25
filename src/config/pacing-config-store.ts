@@ -34,8 +34,8 @@
  */
 
 import pg from 'pg';
-import { DEFAULT_PG_CONFIG } from '../kernel/pg-config.js';
-import { writeWithMirrorBump, type MirrorVersionBumper } from '../kernel/config-mirror-bump-types.js';
+import { DEFAULT_PG_CONFIG } from 'aidcp-kernel/kernel/pg-config.js';
+import { writeWithMirrorBump, type MirrorVersionBumper } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import {
   BUILTIN_FLOOR,
   PACING_OPS,

@@ -40,7 +40,7 @@ import {
   type ConfigMirrorKey,
   type MirrorQueryable,
   type MirrorVersionBumper,
-} from '../kernel/config-mirror-bump-types.js';
+} from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import { OutboxConsumer, emitOutboxEvent, type OutboxEvent } from '../transport/event-outbox.js';
 
 /**

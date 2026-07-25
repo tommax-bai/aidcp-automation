@@ -1,7 +1,7 @@
 import {
   DEPLOYMENT_TARGETS,
   parseDeploymentTarget,
-} from '../deployment-target.js';
+} from 'aidcp-kernel/deployment-target.js';
 // 纯类型契约已提到 kernel（发布 / 委托任务闭包共导）；本文件保留状态机 Set、转移/校验函数与运行时数组常量。
 // re-export 保持既有 `from '../delegated-task/types'` 的类型导入面逐字不变。
 import type {
@@ -12,7 +12,7 @@ import type {
   DelegatedTaskProgress,
   DelegatedTaskIntent,
   DelegatedVerificationKind,
-} from '../kernel/delegated-task-types.js';
+} from 'aidcp-kernel/kernel/delegated-task-types.js';
 export type {
   DelegatedAction,
   DelegatedPlatformId,
@@ -33,11 +33,11 @@ export type {
   DelegatedVerificationKind,
   DelegatedAttemptStatus,
   DelegatedTaskAttempt,
-} from '../kernel/delegated-task-types.js';
+} from 'aidcp-kernel/kernel/delegated-task-types.js';
 
 // 状态全集字面数组 DELEGATED_TASK_STATUSES 与纯归一 clampClientApprovalMode 抬入 kernel
 // （change decouple-longtail-sweep），供 api 侧面板 / 客户端鉴权跨边界共导；本文件等值再导出，令既有消费方无感。
-export { DELEGATED_TASK_STATUSES, clampClientApprovalMode } from '../kernel/delegated-task-types.js';
+export { DELEGATED_TASK_STATUSES, clampClientApprovalMode } from 'aidcp-kernel/kernel/delegated-task-types.js';
 
 export const DELEGATED_EXECUTION_TARGETS = DEPLOYMENT_TARGETS;
 

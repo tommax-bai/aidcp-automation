@@ -22,7 +22,7 @@ import type {
   DelegatedTaskIntent,
   DelegatedTaskServicePort,
   DelegatedTaskStatus,
-} from '../kernel/delegated-task-types.js';
+} from 'aidcp-kernel/kernel/delegated-task-types.js';
 
 /** 每个端口方法对应的内部 HTTP 路由名。server / client 两侧共用，防漂移。 */
 export const DELEGATED_TASK_ROUTES = {

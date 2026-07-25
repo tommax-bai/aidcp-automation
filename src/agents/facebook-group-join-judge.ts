@@ -1,11 +1,11 @@
-import type { LlmCallOpts } from '../kernel/llm-contract.js';
+import type { LlmCallOpts } from 'aidcp-kernel/kernel/llm-contract.js';
 import type { RoleName } from '../event-bus/types.js';
 import type { FacebookGroupJoinAuditRow } from '../comment-agent/facebook-group-store.js';
 import {
   buildFacebookGroupJoinJudgePrompt,
   type FacebookGroupJoinObservation,
   type FacebookGroupJoinPhase,
-} from '../kernel/facebook-group-join-prompt.js';
+} from 'aidcp-kernel/kernel/facebook-group-join-prompt.js';
 
 // 观测数据模型、阶段枚举与纯 prompt 构建函数已抬入 kernel（src/kernel/facebook-group-join-prompt.ts，
 // change decouple-behavior-class-ports）；此处等值再导出，既有导入方无感、行为逐字不变。

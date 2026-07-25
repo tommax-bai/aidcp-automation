@@ -11,7 +11,7 @@
  *
  * 解析以 note.detail 事件 ts 为显式观测锚；日精度值按当日最年轻可能时刻保守计算帖龄。
  */
-import { normalizeSourcePublishedTime, sourcePublishedAgeHours } from '../time/source-published-time.js';
+import { normalizeSourcePublishedTime, sourcePublishedAgeHours } from 'aidcp-kernel/time/source-published-time.js';
 
 /**
  * 把发布时刻文本解析为距事件观测锚的小时数。日精度按该日最年轻可能时刻计算，

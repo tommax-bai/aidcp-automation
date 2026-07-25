@@ -51,11 +51,11 @@ import type pg from 'pg';
 import type {
   AccountIdentityProjectionRow,
   AccountRosterSourcePort,
-} from '../kernel/account-projection-types.js';
+} from 'aidcp-kernel/kernel/account-projection-types.js';
 import {
   SchemaCapabilityError,
   classifySchemaCapability,
-} from '../kernel/schema-capability-contract.js';
+} from 'aidcp-kernel/kernel/schema-capability-contract.js';
 import { probeSchemaShape } from '../schema/schema-capability.js';
 
 /** 投影表名。守卫 SQL 里刻意写字面量而不是插值这个常量——插值会让归属门禁扫不到表名。 */

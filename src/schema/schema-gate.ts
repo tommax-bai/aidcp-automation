@@ -41,7 +41,7 @@ import {
   pgOwnerUrlEnvVar,
   resolveOwnerPgConfig,
   type PgOwner,
-} from '../kernel/pg-owner-connection-resolver.js';
+} from 'aidcp-kernel/kernel/pg-owner-connection-resolver.js';
 import { loadMigrationFiles } from './migration-files.js';
 import {
   loadMigrationOwnerScopes,

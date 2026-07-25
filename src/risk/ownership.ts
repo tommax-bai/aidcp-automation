@@ -9,7 +9,7 @@
  * 分工一句话：**分裂的是写权限，不分裂的是事实。** risk_state 的写按 target 排他；
  * risk_counters 是 append-only 的既成事实账本，不按 target 分裂。
  */
-import type { DeploymentTarget } from '../deployment-target.js';
+import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
 
 /** 归属占位的诚实结果：占位成功 / 已被占位（附真实属主），MUST NOT 在已被占位时覆盖。 */
 export type ClaimExecutionTargetResult =

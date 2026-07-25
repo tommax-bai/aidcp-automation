@@ -14,8 +14,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { InternalHttpClient, InternalHttpServer } from './internal-http.js';
-import type { TriggerInput } from '../kernel/publish-pipeline-types.js';
-import type { PublishGenerationPort, SchedulerTriggerResult } from '../kernel/publish-generation-types.js';
+import type { TriggerInput } from 'aidcp-kernel/kernel/publish-pipeline-types.js';
+import type { PublishGenerationPort, SchedulerTriggerResult } from 'aidcp-kernel/kernel/publish-generation-types.js';
 
 /** 每个内部 HTTP 路由名。server / client 两侧共用，防漂移。 */
 export const PUBLISH_GENERATION_ROUTES = {
