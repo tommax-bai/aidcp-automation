@@ -5,7 +5,7 @@ import type { ReferenceImageSnapshot } from 'aidcp-kernel/kernel/publish-pipelin
 import type { DelegatedTaskExecutor, DelegatedExecutionResult } from './worker.js';
 import type { DelegatedTask } from './types.js';
 import { delegatedRewriteSourceId } from './ownership.js';
-import { normalizeTextCardTranscription } from '../cache/curated-content-store.js';
+import { normalizeTextCardTranscription } from 'aidcp-kernel/kernel/text-card-transcription.js';
 
 export interface DelegatedCommentPort {
   triggerManual(
