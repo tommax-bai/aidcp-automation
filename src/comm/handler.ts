@@ -64,7 +64,7 @@ import type { CaptchaAssistService } from './captcha-assist.js';
 import type { TaskPlanner } from '../planner/types.js';
 import type { TextCompletionPort } from 'aidcp-kernel/kernel/llm-contract.js';
 import type { EventBus } from '../event-bus/index.js';
-import type { PublishApprovalCardData } from './feishu-card-contract.js';
+import type { PublishApprovalCardData } from 'aidcp-kernel/kernel/feishu-card-contract.js';
 import type { DefaultChatProvider } from 'aidcp-kernel/kernel/default-chat-provider.js';
 import { RiskController, SessionBudget, buildPacingSnapshot } from '../risk/index.js';
 import type { RiskAction, RiskStatus, RiskQuotaLevel, PacingFloorProvider } from '../risk/index.js';
