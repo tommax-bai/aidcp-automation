@@ -1,0 +1,38 @@
+{
+  "name": "aidcp-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "aidcp-automation —— 边缘 WS / 风控单写 / 编排 / 通知巡视（属主库 aidcp_automation）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test 'test/**/*.test.ts'",
+    "test:acceptance": "tsx --test test/acceptance/*.test.ts",
+    "test:pg": "AIDCP_PG_INTEGRATION=1 tsx --test 'test/**/*.integration.test.ts'",
+    "migrate": "tsx --env-file=.env scripts/migrate.ts",
+    "boundaries:refresh": "tsx test/acceptance/helpers/boundary-record.ts refresh",
+    "boundaries:census": "tsx test/acceptance/helpers/boundary-record.ts census",
+    "start": "tsx --env-file=.env src/server.ts",
+    "trigger:like": "tsx src/cli/trigger-like.ts",
+    "test:feishu": "tsx --env-file=.env src/cli/test-feishu.ts"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.66.0",
+    "@resvg/resvg-js": "2.6.2",
+    "ali-oss": "^6.23.0",
+    "pg": "^8.13.1",
+    "satori": "0.26.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

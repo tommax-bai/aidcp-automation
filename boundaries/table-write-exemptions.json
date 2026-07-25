@@ -1,0 +1,9 @@
+{
+  "seedTotal": 1,
+  "seedUnplanned": 1,
+  "frozenTotal": 0,
+  "recordedAt": "2026-07-25",
+  "raises": [],
+  "entries": [],
+  "seedBasis": "decouple store schema+pgconfig cluster: frozenTotal 209->173"
+}
