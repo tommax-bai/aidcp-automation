@@ -27,7 +27,7 @@
     "pg": "^8.13.1",
     "satori": "0.26.0",
     "ws": "^8.18.0",
-    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#c8d3fd5ae494fcc628d69487467a02af3cb3e800"
+    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#4ebe412c191cd0acf979cf2bdbbf8dad85247428"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
