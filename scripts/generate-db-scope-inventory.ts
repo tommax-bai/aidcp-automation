@@ -41,6 +41,7 @@ async function main(): Promise<void> {
 
   const payload = {
     _comment: [
+      'aidcp:test-owner=derived',
       '库级作用域机制清单的机器可读副本（change cloud-schema-migration-executor 任务 10.1）。',
       '人读版本在控制仓 aidcp/docs/database-scope-inventory.md，两者 MUST 同步。',
       'advisory lock 与外键都是【数据库级】作用域：搬进不同 schema 后依然有效，只有拆成不同数据库才失效，',

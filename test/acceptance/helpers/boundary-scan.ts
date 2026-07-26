@@ -1,4 +1,5 @@
 /**
+ * aidcp:test-owner=derived
  * 边界扫描器 —— `AC-BOUND-*`（导入方向）与 `AC-OWN-*`（表写入与建表归属）两族门禁的共用输入。
  *
  * 设计约束（来自控制仓定稿 docs/cloud-service-decomposition-proposal.md §12「两族门禁」）：

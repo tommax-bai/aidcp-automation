@@ -1,3 +1,4 @@
+// aidcp:test-owner=derived
 import { access, readFile, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

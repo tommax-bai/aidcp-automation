@@ -94,6 +94,7 @@ async function main(): Promise<void> {
 
   const payload = {
     _comment: [
+      'aidcp:test-owner=derived',
       '运行时 DDL 允许清单（change cloud-schema-migration-executor 任务 4.1）。',
       '清单只减不增：新增运行时 DDL MUST 改为加在 migrations/，MUST NOT 加进本文件。',
       '每收口一批存储，跑 npx tsx scripts/generate-ddl-allowlist.ts --write 让条目变少。',
