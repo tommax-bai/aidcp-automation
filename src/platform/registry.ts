@@ -21,8 +21,6 @@ export type {
 } from 'aidcp-kernel/kernel/platform-types.js';
 import type {
   PlatformId,
-  ScheduledAutomationAction,
-  AvailableScheduledAutomationAction,
   DelegatedAction,
   DelegatedActionSupport,
   NoteScopedAction,
@@ -30,8 +28,6 @@ import type {
   IdentityCaptureStrategy,
   CommentPlatformProfile,
   PlatformRegistryEntry,
-  ScheduledAutomationSupport,
-  ScheduledAutomationCatalogReader,
 } from 'aidcp-kernel/kernel/platform-types.js';
 // 四个不读注册表的判定件已单写在 kernel（change cloud-coupling-phase4-runtime-ports）；
 // 本地要用，同时对外等值再导出——`../platform/index` 的导出面逐字不变。
@@ -41,23 +37,26 @@ import {
   SCHEDULED_CONTACT_COMMENT_DAILY_CAP_MAX,
   SCHEDULED_GROUP_JOIN_DAILY_CAP_MAX,
 } from 'aidcp-kernel/kernel/platform-types.js';
+import {
+  availableScheduledAutomationActionsForPlatform,
+  normalizePlatformForCatalog,
+  SCHEDULED_AUTOMATION_ACTIONS,
+  SCHEDULED_AUTOMATION_CATALOG,
+  SCHEDULED_AUTOMATION_CATALOG_READER,
+  scheduledAutomationDeclarationsForPlatform,
+} from 'aidcp-kernel/kernel/scheduled-automation-catalog.js';
 export {
+  availableScheduledAutomationActionsForPlatform,
+  normalizePlatformForCatalog,
   normalizePlatformId,
   SCHEDULED_CONTENT_DAILY_CAP_MAX,
   SCHEDULED_CONTACT_COMMENT_DAILY_CAP_MAX,
   SCHEDULED_GROUP_JOIN_DAILY_CAP_MAX,
+  SCHEDULED_AUTOMATION_ACTIONS,
+  SCHEDULED_AUTOMATION_CATALOG,
+  SCHEDULED_AUTOMATION_CATALOG_READER,
+  scheduledAutomationDeclarationsForPlatform,
 };
-
-/**
- * 账号排期动作全集：Cloud 目录投影与写入校验共同消费，不能从其它能力词推导。
- * `satisfies` 与 kernel 的 ScheduledAutomationAction 联合逐字对齐（增删动作两处同改，编译期兜底）。
- */
-export const SCHEDULED_AUTOMATION_ACTIONS = [
-  'post',
-  'comment',
-  'contact_comment',
-  'join_group',
-] as const satisfies readonly ScheduledAutomationAction[];
 
 const XHS_DELEGATED_ACTIONS: Record<DelegatedAction, DelegatedActionSupport> = {
   comment_batch: { level: 'supported' },
@@ -234,24 +233,7 @@ export const PLATFORM_REGISTRY: Record<PlatformId, PlatformRegistryEntry> = {
         defaultTimeWindow: XHS_COMMENT_PROFILE.search.defaultTimeWindow,
       },
     },
-    scheduledAutomation: {
-      post: {
-        supported: true,
-        allowedModes: ['review', 'auto_approve'],
-        maxDailyCap: SCHEDULED_CONTENT_DAILY_CAP_MAX,
-      },
-      comment: {
-        supported: true,
-        allowedModes: ['review', 'auto_approve'],
-        maxDailyCap: SCHEDULED_CONTENT_DAILY_CAP_MAX,
-      },
-      contact_comment: {
-        supported: true,
-        allowedModes: ['review', 'auto_approve'],
-        maxDailyCap: SCHEDULED_CONTACT_COMMENT_DAILY_CAP_MAX,
-      },
-      join_group: { supported: false, reason: 'no_group_concept' },
-    },
+    scheduledAutomation: SCHEDULED_AUTOMATION_CATALOG.xiaohongshu,
     delegatedActions: XHS_DELEGATED_ACTIONS,
     comment: XHS_COMMENT_PROFILE,
   },
@@ -308,29 +290,7 @@ export const PLATFORM_REGISTRY: Record<PlatformId, PlatformRegistryEntry> = {
         defaultTimeWindow: FB_COMMENT_PROFILE.search.defaultTimeWindow,
       },
     },
-    scheduledAutomation: {
-      // Facebook 自动发帖运行时会跳过 auto_approve；这里只声明真实可执行的 review。
-      post: {
-        supported: true,
-        allowedModes: ['review'],
-        maxDailyCap: SCHEDULED_CONTENT_DAILY_CAP_MAX,
-      },
-      comment: {
-        supported: true,
-        allowedModes: ['review', 'auto_approve'],
-        maxDailyCap: SCHEDULED_CONTENT_DAILY_CAP_MAX,
-      },
-      contact_comment: {
-        supported: true,
-        allowedModes: ['review', 'auto_approve'],
-        maxDailyCap: SCHEDULED_CONTACT_COMMENT_DAILY_CAP_MAX,
-      },
-      join_group: {
-        supported: true,
-        allowedModes: [],
-        maxDailyCap: SCHEDULED_GROUP_JOIN_DAILY_CAP_MAX,
-      },
-    },
+    scheduledAutomation: SCHEDULED_AUTOMATION_CATALOG.facebook,
     delegatedActions: FACEBOOK_DELEGATED_ACTIONS,
     comment: FB_COMMENT_PROFILE,
   },
@@ -354,12 +314,7 @@ export const PLATFORM_REGISTRY: Record<PlatformId, PlatformRegistryEntry> = {
     identityCapture: { supported: false, reason: 'interaction_auth_identity_only' },
     pacing: {},
     scheduler: { comment: { enabled: false, defaultSort: 'none', defaultTimeWindow: 'none' } },
-    scheduledAutomation: {
-      post: { supported: false, reason: 'interaction_inbox_only' },
-      comment: { supported: false, reason: 'interaction_inbox_only' },
-      contact_comment: { supported: false, reason: 'interaction_inbox_only' },
-      join_group: { supported: false, reason: 'interaction_inbox_only' },
-    },
+    scheduledAutomation: SCHEDULED_AUTOMATION_CATALOG.wechat_channels,
     delegatedActions: WECHAT_CHANNELS_DELEGATED_ACTIONS,
     comment: WECHAT_CHANNELS_COMMENT_PROFILE,
   },
@@ -378,36 +333,6 @@ export function identityCaptureStrategyForPlatform(
   return platformRegistryEntry(platform).identityCapture;
 }
 
-/**
- * 面板 catalog 的平台值：已知别名走统一归一化；未知值保留可诊断的 trim/lowercase 事实，
- * 绝不回落成小红书或其它已知平台。
- */
-export function normalizePlatformForCatalog(raw: string | null | undefined): string {
-  try {
-    return normalizePlatformId(raw);
-  } catch {
-    return raw?.trim().toLowerCase() || 'unknown';
-  }
-}
-
-/** 未知平台与无声明平台均 fail closed 为无动作。 */
-export function availableScheduledAutomationActionsForPlatform(
-  platform: string | null | undefined,
-): AvailableScheduledAutomationAction[] {
-  let entry: PlatformRegistryEntry;
-  try {
-    entry = platformRegistryEntry(platform);
-  } catch {
-    return [];
-  }
-  return SCHEDULED_AUTOMATION_ACTIONS.flatMap((action) => {
-    const support = entry.scheduledAutomation[action];
-    return support.supported
-      ? [{ action, allowedModes: [...support.allowedModes], maxDailyCap: support.maxDailyCap }]
-      : [];
-  });
-}
-
 export function commentProfileForPlatform(platform: string | null | undefined): CommentPlatformProfile {
   return platformRegistryEntry(platform).comment;
 }
@@ -422,19 +347,3 @@ export function delegatedActionSupportForPlatform(
 export function defaultCommentSearchLabel(profile: CommentPlatformProfile = XHS_COMMENT_PROFILE): string {
   return `${profile.search.defaultTimeWindowLabel}·${profile.search.defaultSortLabel}`;
 }
-
-/**
- * 排期自动化目录读端口的**唯一实装**（change cloud-coupling-phase4-runtime-ports）。
- * §9「平台能力由 aidcp-automation 单写」因此仍成立：读表逻辑一处也没离开本文件。
- */
-export const SCHEDULED_AUTOMATION_CATALOG_READER: ScheduledAutomationCatalogReader = {
-  normalizeForCatalog: (platform) => normalizePlatformForCatalog(platform),
-  availableActions: (platform) => availableScheduledAutomationActionsForPlatform(platform),
-  declarationsFor: (platform): Record<ScheduledAutomationAction, ScheduledAutomationSupport> | null => {
-    try {
-      return platformRegistryEntry(platform).scheduledAutomation;
-    } catch {
-      return null;
-    }
-  },
-};

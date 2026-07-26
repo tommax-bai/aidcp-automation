@@ -32,7 +32,9 @@ import { compareVersions } from './migration-plan.js';
  * 也被顺带纳入「缺了就算 behind」——那条迁移本身仍不是硬依赖（只被非 monolith 模式的消费者用），
  * 只是复合序的结果。部署时两条一起跑即可，warn 模式下缺任一条也只是响亮提示、不拒绝启动。
  */
-export const REQUIRED_SCHEMA_VERSION = '0076_config_mirror_bump_inbox';
+// The derived automation checkout does not ship API-owned migration 0076.
+// Its highest required local prerequisite is the target-scoped outbox cursor.
+export const REQUIRED_SCHEMA_VERSION = '0075_event_outbox_topic_cursor';
 
 /**
  * 本构建认识的最高迁移版本 id，等于本构建 `migrations/` 目录里的最大版本。
@@ -81,8 +83,30 @@ export const REQUIRED_SCHEMA_VERSION = '0076_config_mirror_bump_inbox';
  * admission ledger 增加 claim/CAS 列与 command receipt inbox。独立 automation 的 offboard
  * reconcile 依赖该能力；迁移缺失时 API owner route 显式报 schema/SQL 错且 automation 保持
  * admission pending，不会伪造物化完成。故只抬 KNOWN_MAX、不抬 REQUIRED。
+ *
+ * 注：`0082_api_sync_read_consumer_checkpoint` /
+ * `0083_automation_sync_read_consumer_checkpoint`（change split-cloud-api-composition-root-4b）
+ * 分别建立 api 与 automation consumer 自己的 target-scoped cursor/readiness/health 恢复表。
+ * 两表不保存 owner payload、共享事实或业务 version；独立组合根启用前不承重，缺表时对应 mirror
+ * bootstrap 响亮失败而 monolith 行为不变，故只抬 KNOWN_MAX、不抬 REQUIRED。
+ *
+ * 注：`0084_automation_account_projection_sync_read`（change split-cloud-api-composition-root-4b）
+ * 只给既有共享 B4 投影增加 post-4a 仍有 automation 消费者的 created_at/status；展示与卡片字段
+ * 不进入投影。独立 automation 的相关闸门缺列即能力级 fail-closed，故只抬 KNOWN_MAX。
+ *
+ * 注：`0085_automation_sync_read_owner_generation`（change split-cloud-api-composition-root-4b）
+ * 只持久化 automation A3-A6 的 target-scoped digest/generation/emit-dedup 水位，不保存 runtime
+ * 业务 payload。缺表时独立 runtime snapshot 响亮失败，绝不把进程内重置 cursor 当作恢复。
+ *
+ * 注：`0086_session_config_global_sync_read_revision`（change split-cloud-api-composition-root-4b）
+ * 在 A1 owner 单例行内持久化 shared revision；mask mutation 与 revision 同一 UPSERT，outbox
+ * 清理不影响 snapshot cursor，且不引入平行 revision authority。
+ *
+ * 注：`0087_automation_account_projection_shared_cursor`（change split-cloud-api-composition-root-4b）
+ * 在既有 B4 shared projection-state 行记录 applied cursor/digest，跨 dev/ol 串行防旧快照回退；
+ * target checkpoint 只保留 delivery/readiness。
  */
-export const KNOWN_MAX_SCHEMA_VERSION = '0081_offboard_admission_claims';
+export const KNOWN_MAX_SCHEMA_VERSION = '0087_automation_account_projection_shared_cursor';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 

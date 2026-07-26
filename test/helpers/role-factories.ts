@@ -1,4 +1,5 @@
 /**
+ * aidcp:test-owner=derived
  * Automation-derived tests verify the factory boundary without importing the
  * content-owned role implementations that are intentionally absent here.
  */

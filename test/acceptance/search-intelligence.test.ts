@@ -1,4 +1,5 @@
 /**
+ * aidcp:test-owner=derived
  * 验收用例 AC-SEARCH-* — 概念池驱动的搜索智能
  *
  * 守护点（change: wire-concept-pool-search-intelligence）：

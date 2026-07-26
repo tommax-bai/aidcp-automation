@@ -1,4 +1,5 @@
 /**
+ * aidcp:test-owner=derived
  * RoleDispatcher content 角色工厂注册表回归。
  *
  * 背景：change decouple-roles-from-dispatcher 把 dispatcher（automation）对 4 个 content 层角色的直接

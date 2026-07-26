@@ -1,4 +1,5 @@
 /**
+ * aidcp:test-owner=derived
  * `InteractionStore` 的测试期依赖桩（Block③ L3 收口后新增的两个注入口）。
  *
  * ① **审计中继驱动器** —— 镜像 `server.ts` 里那条接线（automation 的 `event_outbox`

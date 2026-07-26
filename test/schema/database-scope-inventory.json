@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "库级作用域机制清单的机器可读副本（change cloud-schema-migration-executor 任务 10.1）。",
+    "人读版本在控制仓 aidcp/docs/database-scope-inventory.md，两者 MUST 同步。",
+    "advisory lock 与外键都是【数据库级】作用域：搬进不同 schema 后依然有效，只有拆成不同数据库才失效，",
+    "而且失效方式是静默的——锁不再互斥、外键不再存在，业务照跑、数据慢慢分叉。",
+    "键刻意不含行号：行号随无关编辑漂移，带行号的清单每次改代码都要重刷，很快就没人认真看了。"
+  ],
+  "advisoryLocks": {
+    "scripts/migrate.ts": {
+      "pg_advisory_unlock": 1,
+      "pg_try_advisory_lock": 1
+    },
+    "src/interactions/interaction-store.ts": {
+      "pg_advisory_xact_lock": 2
+    },
+    "src/risk/writer-lock.ts": {
+      "pg_advisory_unlock": 1,
+      "pg_try_advisory_lock": 1
+    }
+  },
+  "foreignKeys": {
+    "src/comment-agent/facebook-group-store.ts": {
+      "accounts(account_id)": 1,
+      "facebook_group_target(group_url)": 2
+    },
+    "src/delegated-task/store.ts": {
+      "accounts(account_id)": 1,
+      "delegated_tasks(id)": 2
+    }
+  },
+  "schemaLiterals": {},
+  "migrationForeignKeyTargets": {
+    "account_facebook_publish_image": 2,
+    "account_facebook_publish_image_set": 1,
+    "accounts": 18,
+    "client_environments": 1,
+    "client_users": 3,
+    "delegated_tasks": 2,
+    "facebook_group_target": 2,
+    "interaction_messages": 1,
+    "interaction_reply_config_scopes": 3,
+    "interaction_reply_jobs": 1,
+    "interaction_threads": 1,
+    "publish_log": 2
+  }
+}

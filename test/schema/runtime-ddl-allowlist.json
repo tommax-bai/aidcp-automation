@@ -1,0 +1,122 @@
+{
+  "_comment": [
+    "运行时 DDL 允许清单（change cloud-schema-migration-executor 任务 4.1）。",
+    "清单只减不增：新增运行时 DDL MUST 改为加在 migrations/，MUST NOT 加进本文件。",
+    "每收口一批存储，跑 npx tsx scripts/generate-ddl-allowlist.ts --write 让条目变少。",
+    "key = <verb>:<object>，刻意不含行号——行号会随无关编辑漂移，会把清单变成噪声源。"
+  ],
+  "baseline": {
+    "_comment": [
+      "首次冻结时的三元组，按当前 master 实测（非 proposal/design 里的历史数字）。",
+      "本块一旦落盘 MUST NOT 随收口进度重算——它记的是「当初有多少」。",
+      "createTableOnly 单列，是为了与 proposal 的 76 / 58–60 / 34（只数建表动词）同尺子对照。"
+    ],
+    "measuredOn": "aidcp-automation derived baseline @ split-cloud-api-composition-root-4b",
+    "textHits": 90,
+    "effectiveHits": 82,
+    "files": 14,
+    "createTableOnly": {
+      "textHits": 83,
+      "effectiveHits": 24,
+      "files": 14,
+      "note": "derived automation owner baseline；不可与 monolith proposal 的 76 / 58–60 / 34 直接比较"
+    }
+  },
+  "current": {
+    "textHits": 90,
+    "effectiveHits": 82,
+    "files": 14
+  },
+  "entries": {
+    "src/alerts/alert-store.ts": {
+      "create_index:idx_alerts_created": 1,
+      "create_index:idx_alerts_unresolved_edge": 1,
+      "create_table:alerts": 1
+    },
+    "src/cache/group-route-store.ts": {
+      "create_table:group_route": 1
+    },
+    "src/cache/interaction-feed-store.ts": {
+      "create_index:idx_interaction_feed_account_time": 1,
+      "create_index:idx_interaction_feed_time": 1,
+      "create_table:interaction_feed": 1,
+      "create_table:interaction_target_meta": 1
+    },
+    "src/cache/liked-note-store.ts": {
+      "create_index:idx_liked_notes_liked_at": 1,
+      "create_table:liked_notes": 1
+    },
+    "src/cache/pg-anchor-cache.ts": {
+      "create_table:anchor_staging": 1,
+      "create_table:anchors": 1
+    },
+    "src/cache/valuable-comment-store.ts": {
+      "create_index:idx_valuable_comments_liked_at": 1,
+      "create_index:idx_valuable_comments_topics": 1,
+      "create_table:valuable_comments": 1
+    },
+    "src/comment-agent/facebook-comment-audit-store.ts": {
+      "create_index:idx_fb_comment_audit_account": 1,
+      "create_table:facebook_comment_audit": 1
+    },
+    "src/comment-agent/facebook-group-store.ts": {
+      "alter_table:facebook_group_join_audit": 2,
+      "alter_table:facebook_group_target": 12,
+      "create_index:idx_fb_group_join_audit_account": 1,
+      "create_index:idx_fb_group_join_audit_group": 1,
+      "create_index:idx_fb_group_join_audit_scheduled": 1,
+      "create_index:idx_fb_group_membership_account_status": 1,
+      "create_index:idx_fb_group_membership_assigned_ttl": 1,
+      "create_index:idx_fb_group_membership_coverage": 1,
+      "create_index:idx_fb_group_membership_status": 1,
+      "create_index:idx_fb_group_target_direction": 1,
+      "create_index:idx_fb_group_target_enabled_gating": 1,
+      "create_index:idx_fb_group_target_region_park": 1,
+      "create_index:idx_fb_group_target_scope_label": 1,
+      "create_table:facebook_group_join_audit": 1,
+      "create_table:facebook_group_membership": 1,
+      "create_table:facebook_group_target": 1,
+      "create_table:facebook_group_target_scope": 1
+    },
+    "src/config/pacing-config-store.ts": {
+      "create_table:pacing_floor_config": 1
+    },
+    "src/config/quota-config-store.ts": {
+      "create_table:quota_config": 1
+    },
+    "src/config/resume-config-store.ts": {
+      "create_table:resume_config_global": 1
+    },
+    "src/config/session-config-store.ts": {
+      "alter_table:session_config_global": 4,
+      "create_table:session_config_global": 1
+    },
+    "src/delegated-task/store.ts": {
+      "alter_table:delegated_tasks": 4,
+      "create_index:idx_delegated_task_attempts_reconcile": 1,
+      "create_index:idx_delegated_task_events_task": 1,
+      "create_index:idx_delegated_tasks_curated_publish_id": 1,
+      "create_index:idx_delegated_tasks_curated_publish_source": 1,
+      "create_index:idx_delegated_tasks_target_active_dedupe": 1,
+      "create_index:idx_delegated_tasks_target_claim": 1,
+      "create_index:idx_delegated_tasks_target_ownership": 1,
+      "create_table:delegated_task_attempts": 1,
+      "create_table:delegated_task_events": 1,
+      "create_table:delegated_tasks": 1
+    },
+    "src/risk/pg-risk-store.ts": {
+      "alter_table:risk_counters": 3,
+      "create_index:idx_risk_counter_outbox_claim": 1,
+      "create_index:idx_risk_counters_account_action_time": 1,
+      "create_index:idx_risk_counters_account_time": 1,
+      "create_index:idx_risk_counters_time": 1,
+      "create_index:idx_risk_interactions_account_time": 1,
+      "create_index:uq_risk_counter_outbox_target_dedupe": 1,
+      "create_index:uq_risk_counters_outbox": 1,
+      "create_table:risk_counter_outbox": 1,
+      "create_table:risk_counters": 1,
+      "create_table:risk_interactions": 1,
+      "create_table:risk_state": 1
+    }
+  }
+}

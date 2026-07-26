@@ -31,6 +31,10 @@ async function frozenBaseline(): Promise<unknown | undefined> {
 async function main(): Promise<void> {
   const write = process.argv.includes('--write');
   const report = await scanRuntimeDdl();
+  const packageName = JSON.parse(
+    await readFile(path.join(repoRoot(), 'package.json'), 'utf8'),
+  ) as { name?: string };
+  const derivedAutomation = packageName.name === 'aidcp-automation';
 
   const entries: Record<string, Record<string, number>> = {};
   for (const hit of report.hits) {
@@ -72,7 +76,9 @@ async function main(): Promise<void> {
       '本块一旦落盘 MUST NOT 随收口进度重算——它记的是「当初有多少」。',
       'createTableOnly 单列，是为了与 proposal 的 76 / 58–60 / 34（只数建表动词）同尺子对照。',
     ],
-    measuredOn: 'master @ publish-approval-signal-to-database (d9c550e) + 本 change 第一批',
+    measuredOn: derivedAutomation
+      ? 'aidcp-automation derived baseline @ split-cloud-api-composition-root-4b'
+      : 'master @ publish-approval-signal-to-database (d9c550e) + 本 change 第一批',
     textHits: report.textHitCount,
     effectiveHits: report.effectiveHitCount,
     files: report.fileCount,
@@ -80,7 +86,9 @@ async function main(): Promise<void> {
       textHits: 83,
       effectiveHits: createTableHits.length,
       files: createTableFiles.size,
-      note: 'proposal 记 76 / 58–60 / 34；差额来自 config-mirror 与 publish-approval 两个并行 change 新增的两个存储',
+      note: derivedAutomation
+        ? 'derived automation owner baseline；不可与 monolith proposal 的 76 / 58–60 / 34 直接比较'
+        : 'proposal 记 76 / 58–60 / 34；差额来自 config-mirror 与 publish-approval 两个并行 change 新增的两个存储',
     },
   };
 
