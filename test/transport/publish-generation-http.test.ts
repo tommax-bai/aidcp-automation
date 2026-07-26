@@ -17,6 +17,7 @@ import type {
   SchedulerTriggerResult,
 } from 'aidcp-kernel/kernel/publish-generation-types.js';
 import type { TriggerInput } from 'aidcp-kernel/kernel/publish-pipeline-types.js';
+import { AUTOMATION_ROOT_READINESS_BLOCKERS } from '../../src/automation-composition-root.js';
 
 /** 样本终态：结构上满足 SchedulerTriggerResult（含 approvalCard 联合的一个合法枝）。 */
 const SAMPLE: SchedulerTriggerResult = {
@@ -115,22 +116,26 @@ test('慢 trigger（client 多轮）：小 pollSegmentMs 下循环 poll 直到 d
  * 落回默认 15s 时，每一段 poll 都会在服务端回 `{done:false}` 之前被客户端切断 ⇒ 每次跨服务发帖生成
  * 都在 15s 确定性失败（core 模式的硬阻断，typecheck 抓不到——它只是个缺省参数）。
  */
-test('组合根：跨服务生成客户端显式接线 180s 超时（> 150s 分段轮询，绝不落 15s 默认）', async () => {
+test('派生组合根：生成链保持具名 content/runtime blocker，不伪装成已接线', async () => {
   assert.equal(INTERNAL_HTTP_TIMEOUT_CEILING_MS, 180_000);
   assert.ok(
     INTERNAL_HTTP_TIMEOUT_CEILING_MS > PUBLISH_GENERATION_POLL_SEGMENT_CEILING_MS,
     '单次调用超时必须严格大于单段 long-poll 挂起上限',
   );
-  const source = await readFile(new URL('../../src/server.ts', import.meta.url), 'utf8');
-  const at = source.indexOf('new PublishGenerationHttpClient(');
-  assert.ok(at >= 0, '组合根必须存在 HTTP 生成客户端的构造点');
-  const ctor = source.slice(at, at + 500);
-  const wired = /new InternalHttpClient\([^)]*timeoutMs:\s*([A-Za-z_$][\w$]*)/.exec(ctor);
-  assert.ok(wired, '生成客户端 MUST 显式传 timeoutMs（缺省 15s ⇒ 每次跨服务生成确定性超时）');
-  assert.equal(
-    wired[1],
-    'INTERNAL_HTTP_TIMEOUT_CEILING_MS',
-    '复用既有 180s 单一来源常量（与 model-call 天花板同源），不新写魔数',
+  const [server, root] = await Promise.all([
+    readFile(new URL('../../src/server.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../../src/automation-composition-root.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.doesNotMatch(
+    `${server}\n${root}`,
+    /new PublishGenerationHttpClient\(/,
+    '4a automation root MUST NOT fake the unresolved content generation wiring',
+  );
+  assert.ok(
+    AUTOMATION_ROOT_READINESS_BLOCKERS.some(
+      (blocker) => blocker.id === 'content-generic-llm-authority',
+    ),
+    'unwired generation authority must remain a named readiness blocker',
   );
 });
 

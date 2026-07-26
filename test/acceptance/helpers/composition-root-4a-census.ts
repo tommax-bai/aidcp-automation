@@ -1,7 +1,12 @@
 import { access, readFile, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { API_DIRECT_PORT_INVENTORY } from 'aidcp-kernel/kernel/api-direct-port.js';
+import {
+  AUTOMATION_ROOT_READINESS_BLOCKERS,
+} from '../../../src/automation-composition-root.js';
 
 export type SurfaceDirection =
   | 'automation-to-api'
@@ -45,6 +50,16 @@ export interface DerivedBlocker {
   evidence: string[];
 }
 
+export interface DerivedAutomationRootCensus {
+  apiClientGroups: number;
+  apiClientMethodSlots: number;
+  commandReceiverGroups: number;
+  commandReceiverMethodSlots: number;
+  totalGroups: number;
+  totalMethodSlots: number;
+  excludedTransportGroups: readonly ['personaGenerator'];
+}
+
 interface ProductionConsumerBinding {
   groupId: string;
   method: string;
@@ -52,18 +67,18 @@ interface ProductionConsumerBinding {
   callPath: string;
 }
 
-interface EvidenceProbe {
+export interface EvidenceProbe {
   sourceFile: string;
   scope?: string;
   kind: 'call' | 'new' | 'identifier' | 'text';
   symbol: string;
 }
 
-interface BlockerBinding extends Omit<DerivedBlocker, 'evidence'> {
+export interface BlockerBinding extends Omit<DerivedBlocker, 'evidence'> {
   probes: readonly EvidenceProbe[];
 }
 
-interface OwnershipEntry {
+export interface OwnershipEntry {
   path: string;
   layer: string;
 }
@@ -598,7 +613,7 @@ export const PRODUCTION_CONSUMER_BINDINGS: readonly ProductionConsumerBinding[] 
   },
 ] as const;
 
-const REVIEWED_BLOCKER_BINDINGS: readonly BlockerBinding[] = [
+export const REVIEWED_BLOCKER_BINDINGS: readonly BlockerBinding[] = [
   {
     id: '4b-a1-week-mask-mirror',
     category: '4b-mirror',
@@ -1428,7 +1443,7 @@ function normalizeImportedSource(moduleName: string): string | null {
   return relative;
 }
 
-function importedOwners(
+export function importedOwners(
   server: ts.SourceFile,
   ownership: readonly OwnershipEntry[],
 ): Map<string, { source: string; owner: string }> {
@@ -1463,7 +1478,7 @@ function variableNameFor(node: ts.Node): string {
   return '<expression>';
 }
 
-function ownerPools(root: ts.Node | null): string[] {
+export function ownerPools(root: ts.Node | null): string[] {
   if (!root) return [];
   const evidence: string[] = [];
   function visit(node: ts.Node): void {
@@ -1518,7 +1533,7 @@ function isApiOwnerModeOnly(node: ts.Node, root: ts.Node): boolean {
   return false;
 }
 
-function ownerStoreConstructions(
+export function ownerStoreConstructions(
   root: ts.Node | null,
   imports: ReadonlyMap<string, { source: string; owner: string }>,
 ): string[] {
@@ -1546,7 +1561,7 @@ function ownerStoreConstructions(
   return [...new Set(evidence)].sort();
 }
 
-function kebabCase(value: string): string {
+export function kebabCase(value: string): string {
   return value
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
     .replace(/[^a-zA-Z0-9]+/g, '-')
@@ -1554,7 +1569,7 @@ function kebabCase(value: string): string {
     .toLowerCase();
 }
 
-function probeEvidence(
+export function probeEvidence(
   file: ts.SourceFile,
   probe: EvidenceProbe,
 ): string | null {
@@ -1573,66 +1588,123 @@ function probeEvidence(
   return `${probe.sourceFile}#${scope}${probe.kind}:${probe.symbol}`;
 }
 
-export async function deriveIndependentRootBlockers(): Promise<DerivedBlocker[]> {
-  const [server, ownershipRaw] = await Promise.all([
-    sourceFile('src/server.ts'),
-    readFile(resolve(REPO_ROOT, 'boundaries/module-ownership.json'), 'utf8'),
-  ]);
-  const ownership = JSON.parse(ownershipRaw) as OwnershipEntry[];
-  const segA = functionBody(server, 'segAApiFoundation');
-  const imports = importedOwners(server, ownership);
-  const sourceByFile = new Map<string, ts.SourceFile>([['src/server.ts', server]]);
-  const reviewed: DerivedBlocker[] = [];
-  for (const binding of REVIEWED_BLOCKER_BINDINGS) {
-    const evidence: string[] = [];
-    for (const probe of binding.probes) {
-      let file = sourceByFile.get(probe.sourceFile);
-      if (!file) {
-        file = await sourceFile(probe.sourceFile);
-        sourceByFile.set(probe.sourceFile, file);
-      }
-      const item = probeEvidence(file, probe);
-      if (item) evidence.push(item);
-    }
-    if (evidence.length > 0) {
-      reviewed.push({
-        id: binding.id,
-        category: binding.category,
-        owner: binding.owner,
-        consumer: binding.consumer,
-        closingChange: binding.closingChange,
-        evidence,
-      });
-    }
+export function deriveAutomationRootCensus(): DerivedAutomationRootCensus {
+  const apiGroupByProperty = {
+    accountRoster: 'accountRoster',
+    accountOwnership: 'accountOwnership',
+    accountRuntime: 'accountRuntime',
+    automationPublishLog: 'publishLog',
+    edgePublish: 'edgePublish',
+    interactionAuth: 'interactionAuth',
+    interactionApiWrites: 'interactionApiWrites',
+    replyConfig: 'replyConfig',
+    accountPersona: 'accountPersona',
+    environmentHandshake: 'environmentHandshake',
+    commentApprovalPolicy: 'commentApprovalPolicy',
+    notificationContacts: 'notificationContacts',
+    firstPostProgress: 'firstPostProgress',
+    automationConfigCommands: 'automationConfigCommands',
+    offboardAdmissionLedger: 'offboardAdmissionLedger',
+    structuredNotification: 'notificationDelivery',
+  } as const;
+  const commandGroupByRegistrar = {
+    registerEdgeResumeCommandRoutes: 'edgeResumeCommand',
+    registerFacebookScopeCommandRoutes: 'facebookScopeCommands',
+    registerPublishUiUpdateCommandRoutes: 'publishUiUpdateCommand',
+  } as const;
+  const source = readFileSync(
+    resolve(REPO_ROOT, 'src/automation-composition-root.ts'),
+    'utf8',
+  );
+  const file = ts.createSourceFile(
+    'src/automation-composition-root.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const clientsBody = functionBody(file, 'createAutomationApiClients');
+  const rootBody = functionBody(file, 'createAutomationCompositionRoot');
+  if (!clientsBody || !rootBody) {
+    throw new Error('automation composition-root factory functions are missing');
   }
 
-  const pools = ownerPools(segA).map((evidence): DerivedBlocker => {
-    const [poolName, owner] = evidence.split(':');
-    return {
-      id: `seg-a-foreign-pool-${kebabCase(poolName ?? evidence)}`,
-      category: 'composition-root',
-      owner: owner ?? 'unknown',
-      consumer: 'shared segA composition root',
-      closingChange: 'future',
-      evidence: [`src/server.ts#segAApiFoundation:pool:${evidence}`],
-    };
+  let clientsReturn: ts.ObjectLiteralExpression | null = null;
+  const registered = new Set<keyof typeof commandGroupByRegistrar>();
+  function visitClients(node: ts.Node): void {
+    if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
+      clientsReturn = node.expression;
+    }
+    ts.forEachChild(node, visitClients);
+  }
+  function visitRoot(node: ts.Node): void {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const name = node.expression.text;
+      if (name in commandGroupByRegistrar) {
+        registered.add(name as keyof typeof commandGroupByRegistrar);
+      }
+    }
+    ts.forEachChild(node, visitRoot);
+  }
+  visitClients(clientsBody);
+  visitRoot(rootBody);
+  const returnedObject = clientsReturn as ts.ObjectLiteralExpression | null;
+  if (!returnedObject) {
+    throw new Error('createAutomationApiClients must return an object literal');
+  }
+  const apiProperties = returnedObject.properties.map((property: ts.ObjectLiteralElementLike) => {
+    if (
+      !ts.isPropertyAssignment(property)
+      && !ts.isShorthandPropertyAssignment(property)
+    ) {
+      throw new Error('automation API client root contains a non-property entry');
+    }
+    const name = nameText(property.name);
+    if (!name || !(name in apiGroupByProperty)) {
+      throw new Error(`automation API client root has undeclared property: ${name ?? '<unknown>'}`);
+    }
+    return name as keyof typeof apiGroupByProperty;
   });
-  const apiOwnerStores = ownerStoreConstructions(segA, imports)
-    .flatMap((evidence): DerivedBlocker[] => {
-      const [className, owner, source] = evidence.split(':');
-      if (!className || owner !== 'api' || !source) return [];
-      return [{
-        id: `seg-a-api-owner-${kebabCase(className)}`,
-        category: 'composition-root',
-        owner,
-        consumer: 'automation and content roots through shared segA',
-        closingChange: 'future',
-        evidence: [
-          `src/server.ts#segAApiFoundation:new:${className}:${owner}:${source}`,
-        ],
-      }];
-    });
-  return [...reviewed, ...pools, ...apiOwnerStores];
+  type InventoryGroup = keyof typeof API_DIRECT_PORT_INVENTORY;
+  const apiInventoryGroups: InventoryGroup[] = apiProperties.map(
+    (name: keyof typeof apiGroupByProperty) => apiGroupByProperty[name],
+  );
+  const commandInventoryGroups: InventoryGroup[] = [...registered].map(
+    (name) => commandGroupByRegistrar[name],
+  );
+  const apiClientMethodSlots = apiInventoryGroups.reduce(
+    (sum, group) => sum + API_DIRECT_PORT_INVENTORY[group].length,
+    0,
+  );
+  const commandReceiverMethodSlots = commandInventoryGroups.reduce(
+    (sum, group) => sum + API_DIRECT_PORT_INVENTORY[group].length,
+    0,
+  );
+  const admitted = new Set<InventoryGroup>([...apiInventoryGroups, ...commandInventoryGroups]);
+  const excluded = Object.keys(API_DIRECT_PORT_INVENTORY)
+    .filter((group) => !admitted.has(group as InventoryGroup));
+  if (excluded.length !== 1 || excluded[0] !== 'personaGenerator') {
+    throw new Error(`unexpected automation-root excluded transport groups: ${excluded.join(',')}`);
+  }
+  return {
+    apiClientGroups: apiProperties.length,
+    apiClientMethodSlots,
+    commandReceiverGroups: registered.size,
+    commandReceiverMethodSlots,
+    totalGroups: apiProperties.length + registered.size,
+    totalMethodSlots: apiClientMethodSlots + commandReceiverMethodSlots,
+    excludedTransportGroups: ['personaGenerator'],
+  };
+}
+
+export async function deriveIndependentRootBlockers(): Promise<DerivedBlocker[]> {
+  return AUTOMATION_ROOT_READINESS_BLOCKERS.map((blocker) => ({
+    ...blocker,
+    consumer: 'automation independent root',
+    evidence: [
+      `src/automation-composition-root.ts#readiness:${blocker.id}`,
+    ],
+  }));
 }
 
 export function assertNoIndependentRootBlockers(
@@ -1667,15 +1739,14 @@ async function runCli(argv: readonly string[]): Promise<void> {
   ]);
   if (argv[0] === '--report') {
     const methods = surface.groups.reduce((sum, group) => sum + group.methods.length, 0);
-    const consumed = surface.groups.reduce(
-      (sum, group) => sum + group.productionConsumerMethods.length,
-      0,
-    );
+    const root = deriveAutomationRootCensus();
     console.log(
-      `composition-root 4a census groups=${surface.groups.length}`
-      + ` methodSlots=${methods} productionConsumers=${consumed}`
-      + ` approvedAlternates=${surface.alternates.filter((item) => item.selected).length}`
-      + ` independentRootBlockers=${blockers.length}`,
+      `composition-root 4a transportGroups=${surface.groups.length}`
+      + ` transportMethodSlots=${methods}`
+      + ` automationRootGroups=${root.totalGroups}`
+      + ` automationRootMethodSlots=${root.totalMethodSlots}`
+      + ` excludedTransportGroups=${root.excludedTransportGroups.join(',')}`
+      + ` automationRootBlockers=${blockers.length}`,
     );
     return;
   }

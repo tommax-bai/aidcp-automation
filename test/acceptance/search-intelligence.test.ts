@@ -16,7 +16,7 @@ import { EventBus } from '../../src/event-bus/index.js';
 import { SearchEvaluator } from '../../src/agents/search-evaluator.js';
 import { RoleDispatcher } from '../../src/orchestrator/role-dispatcher.js';
 import type { EdgeCommand, ConceptStorePort } from '../../src/orchestrator/role-dispatcher.js';
-import { contentRoleFactories } from '../helpers/role-factories.js';
+import { contentRoleTestDoubles } from '../helpers/role-factories.js';
 import { SessionContext } from '../../src/agents/session-context.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import type { SearchApprovedPayload, SearchSkippedPayload } from '../../src/event-bus/types.js';
@@ -130,8 +130,9 @@ describe('AC-SEARCH 概念池驱动的搜索智能', () => {
       eventBus: bus,
       sendCommand: (c) => commands.push(c),
       conceptStore,
-      // concept_extractor 属 content 层，经组合根注入的工厂构造（生产在 server.ts，测试用等价装配）。
-      roleFactories: contentRoleFactories(),
+      // 派生仓没有 content owner 实现；这里只注入可观察的空角色 test double，
+      // 让本测试只覆盖 automation 自己的 search 调度链。
+      roleFactories: contentRoleTestDoubles(),
       clock: () => 0,
       hasSearchActivityReceipt: () => options.capable ?? false,
       explainSearch: () => options.searchAllowed === false

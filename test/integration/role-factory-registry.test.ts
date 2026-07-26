@@ -11,7 +11,7 @@ import { RoleDispatcher } from '../../src/orchestrator/role-dispatcher.js';
 import type { ConceptStorePort, RoleFactoryRegistry } from '../../src/orchestrator/role-dispatcher.js';
 import type { RoleName } from '../../src/event-bus/types.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
-import { contentRoleFactories } from '../helpers/role-factories.js';
+import { contentRoleTestDoubles } from '../helpers/role-factories.js';
 
 const mockSoul: Soul = {
   identity: { name: 'TestBot', role: 'AI爱好者', background: '技术博主', tone: '友好' },
@@ -25,9 +25,9 @@ const conceptStoreStub: ConceptStorePort = {
   markSearched: async () => {},
 };
 
-/** 包住真实 content 工厂并记录被请求的 RoleName —— 顺带验证 dispatcher 组装的 options 满足真实构造签名。 */
+/** 包住派生仓 test double 并记录被请求的 RoleName；不冒充 content owner 实现。 */
 function recordingFactories(seen: RoleName[]): RoleFactoryRegistry {
-  const real = contentRoleFactories();
+  const real = contentRoleTestDoubles();
   const wrapped: RoleFactoryRegistry = {};
   for (const key of Object.keys(real) as RoleName[]) {
     const f = real[key]!;
