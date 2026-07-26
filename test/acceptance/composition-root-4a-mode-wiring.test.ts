@@ -7,6 +7,7 @@ import {
   type SyncReadPayloadByStream,
 } from 'aidcp-kernel/kernel/sync-read-facts.js';
 import {
+  SYNC_READ_CHANGED_TOPIC,
   syncReadPayloadDigest,
   type SyncReadConsumerCheckpoint,
   type SyncReadSnapshotEnvelope,
@@ -213,6 +214,10 @@ test('minimal root constructs exactly 16 API clients and three automation receiv
   assert.deepEqual(Object.keys(root.commandReceivers), [...AUTOMATION_COMMAND_RECEIVER_GROUPS]);
   assert.equal(root.structuredDeliver, root.apiClients.structuredNotification);
   assert.ok(root.offboardReconciler instanceof AutomationOffboardAdmissionReconciler);
+  assert.deepEqual(root.syncRead.signalRelay.stats().topics, [
+    SYNC_READ_CHANGED_TOPIC,
+  ]);
+  assert.equal(root.syncRead.signalRelay.stats().running, false);
 });
 
 test('minimal root exposes a real target-bound Edge resume loopback route', async () => {
@@ -254,6 +259,8 @@ test('4b automation start listens before bidirectional bootstrap and reaches rea
   const scheduled: number[] = [];
   let projectionStopped = false;
   let clearedTimer = false;
+  let relayStarted = false;
+  let relayStopped = false;
   let root:
     | ReturnType<typeof createAutomationCompositionRoot>
     | undefined;
@@ -314,6 +321,20 @@ test('4b automation start listens before bidirectional bootstrap and reaches rea
           projectionStopped = true;
         },
       },
+      signalRelay: {
+        start: () => {
+          relayStarted = true;
+        },
+        stop: () => {
+          relayStopped = true;
+        },
+        stats: () => ({
+          running: relayStarted,
+          topics: [SYNC_READ_CHANGED_TOPIC],
+          lastError: null,
+          blocked: [],
+        }),
+      },
       setTimer: (_fn, ms) => {
         scheduled.push(ms);
         return fakeTimer;
@@ -349,6 +370,7 @@ test('4b automation start listens before bidirectional bootstrap and reaches rea
     'B4 owns its projection/checkpoint transaction and is not double-saved',
   );
   assert.equal(root.syncRead.readiness().state, 'ready');
+  assert.equal(root.syncRead.signalRelay.stats().running, true);
   assert.deepEqual(root.syncRead.mirrors.personaFor('acct-a'), {
     state: 'fresh',
     value: { binding: 'bound', personaText: 'persona-a', soul: null },
@@ -370,6 +392,7 @@ test('4b automation start listens before bidirectional bootstrap and reaches rea
   await root.close();
   assert.equal(projectionStopped, true);
   assert.equal(clearedTimer, true);
+  assert.equal(relayStopped, true);
 });
 
 test('4b first-load failure stays named and a later full snapshot heals readiness', async () => {
@@ -416,6 +439,16 @@ test('4b first-load failure stays named and a later full snapshot heals readines
           };
         },
         stop: () => undefined,
+      },
+      signalRelay: {
+        start: () => undefined,
+        stop: () => undefined,
+        stats: () => ({
+          running: true,
+          topics: [SYNC_READ_CHANGED_TOPIC],
+          lastError: null,
+          blocked: [],
+        }),
       },
       setTimer: () => ({} as ReturnType<typeof setTimeout>),
       clearTimer: () => undefined,

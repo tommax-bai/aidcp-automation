@@ -16,6 +16,7 @@ import type {
 } from 'aidcp-kernel/kernel/sync-read-snapshot.js';
 import {
   parseSyncReadSnapshotEnvelope,
+  SYNC_READ_CHANGED_TOPIC,
   SYNC_READ_STREAM_DEFINITIONS,
 } from 'aidcp-kernel/kernel/sync-read-snapshot.js';
 
@@ -59,13 +60,18 @@ import {
   type AutomationRuntimeSyncReadStream,
   type AutomationSyncReadRuntimeSources,
 } from './transport/automation-sync-read-source.js';
+import { OutboxConsumer } from './transport/event-outbox.js';
 import { InternalHttpClient, InternalHttpServer } from './transport/internal-http.js';
 import {
   registerEdgeResumeCommandRoutes,
   registerFacebookScopeCommandRoutes,
   registerPublishUiUpdateCommandRoutes,
 } from './transport/paired-command-http.js';
-import { SyncReadChangedOutbox } from './transport/sync-read-changed-outbox.js';
+import {
+  createSyncReadChangedHttpRelay,
+  SyncReadChangedOutbox,
+} from './transport/sync-read-changed-outbox.js';
+import { SyncReadChangedHttpClient } from './transport/sync-read-changed-http.js';
 import {
   registerSyncReadSnapshotRoute,
   SyncReadSnapshotHttpClient,
@@ -258,6 +264,9 @@ export const AUTOMATION_SYNC_READ_OWNER_STREAMS = [
 export type AutomationSyncReadOwnerStream =
   (typeof AUTOMATION_SYNC_READ_OWNER_STREAMS)[number];
 
+export const AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER =
+  'api-sync-read-changed-relay';
+
 const AUTOMATION_SYNC_READ_REFRESH_MS = 30_000;
 
 type AutomationConsumerMirror =
@@ -315,11 +324,28 @@ interface AutomationOwnerSnapshotSourcePort {
   ): Promise<SyncReadSnapshotEnvelope>;
 }
 
+export interface AutomationSyncReadSignalRelayPort {
+  start(): void;
+  stop(): void;
+  stats(): {
+    running: boolean;
+    topics: string[];
+    lastError: string | null;
+    blocked: ReadonlyArray<{
+      topic: string;
+      eventId: number;
+      attempts: number;
+      lastError: string;
+    }>;
+  };
+}
+
 export interface AutomationRootSyncReadOverrides {
   mirrors?: AutomationSyncReadMirrors;
   checkpointStore?: AutomationCheckpointStorePort;
   accountProjectionStore?: AutomationAccountProjectionPort;
   ownerSnapshotSource?: AutomationOwnerSnapshotSourcePort;
+  signalRelay?: AutomationSyncReadSignalRelayPort;
   fetchOwnerSnapshot?: (
     stream: AutomationSyncReadConsumerStream,
   ) => Promise<SyncReadSnapshotEnvelope>;
@@ -355,6 +381,7 @@ export interface AutomationRootSyncReadHandles {
   mirrors: AutomationSyncReadMirrors;
   ownerSnapshotSource: AutomationOwnerSnapshotSourcePort;
   accountProjectionStore: AutomationAccountProjectionPort;
+  signalRelay: AutomationSyncReadSignalRelayPort;
   refresh(): Promise<void>;
   publishChanged(
     stream: AutomationRuntimeSyncReadStream,
@@ -517,8 +544,9 @@ export function createAutomationCompositionRoot(options: {
         logger,
       ),
     );
+  const syncReadApiHttp = new InternalHttpClient(options.config.apiBaseUrl);
   const snapshotClient = new SyncReadSnapshotHttpClient(
-    new InternalHttpClient(options.config.apiBaseUrl),
+    syncReadApiHttp,
     {
       executionTarget: options.config.executionTarget,
       bearerToken: options.config.apiInternalToken,
@@ -532,6 +560,32 @@ export function createAutomationCompositionRoot(options: {
         (value): value is SyncReadPayloadByStream[typeof stream] =>
           isSyncReadFactPayload(stream, value),
       ));
+  const signalRelay =
+    options.syncRead?.signalRelay ??
+    new OutboxConsumer({
+      consumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
+      executionTarget: options.config.executionTarget,
+      pool: ownerPool,
+      handlers: new Map([
+        [
+          SYNC_READ_CHANGED_TOPIC,
+          createSyncReadChangedHttpRelay({
+            executionTarget: options.config.executionTarget,
+            delivery: new SyncReadChangedHttpClient(syncReadApiHttp, {
+              executionTarget: options.config.executionTarget,
+              bearerToken: options.config.apiInternalToken,
+            }),
+          }),
+        ],
+      ]),
+      logger: {
+        log: () => undefined,
+        warn: (message) => logger.warn(message),
+      },
+      setTimer,
+      clearTimer,
+      now: clock,
+    });
   const commandReceivers = {
     edgeResume: new EdgeResumeCommandReceiver(options.runtime.edgeResume),
     facebookScope: new FacebookScopeCommandReceiver(options.runtime.facebookScope),
@@ -790,6 +844,7 @@ export function createAutomationCompositionRoot(options: {
     mirrors,
     ownerSnapshotSource,
     accountProjectionStore,
+    signalRelay,
     refresh,
     publishChanged,
     readiness,
@@ -808,6 +863,7 @@ export function createAutomationCompositionRoot(options: {
       const listeningPort =
         internalServer.address()?.port ?? await internalServer.listen(port);
       await refresh();
+      signalRelay.start();
       syncReadStarted = true;
       scheduleRefresh();
       return listeningPort;
@@ -815,6 +871,7 @@ export function createAutomationCompositionRoot(options: {
     async close() {
       closed = true;
       syncReadStarted = false;
+      signalRelay.stop();
       if (refreshTimer !== null) {
         clearTimer(refreshTimer);
         refreshTimer = null;
