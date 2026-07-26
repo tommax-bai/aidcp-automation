@@ -1,9 +1,12 @@
 import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   type AdjudicatedFiles,
   type OwnershipEntry,
   type OwnershipRules,
+  type ImportScanResult,
   classifyEdge,
   expandOwnership,
   listSourceFiles,
@@ -21,8 +24,21 @@ function deriveOwnership(): OwnershipEntry[] {
   return expandOwnership(rules, files, adjudicated.files);
 }
 
-function census(entries: readonly OwnershipEntry[]): void {
-  const files = listSourceFiles();
+export interface BoundaryCensusDeps {
+  listFiles(): string[];
+  scan(files: string[]): ImportScanResult;
+}
+
+const DEFAULT_CENSUS_DEPS: BoundaryCensusDeps = {
+  listFiles: () => listSourceFiles(),
+  scan: (files) => scanImports(files),
+};
+
+export function census(
+  entries: readonly OwnershipEntry[],
+  deps: BoundaryCensusDeps = DEFAULT_CENSUS_DEPS,
+): void {
+  const files = deps.listFiles();
   const sourceSet = new Set(files);
   const entrySet = new Set(entries.map((entry) => entry.path));
   const missing = files.filter((file) => !entrySet.has(file));
@@ -35,7 +51,7 @@ function census(entries: readonly OwnershipEntry[]): void {
   }
 
   const layerByFile = new Map(entries.map((entry) => [entry.path, entry.layer]));
-  const imports = scanImports(files);
+  const imports = deps.scan(files);
   if (imports.unresolved.length > 0) {
     throw new Error(
       `unresolved relative imports (${imports.unresolved.length}): `
@@ -43,11 +59,16 @@ function census(entries: readonly OwnershipEntry[]): void {
     );
   }
   const byVerdict = { allowed: 0, exemptable: 0, forbidden: 0 };
+  const forbidden: string[] = [];
   for (const edge of imports.edges) {
     const from = layerByFile.get(edge.from);
     const to = layerByFile.get(edge.to);
     if (!from || !to) throw new Error(`unowned import edge: ${edge.from} -> ${edge.to}`);
-    byVerdict[classifyEdge(from, to)] += 1;
+    const verdict = classifyEdge(from, to);
+    byVerdict[verdict] += 1;
+    if (verdict === 'forbidden') {
+      forbidden.push(`${edge.from} (${from}) -> ${edge.to} (${to})`);
+    }
   }
   console.log(
     `derived boundary census source=${files.length} ownership=${entries.length}`
@@ -55,9 +76,14 @@ function census(entries: readonly OwnershipEntry[]): void {
     + ` allowed=${byVerdict.allowed} exemptable=${byVerdict.exemptable}`
     + ` forbidden=${byVerdict.forbidden}`,
   );
+  if (forbidden.length > 0) {
+    throw new Error(
+      `forbidden import edges (${forbidden.length}):\n  ${forbidden.join('\n  ')}`,
+    );
+  }
 }
 
-function run(argv: readonly string[]): void {
+export function run(argv: readonly string[]): void {
   if (argv.length !== 1 || !['refresh', 'census'].includes(argv[0]!)) {
     throw new Error('usage: boundary-record.ts <refresh|census>');
   }
@@ -71,9 +97,12 @@ function run(argv: readonly string[]): void {
   census(readJson<OwnershipEntry[]>(OWNERSHIP_PATH));
 }
 
-try {
-  run(process.argv.slice(2));
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  try {
+    run(process.argv.slice(2));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
