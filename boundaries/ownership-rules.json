@@ -110,6 +110,7 @@
     { "path": "src/interactions/interaction-automation-ports.ts", "layer": "api", "basis": "§4.6.1：配置/查询面（api）消费 automation 编排行为的窄注入端口（consumer-owned ports）。change decouple-interaction-api-cluster 新增：把 interaction-customer-api 对 send-orchestrator / reply-workflow 的直接 import type 收窄为端口接口，只引 kernel 契约、由组合根按结构兼容注入 automation 实例，automation 类不 import 本端口。" },
     { "path": "src/interactions/interaction-internal-api.ts", "layer": "api", "basis": "§4.6.1：配置存储与查询面" },
     { "path": "src/interactions/offboard-write-adapter.ts", "layer": "automation", "basis": "§5.1：互动域离场表（interaction_offboards/interaction_offboard_audit/interaction_auth_state/interaction_runtime_controls）归 aidcp-automation 单写。本文件是 change offboard-saga 里这些离场表的 automation 侧单写者，aidcp-api 的 client-user-store 经窄接口注入调用。" },
+    { "path": "src/interactions/offboard-admission-reconciler.ts", "layer": "automation", "basis": "【待定稿裁决】change split-cloud-api-composition-root-4a D9 新写：automation 编排本地完整 active offboard 快照、本地物化与 API admission ledger 三项窄端口；不持 pool/事务句柄，不吞 result_unknown，归 automation owner。请求回写 §4.7。" },
     { "path": "src/interactions/interaction-scope-internal-api.ts", "layer": "api", "basis": "§4.6.1：配置存储与查询面" },
     { "path": "src/interactions/interaction-panel-permissions.ts", "layer": "api", "basis": "§4.6.1：配置存储与查询面" },
     { "path": "src/interactions/reply-config-store.ts", "layer": "api", "basis": "§4.6.1：配置存储与查询面" },
