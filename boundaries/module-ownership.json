@@ -1128,5 +1128,15 @@
     "path": "src/transport/triggered-publish-refs-http.ts",
     "layer": "automation",
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
+    "path": "src/orchestrator/facebook-rule-mode-runtime-store.ts",
+    "layer": "automation",
+    "note": "change facebook-rule-mode-cadence：target-scoped 浏览事实、进度、批次和动作终态是 automation 运行权威，本文件只读写 automation 属主表"
+  },
+  {
+    "path": "src/orchestrator/facebook-rule-mode.ts",
+    "layer": "automation",
+    "note": "change facebook-rule-mode-cadence：有效模式仲裁与规则浏览卡片选择直接服务 automation 浏览闭环，不持配置权威、不写数据库"
   }
 ]

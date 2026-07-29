@@ -32,9 +32,9 @@ import { compareVersions } from './migration-plan.js';
  * 也被顺带纳入「缺了就算 behind」——那条迁移本身仍不是硬依赖（只被非 monolith 模式的消费者用），
  * 只是复合序的结果。部署时两条一起跑即可，warn 模式下缺任一条也只是响亮提示、不拒绝启动。
  */
-// Derived automation checkout: this repo only ships automation-owned migrations, so its
-// start-up contract is pinned to its own highest one. Machine-derived on every sync
-// by scripts/sync-split-repos:derived_schema_version — do not hand-edit.
+// Derived automation checkout: this repo only ships automation-owned migrations, so the
+// start-up contract is narrowed to its own scope. Machine-derived on every sync by
+// scripts/sync-split-repos:derived_schema_version — do not hand-edit.
 export const REQUIRED_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_state';
 
 /**
@@ -147,7 +147,10 @@ export const REQUIRED_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_stat
  * 它是放宽方向的约束替换，缺它时旧库仍能正常跑（只是写不进大于 10 的值、写入被库拒并有明确报错），
  * 不构成「缺列就写不进、链路失败」的硬依赖，故不满足抬 REQUIRED 的门槛。
  */
-export const KNOWN_MAX_SCHEMA_VERSION = '0098_facebook_group_join_daily_cap_50';
+// Derived automation checkout: this repo only ships automation-owned migrations, so the
+// start-up contract is narrowed to its own scope. Machine-derived on every sync by
+// scripts/sync-split-repos:derived_schema_version — do not hand-edit.
+export const KNOWN_MAX_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_state';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 
