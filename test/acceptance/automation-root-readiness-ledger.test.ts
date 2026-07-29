@@ -11,11 +11,20 @@
  * still listed eight 4b mirror dependencies which the sync-read mirrors had
  * already closed, while the constant had moved on to 12.
  *
- * These assertions are the minimum anchor: the constant and the JSON must be
- * the same ledger, and the summary must be computed from it rather than typed
- * in. Changing either side alone is red. A stale entry can no longer sit in the
- * JSON pretending to be a live blocker, and a real blocker can no longer be
- * dropped from the JSON without the constant moving too.
+ * These assertions are the minimum anchor, and the honest statement of what
+ * they buy is narrow: **they anchor self-consistency, not agreement with
+ * reality.** The constant and the JSON must be the same ledger, and the summary
+ * must be computed from it rather than typed in, so changing either side alone
+ * is red — that is the single-sided drift these tests catch, and it is the
+ * drift that actually happened.
+ *
+ * What they cannot catch, stated plainly so nobody relies on it: adding an
+ * invented blocker to both sides at once is green, and deleting a real blocker
+ * from both sides at once is also green. Nothing here reads production source,
+ * because in this package the ledger is a hand-written constant. The Cloud
+ * monolith's copy gets self-extinguishing behaviour from AST derivation; this
+ * one does not, and an entry here stays true only for as long as a human keeps
+ * it true.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
