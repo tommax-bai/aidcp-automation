@@ -4,95 +4,15 @@
   "claimBlocked": true,
   "claim": "api, automation, and content are independently bootable without foreign owner pools, stores, or synchronous in-process dependencies",
   "summary": {
-    "total": 20,
+    "total": 15,
     "byCategory": {
-      "4b-mirror": 8,
+      "4b-mirror": 0,
       "operator-command": 4,
-      "content-owner": 7,
+      "content-owner": 10,
       "composition-root": 1
     }
   },
   "blockers": [
-    {
-      "id": "4b-b1-persona-binding-soul-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b1-persona-binding-soul-mirror"
-      ]
-    },
-    {
-      "id": "4b-b2-environment-gate-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b2-environment-gate-mirror"
-      ]
-    },
-    {
-      "id": "4b-b3-config-freshness-runtime",
-      "category": "4b-mirror",
-      "owner": "shared-kernel",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b3-config-freshness-runtime"
-      ]
-    },
-    {
-      "id": "4b-b4-account-identity-status-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b4-account-identity-status-mirror"
-      ]
-    },
-    {
-      "id": "4b-b5-content-schedule-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b5-content-schedule-mirror"
-      ]
-    },
-    {
-      "id": "4b-b5-hot-lead-config-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b5-hot-lead-config-mirror"
-      ]
-    },
-    {
-      "id": "4b-b5-facebook-comment-config-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b5-facebook-comment-config-mirror"
-      ]
-    },
-    {
-      "id": "4b-b5-facebook-join-config-mirror",
-      "category": "4b-mirror",
-      "owner": "api",
-      "closingChange": "split-cloud-api-composition-root-4b",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:4b-b5-facebook-join-config-mirror"
-      ]
-    },
     {
       "id": "feishu-operator-natural-language-delegate",
       "category": "operator-command",
@@ -201,6 +121,36 @@
       "consumer": "automation independent root",
       "evidence": [
         "src/automation-composition-root.ts#readiness:content-token-usage-authority"
+      ]
+    },
+    {
+      "id": "content-textcard-transcription-authority",
+      "category": "content-owner",
+      "owner": "content",
+      "closingChange": "future",
+      "consumer": "automation independent root",
+      "evidence": [
+        "src/automation-composition-root.ts#readiness:content-textcard-transcription-authority"
+      ]
+    },
+    {
+      "id": "content-reply-generation-authority",
+      "category": "content-owner",
+      "owner": "content",
+      "closingChange": "future",
+      "consumer": "automation independent root",
+      "evidence": [
+        "src/automation-composition-root.ts#readiness:content-reply-generation-authority"
+      ]
+    },
+    {
+      "id": "content-publish-rejection-evidence-authority",
+      "category": "content-owner",
+      "owner": "content",
+      "closingChange": "future",
+      "consumer": "automation independent root",
+      "evidence": [
+        "src/automation-composition-root.ts#readiness:content-publish-rejection-evidence-authority"
       ]
     },
     {

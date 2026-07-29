@@ -127,7 +127,20 @@ export interface AutomationRootReadinessBlocker {
 /**
  * This is the automation-derived root ledger, not the Cloud monolith ledger.
  * It includes only dependencies that prevent this package from supplying the
- * complete production automation process.
+ * complete production automation process — a narrowed subset of the monolith
+ * ledger in `aidcp-cloud/boundaries/composition-root-independent-blockers.json`
+ * (which is AST-derived and therefore self-extinguishing; this one is not).
+ *
+ * MUST stay in sync with `boundaries/composition-root-independent-blockers.json`
+ * in this package. That file is a projection of this constant, written by
+ * `test/acceptance/helpers/composition-root-4a-census.ts --refresh-ledger` and
+ * pinned by `test/acceptance/automation-root-readiness-ledger.test.ts`. Editing
+ * either one alone turns that test red — before this anchor existed the JSON had
+ * silently drifted to a stale 20-entry snapshot that no code read.
+ *
+ * The 4b mirror entries (persona binding / environment gate / config freshness /
+ * account identity / the four B5 config streams) are deliberately absent: they
+ * are served here by the sync-read mirrors, so they no longer block this root.
  */
 export const AUTOMATION_ROOT_READINESS_BLOCKERS =
   [
@@ -193,6 +206,28 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
     },
     {
       id: 'content-token-usage-authority',
+      category: 'content-owner',
+      owner: 'content',
+      closingChange: 'future',
+    },
+    // 0.3d：以下三条是本台账此前漏记的真实欠账（cloud 侧 segCAutomation 内构造、属主 content、
+    // 本包内无对应模块）。文字卡 OCR 子链的转写器要交给本包的 RoleDispatcher 工厂；互动回复生成
+    // 由本包的 ReplyWorkflow 直接消费；草稿否决证据判定在委托执行器的候选装载路径上——三者缺席都
+    // 会让本包交付不出完整生产进程，所以本来就该在。
+    {
+      id: 'content-textcard-transcription-authority',
+      category: 'content-owner',
+      owner: 'content',
+      closingChange: 'future',
+    },
+    {
+      id: 'content-reply-generation-authority',
+      category: 'content-owner',
+      owner: 'content',
+      closingChange: 'future',
+    },
+    {
+      id: 'content-publish-rejection-evidence-authority',
       category: 'content-owner',
       owner: 'content',
       closingChange: 'future',

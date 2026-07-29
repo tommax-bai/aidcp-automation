@@ -492,7 +492,10 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
     excludedTransportGroups: ['personaGenerator'],
   });
   const blockers = await deriveIndependentRootBlockers();
-  assert.equal(blockers.length, 12);
+  // 0.3d: content-owner went 7 -> 10 when the text-card OCR sub-chain, the interaction
+  // reply generator and the draft rejection-evidence predicate were recorded. They were
+  // always real debts of this root; they had simply never been written down.
+  assert.equal(blockers.length, 15);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -503,7 +506,7 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
     {
       '4b-mirror': 0,
       'operator-command': 4,
-      'content-owner': 7,
+      'content-owner': 10,
       'composition-root': 1,
     },
   );
