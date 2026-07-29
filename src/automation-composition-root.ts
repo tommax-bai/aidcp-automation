@@ -168,12 +168,11 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
       owner: 'automation',
       closingChange: 'future',
     },
-    {
-      id: 'content-draft-refinement-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
+    // 0.3f：`content-draft-refinement-authority` 在此**刻意缺席**。cloud 单体里草稿精修的
+    // 工作器坐在 segC 的 `seamMode !== 'automation' && …` 守卫内 —— automation 进程按守卫跳过，
+    // api / content 进程根本不跑 segC，因此没有任何独立起根会执行它，本包也不需要它才能交付
+    // 完整生产进程。它在 cloud 单体台账里仍然在（segA 的 store 构造与 segD 的读取都还在），
+    // 只是那条 segC 证据行消失了；两份台账的差就是这个「谁的欠账」之差，不是漏记。
     {
       id: 'content-facebook-publish-media-authority',
       category: 'content-owner',

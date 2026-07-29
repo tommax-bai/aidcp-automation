@@ -495,7 +495,12 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
   // 0.3d: content-owner went 7 -> 10 when the text-card OCR sub-chain, the interaction
   // reply generator and the draft rejection-evidence predicate were recorded. They were
   // always real debts of this root; they had simply never been written down.
-  assert.equal(blockers.length, 15);
+  // 0.3f: 10 -> 9. Draft refinement came back off: the Cloud monolith runs that worker
+  // only behind `seamMode !== 'automation'` inside segC, so no independently-booted
+  // process executes it and it was never this root's debt. It stays in the Cloud
+  // monolith ledger on its segA store and segD reader — that ledger answers a different
+  // question.
+  assert.equal(blockers.length, 14);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -506,7 +511,7 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
     {
       '4b-mirror': 0,
       'operator-command': 4,
-      'content-owner': 10,
+      'content-owner': 9,
       'composition-root': 1,
     },
   );
