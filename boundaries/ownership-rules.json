@@ -75,10 +75,11 @@
     { "path": "src/config-mirror-freshness.ts", "layer": "api", "basis": "【待定稿裁决】§4.7 基线 sha 之后由 change config-mirror-cross-process-invalidation 新增，§4.7『src/ 根文件』行（api 3 / kernel 1 / composition 2）未覆盖它。按配置域默认落 api（§4.6.8：src/config/ 除四类限频配置外归 api，本文件是同一域的镜像新鲜度查询口，仅因『不让风控层第一次 import 配置层』而放在 src/ 根）。MUST NOT 判 kernel：§4.7 的 kernel 花名册是封闭的 4 文件名单，且本文件 :59 有模块级可变单例 installedSource，AC-BOUND-03 的 kernel 准入判据当场不过。请求回写 §4.7 见 docpatch R1" },
     { "path": "src/db/environment-row-lock.ts", "layer": "api", "basis": "【待定稿裁决】§4.7 基线 sha 之后由 change publish-approval-signal-to-database 新增，src/db/ 是 §4.7 里不存在的新目录。按『锁随被保护数据走』落 api：本文件唯一动作是锁 client_environments 的行，该表 §5.1 具名归 aidcp-api 单写、§4.7 的 src/client-auth/ 亦整目录归 api。此处用 fileOverride 而非目录规则，故 src/db/ 后续新增文件仍会逐个待裁决。请求回写 §4.7 见 docpatch R1" },
 
-    { "path": "src/agents/curated-note-evaluator.ts", "layer": "content", "basis": "§7.2 判据三首批迁移名单" },
-    { "path": "src/agents/curated-comment-evaluator.ts", "layer": "content", "basis": "§7.2 判据三首批迁移名单" },
-    { "path": "src/agents/concept-extractor-role.ts", "layer": "content", "basis": "§7.2 判据三首批迁移名单" },
-    { "path": "src/agents/valuable-comment-archivist.ts", "layer": "content", "basis": "§7.2 判据三首批迁移名单" },
+    { "path": "src/agents/curated-note-evaluator.ts", "layer": "automation", "basis": "§7.2.1 改判（用户 2026-07-29，change split-cloud-automation-production-runtime）：这四个角色订阅 automation 的浏览闭环事件、由 automation 的调度器注册与驱动，属主随消费面回 automation；它们跨界要的只是 content 的存储与转写，经 kernel 端口过去。原 §7.2『判据三首批迁移名单』作废" },
+    { "path": "src/agents/curated-comment-evaluator.ts", "layer": "automation", "basis": "§7.2.1 改判（同上）" },
+    { "path": "src/agents/concept-extractor-role.ts", "layer": "automation", "basis": "§7.2.1 改判（同上）" },
+    { "path": "src/agents/valuable-comment-archivist.ts", "layer": "automation", "basis": "§7.2.1 改判（同上）" },
+    { "path": "src/agents/content-role.ts", "layer": "automation", "basis": "§7.2.1 改判（同上）：本类是那四个角色的公共基类，全库实测消费者恰好只有它们四个，随它们改判 automation" },
     { "path": "src/agents/persona-generator.ts", "layer": "content", "basis": "§7.2 判据三首批迁移名单" },
     { "path": "src/agents/persona-auto-fill.ts", "layer": "api", "basis": "§17 第 7 项待回写：§4.7 记 src/agents/ 有 api 2 文件 152 行但未点名，本文件（136 行）是其一，人设按 §5.1 归 aidcp-api。原配对文件 persona-format.ts 已由 change lift-shared-contracts-to-kernel 抬入 kernel（src/kernel/persona-format.ts），§4.7 的『api 2 文件 152 行』行数配对需一并回写，见 docpatch RK1。待控制仓回写 §4.7 后本行 basis 改为直接引用 §4.7" },
 
@@ -124,6 +125,8 @@
     { "path": "src/onboarding/first-post-onboarding-coordinator.ts", "layer": "content", "basis": "§4.7：创作桥接归 content（105 行）" },
 
     { "path": "src/orchestrator/content-scheduler.ts", "layer": "api", "basis": "§4.7 / §4.6.5 第 12 项：内容排期调度器归 api" },
+    { "path": "src/orchestrator/facebook-rule-mode.ts", "layer": "automation", "basis": "change facebook-rule-mode-cadence：有效模式仲裁与规则浏览卡片选择直接服务 automation 浏览闭环，不持配置权威、不写数据库。（补齐：本仓这份规则表此前漏了这两条，靠已生成的 module-ownership.json 兜着，refresh 一跑就会抛）" },
+    { "path": "src/orchestrator/facebook-rule-mode-runtime-store.ts", "layer": "automation", "basis": "change facebook-rule-mode-cadence：target-scoped 浏览事实、进度、批次和动作终态是 automation 运行权威，本文件只读写 automation 属主表" },
 
     { "path": "src/publish-agent/publish-log-store.ts", "layer": "api", "basis": "§4.6.3：台账与审批段 7 文件之一" },
     { "path": "src/publish-agent/publish-pipeline-log-store.ts", "layer": "api", "basis": "§4.6.3：台账与审批段 7 文件之一" },

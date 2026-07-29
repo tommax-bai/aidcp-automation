@@ -65,6 +65,11 @@
     "note": "§4.7 src/agents/ 50 文件：43 automation 为 content 5 + api 2 的补集"
   },
   {
+    "path": "src/agents/concept-extractor-role.ts",
+    "layer": "automation",
+    "note": "§7.2.1 改判（同上）"
+  },
+  {
     "path": "src/agents/content-curator-role.ts",
     "layer": "automation",
     "note": "§4.7 src/agents/ 50 文件：43 automation 为 content 5 + api 2 的补集"
@@ -73,6 +78,21 @@
     "path": "src/agents/content-evaluator.ts",
     "layer": "automation",
     "note": "§4.7 src/agents/ 50 文件：43 automation 为 content 5 + api 2 的补集"
+  },
+  {
+    "path": "src/agents/content-role.ts",
+    "layer": "automation",
+    "note": "§7.2.1 改判（同上）：本类是那四个角色的公共基类，全库实测消费者恰好只有它们四个，随它们改判 automation"
+  },
+  {
+    "path": "src/agents/curated-comment-evaluator.ts",
+    "layer": "automation",
+    "note": "§7.2.1 改判（同上）"
+  },
+  {
+    "path": "src/agents/curated-note-evaluator.ts",
+    "layer": "automation",
+    "note": "§7.2.1 改判（用户 2026-07-29，change split-cloud-automation-production-runtime）：这四个角色订阅 automation 的浏览闭环事件、由 automation 的调度器注册与驱动，属主随消费面回 automation；它们跨界要的只是 content 的存储与转写，经 kernel 端口过去。原 §7.2『判据三首批迁移名单』作废"
   },
   {
     "path": "src/agents/deep-reader.ts",
@@ -213,6 +233,11 @@
     "path": "src/agents/session-monitor-role.ts",
     "layer": "automation",
     "note": "§4.7 src/agents/ 50 文件：43 automation 为 content 5 + api 2 的补集"
+  },
+  {
+    "path": "src/agents/valuable-comment-archivist.ts",
+    "layer": "automation",
+    "note": "§7.2.1 改判（同上）"
   },
   {
     "path": "src/alerts/alert-notification.ts",
@@ -625,6 +650,16 @@
     "note": "§4.7：content-scheduler.ts 归 api，其余归 automation"
   },
   {
+    "path": "src/orchestrator/facebook-rule-mode-runtime-store.ts",
+    "layer": "automation",
+    "note": "change facebook-rule-mode-cadence：target-scoped 浏览事实、进度、批次和动作终态是 automation 运行权威，本文件只读写 automation 属主表"
+  },
+  {
+    "path": "src/orchestrator/facebook-rule-mode.ts",
+    "layer": "automation",
+    "note": "change facebook-rule-mode-cadence：有效模式仲裁与规则浏览卡片选择直接服务 automation 浏览闭环，不持配置权威、不写数据库。（补齐：本仓这份规则表此前漏了这两条，靠已生成的 module-ownership.json 兜着，refresh 一跑就会抛）"
+  },
+  {
     "path": "src/orchestrator/index.ts",
     "layer": "automation",
     "note": "§4.7：content-scheduler.ts 归 api，其余归 automation"
@@ -673,6 +708,11 @@
     "path": "src/publish-agent/command-sequencer.ts",
     "layer": "automation",
     "note": "§4.6.3：下发执行段 6 文件之一"
+  },
+  {
+    "path": "src/publish-agent/curated-gate.ts",
+    "layer": "content",
+    "note": "§4.6.3：生成候选段（54 文件），api 7 与 automation 6 逐文件点名"
   },
   {
     "path": "src/publish-agent/fill-budget.ts",
@@ -1010,6 +1050,11 @@
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
   },
   {
+    "path": "src/transport/operator-command-http.ts",
+    "layer": "automation",
+    "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
     "path": "src/transport/outbox-health.ts",
     "layer": "automation",
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
@@ -1128,15 +1173,5 @@
     "path": "src/transport/triggered-publish-refs-http.ts",
     "layer": "automation",
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
-  },
-  {
-    "path": "src/orchestrator/facebook-rule-mode-runtime-store.ts",
-    "layer": "automation",
-    "note": "change facebook-rule-mode-cadence：target-scoped 浏览事实、进度、批次和动作终态是 automation 运行权威，本文件只读写 automation 属主表"
-  },
-  {
-    "path": "src/orchestrator/facebook-rule-mode.ts",
-    "layer": "automation",
-    "note": "change facebook-rule-mode-cadence：有效模式仲裁与规则浏览卡片选择直接服务 automation 浏览闭环，不持配置权威、不写数据库"
   }
 ]
