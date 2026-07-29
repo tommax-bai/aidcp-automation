@@ -29,7 +29,7 @@
     "test:feishu": "tsx --env-file=.env src/cli/test-feishu.ts"
   },
   "dependencies": {
-    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#c7b6a4e644d1a081fa933c5c212f98d5fc27e6b4",
+    "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#6bf06034c2205ce6a9e32aaa70929c993f7c1780",
     "pg": "^8.13.1",
     "ws": "^8.18.0"
   },
