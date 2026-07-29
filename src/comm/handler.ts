@@ -369,12 +369,35 @@ export class DefaultMessageHandler implements MessageHandler {
   /**
    * 把一次「边缘已确认真实发生」的动作同步提交进记账 outbox（change risk-state-cross-process-integrity）。
    * 缺 accountId → 不入队（与既有 honest-fail 一致：绝不把脏流量记到退役键名下）。
+   * 已有 accountId 但缺 edgeId → 抛错停止推进，绝不生成跨环境可碰撞的残缺键。
    * 漏斗未注入 → no-op（旧装配与纯协议测试保持改动前行为）。
    * **入队失败刻意向上抛**：调用点据此不 emit、不推进闭环。
    */
-  private async enqueueRiskFact(session: EdgeSession, action: RiskAction, dedupeKey: string): Promise<void> {
+  private riskFactDedupeKey(
+    session: EdgeSession,
+    env: Envelope,
+    action: RiskAction,
+    discriminator?: string,
+  ): string {
+    const accountId = session.accountId?.trim();
+    const edgeId = session.edgeId?.trim();
+    if (!accountId || !edgeId) {
+      throw new Error('risk_fact_identity_missing');
+    }
+    const parts = [accountId, edgeId, String(env.ts), env.id, action];
+    if (discriminator !== undefined) parts.push(discriminator);
+    return `edge-risk:${parts.map((part) => encodeURIComponent(part)).join(':')}`;
+  }
+
+  private async enqueueRiskFact(
+    session: EdgeSession,
+    env: Envelope,
+    action: RiskAction,
+    discriminator?: string,
+  ): Promise<void> {
     const accountId = session.accountId?.trim();
     if (!accountId || !this.deps.riskAccounting) return;
+    const dedupeKey = this.riskFactDedupeKey(session, env, action, discriminator);
     await this.deps.riskAccounting.enqueue({ accountId, action, occurredAt: this.clock(), dedupeKey });
   }
 
@@ -558,6 +581,9 @@ export class DefaultMessageHandler implements MessageHandler {
         return null;
       case 'page.cards': {
         const { cards, startupId, documentGeneration, listKind, listState } = env.payload as PageCardsPayload;
+        let presentedRuleView:
+          | { noteId: string; source: 'reels' | 'feed_video'; sourceDedupeKey: string }
+          | undefined;
         // 留存最近一批卡快照（change platform-browse-protocol）：note-scoped 互动回执带独立见证 observation 时，
         // 归账仲裁据此逐字段比对选中卡（信息流就地点赞防点错卡）。详情页/无 observation 时不消费——阶段 0 惰性。
         session.lastCards = cards;
@@ -573,13 +599,20 @@ export class DefaultMessageHandler implements MessageHandler {
           // 先落 outbox 再推进（design D5），与 like/collect/search 同形。入队成功之后才置
           // 「本 Reel 已记 view」标记：入队失败时这一笔既没进账本、也 MUST NOT 被标成已记，
           // 否则随后的 note.detail 会以为它已经算过而整条跳过。
-          await this.enqueueRiskFact(session, 'view', `${env.id}:view:${noteId ?? '-'}`);
+          await this.enqueueRiskFact(session, env, 'view', noteId ?? '-');
           session.countedReelViewNoteId = noteId;
           this.bus(session).emit('interaction.occurred', {
             action: 'view',
             accountId: session.accountId,
             ...(noteId ? { noteId } : {}),
           });
+          if (session.accountId && noteId) {
+            presentedRuleView = {
+              noteId,
+              source: 'reels',
+              sourceDedupeKey: `${env.id}:rule-view:${noteId}`,
+            };
+          }
         } else {
           // 任一后续普通/空/畸形列表都结束「当前 Reel 已记 view」关联，不能抑制未来普通详情记账。
           session.countedReelViewNoteId = undefined;
@@ -595,13 +628,20 @@ export class DefaultMessageHandler implements MessageHandler {
             session.countedFacebookFeedVideoViewKeys = counted;
             if (!counted.has(key)) {
               // 同上：先入队、成功后才登记「已记」，绝不让入队失败留下一个「算过了」的假标记。
-              await this.enqueueRiskFact(session, 'view', `${env.id}:view:${noteId}`);
+              await this.enqueueRiskFact(session, env, 'view', noteId);
               counted.add(key);
               this.bus(session).emit('interaction.occurred', {
                 action: 'view',
                 accountId: session.accountId,
                 noteId,
               });
+              if (session.accountId) {
+                presentedRuleView = {
+                  noteId,
+                  source: 'feed_video',
+                  sourceDedupeKey: `${env.id}:rule-view:${noteId}`,
+                };
+              }
             }
           }
         }
@@ -636,6 +676,15 @@ export class DefaultMessageHandler implements MessageHandler {
           ...(listKind ? { listKind } : {}),
           ts: this.clock(),
         });
+        if (presentedRuleView && session.accountId) {
+          this.bus(session).emit('facebook.rule.view.confirmed', {
+            accountId: session.accountId,
+            noteId: presentedRuleView.noteId,
+            sourceDedupeKey: presentedRuleView.sourceDedupeKey,
+            source: presentedRuleView.source,
+            occurredAt: this.clock(),
+          });
+        }
         return null;
       }
       case 'note.detail': {
@@ -663,12 +712,25 @@ export class DefaultMessageHandler implements MessageHandler {
         const feedVideoViewAlreadyCounted =
           !!detail.noteId && !!session.countedFacebookFeedVideoViewKeys?.has(facebookPostKey(detail.noteId));
         if (!reelViewAlreadyCounted && !feedVideoViewAlreadyCounted) {
-          await this.enqueueRiskFact(session, 'view', `${env.id}:view:${detail.noteId ?? '-'}`);
+          await this.enqueueRiskFact(session, env, 'view', detail.noteId ?? '-');
           this.bus(session).emit('interaction.occurred', {
             action: 'view',
             accountId: session.accountId,
             ...(detail.noteId ? { noteId: detail.noteId } : {}),
           });
+          if (
+            normalizePlatformId(session.platform) === 'facebook'
+            && session.accountId
+            && detail.noteId
+          ) {
+            this.bus(session).emit('facebook.rule.view.confirmed', {
+              accountId: session.accountId,
+              noteId: detail.noteId,
+              sourceDedupeKey: `${env.id}:rule-view:${detail.noteId}`,
+              source: 'detail',
+              occurredAt: this.clock(),
+            });
+          }
         }
         return null;
       }
@@ -764,7 +826,7 @@ export class DefaultMessageHandler implements MessageHandler {
                 } else if (result.actuated === true && outcome !== 'not_submitted') {
                   // 先落持久 outbox，再推进（design D5）。搜索的去重键用 activityId：它每次搜索唯一，
                   // 且边缘重连重发同一条终态时携带同一个 activityId ⇒ 天然只记一次。
-                  await this.enqueueRiskFact(session, 'search', `${env.id}:search:${activityId}`);
+                  await this.enqueueRiskFact(session, env, 'search', activityId);
                   this.bus(session).emit('search.occurred', {
                     accountId: session.accountId,
                     activityId,
@@ -785,8 +847,10 @@ export class DefaultMessageHandler implements MessageHandler {
         }
         if (emitActionCompleted) this.bus(session).emit('action.completed', { ...result, ts: this.clock() });
         // 真实发生的动作 → 驱动 RiskController 按账号计数（record 订在 interaction.occurred）。
-        // 判据分两轴（change fb-join-quota-counts-attempts）：
-        //   · like/collect/follow/comment/comment_like —— ok=true 才算真实互动（already_followed 是良性 no-op，不计）。
+        // 判据分三轴（change fb-join-quota-counts-attempts）：
+        //   · like/collect/follow/comment_like —— ok=true 才算真实互动（already_followed 是良性 no-op，不计）。
+        //   · comment —— ok=true 或 verification_ambiguous（提交已派发但未确认）消耗一次配额；明确待审批/
+        //     已拒绝不计。计入用量不把 ambiguous 染成成功，action.completed 仍按原终态下游处理。
         //   · join_group —— 配额是**风控预算**，计的是「真的抵达 Facebook 的入群动作」，故判据是 clicked 而非 ok：
         //     clicked=true 是边缘**事后回执**说它在真实页面上点了（既成事实）；ok 只是平台对我们**已做之事**的回答
         //     （批了 / 待管理员审批 / 要答题），MUST NOT 决定这次动作算不算数。于是点了但待审批（ok:false,
@@ -798,9 +862,15 @@ export class DefaultMessageHandler implements MessageHandler {
         //   record 已改为无条件写入既成事实（change risk-record-actuated-facts），账号被限 / 配额已耗尽
         //   时它照样记下（只是返回 false 表示「超策略」）。此前它会在那两种情况下静默丢弃，那是本闸
         //   上一层的同一个病：拿「该不该」去回答「有没有」。
+        const commentSubmittedUnknown =
+          result.action === 'comment' && result.reason === 'verification_ambiguous';
+        const commentKnownNotLive =
+          result.action === 'comment'
+          && (result.reason === 'pending_group_approval' || result.reason === 'comment_rejected');
         if (
-          (result.ok || result.action === 'join_group') &&
+          (result.ok || result.action === 'join_group' || commentSubmittedUnknown) &&
           (result.action === 'like' || result.action === 'collect' || result.action === 'follow' || result.action === 'comment' || result.action === 'comment_like' || result.action === 'join_group') &&
+          !commentKnownNotLive &&
           result.reason !== 'already_followed' &&
           (result.action !== 'join_group' || (result.clicked === true && result.reason !== 'already_member' && result.reason !== 'observation_only'))
         ) {
@@ -813,8 +883,12 @@ export class DefaultMessageHandler implements MessageHandler {
               ? this.attributeNoteScopedNoteId(session, result, readSurface)
               : session.currentNoteId;
           // 展示账本目标 id（change interaction-feed-enrichment）：关注按作者（currentAuthorId），其余按笔记。
+          // verification_ambiguous 只消费用量，不是平台确认成功；不带 targetId，避免下游 interaction_feed
+          // 把一条 unknown 评论展示成已完成互动。
           const targetId =
-            result.action === 'follow'
+            commentSubmittedUnknown
+              ? undefined
+              : result.action === 'follow'
               ? session.currentAuthorId
               : result.action === 'join_group'
                 ? undefined
@@ -822,7 +896,7 @@ export class DefaultMessageHandler implements MessageHandler {
           // **先落持久 outbox，再 emit 推进浏览闭环**（design D5）。顺序不可换：emit 之后再记账
           // 就回到了「回执已到、计数未提交」那段真空——崩在那里这次真实动作就此从账本上消失。
           // 入队失败会抛出（并已在漏斗内告警 + 对该账号 fail-closed），此处刻意不 catch。
-          await this.enqueueRiskFact(session, result.action as RiskAction, `${env.id}:${result.action}`);
+          await this.enqueueRiskFact(session, env, result.action as RiskAction);
           this.bus(session).emit('interaction.occurred', {
             action: result.action as 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'join_group',
             // accountId 从会话填（握手已保证存在）；缺失=上游缺陷，下游 consumer honest-fail 丢弃，绝不回落 default
@@ -1124,7 +1198,7 @@ export class DefaultMessageHandler implements MessageHandler {
               accountId,
               action,
               occurredAt: this.clock(),
-              dedupeKey: `${env.id}:risk.record:${action}`,
+              dedupeKey: this.riskFactDedupeKey(session, env, action, 'risk.record'),
             })
           ).allowed
         : await this.controllerFor(session).record(action);

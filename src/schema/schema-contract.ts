@@ -32,9 +32,10 @@ import { compareVersions } from './migration-plan.js';
  * 也被顺带纳入「缺了就算 behind」——那条迁移本身仍不是硬依赖（只被非 monolith 模式的消费者用），
  * 只是复合序的结果。部署时两条一起跑即可，warn 模式下缺任一条也只是响亮提示、不拒绝启动。
  */
-// The derived automation checkout does not ship API-owned migration 0076.
-// Its highest required local prerequisite is the target-scoped outbox cursor.
-export const REQUIRED_SCHEMA_VERSION = '0075_event_outbox_topic_cursor';
+// Derived automation checkout: this repo only ships automation-owned migrations, so its
+// start-up contract is pinned to its own highest one. Machine-derived on every sync
+// by scripts/sync-split-repos:derived_schema_version — do not hand-edit.
+export const REQUIRED_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_state';
 
 /**
  * 本构建认识的最高迁移版本 id，等于本构建 `migrations/` 目录里的最大版本。
@@ -105,8 +106,48 @@ export const REQUIRED_SCHEMA_VERSION = '0075_event_outbox_topic_cursor';
  * 注：`0087_automation_account_projection_shared_cursor`（change split-cloud-api-composition-root-4b）
  * 在既有 B4 shared projection-state 行记录 applied cursor/digest，跨 dev/ol 串行防旧快照回退；
  * target checkpoint 只保留 delivery/readiness。
+ *
+ * 注：`0088_client_environment_proxy_authority`（change cloud-authoritative-environment-proxy）
+ * 为 api owner 增加环境原始代理权威；客户鉴权接口缺表时显式返回 schema unavailable，
+ * Edge 不会回退到 AdsPower 当前执行副本，故只抬 KNOWN_MAX、不抬 monolith REQUIRED。
+ *
+ * 注：`0089_facebook_global_scope_regional_templates`
+ * 为 automation owner 的 Facebook 群目标增加显式 global/restricted 范围，并持久化区域通用
+ * 评论模板；缺失时相关范围与模板能力在 capability probe 处 fail-closed，故只抬 KNOWN_MAX。
+ *
+ * 注：`0090_facebook_comment_mode_configured`
+ * 为 api owner 的账号 Facebook 评论配置增加独立的方案显式性；历史持久化行标记为显式，
+ * 新行只有明确写入 commentMode 才置位。缺列时评论配置能力在 probe 处 fail-closed。
+ *
+ * 注：`0091_facebook_comment_config_snapshot_revision`
+ * 推进 API owner 的 facebook_comment_config 镜像版本，使 0090 新增的快照字段与新 cursor
+ * 同步生效；否则重启消费者会在旧 cursor 上看见新 payload 并以 same_cursor_payload_drift 拒绝。
+ *
+ * `0092_facebook_rule_mode_config` 与 `0093_facebook_rule_mode_runtime` 分属 api/automation，
+ * 分别增加账号开关和 target-scoped 规则进度/批次。新 store 不保留运行时 DDL，启动必须先
+ * 通过精确 schema probe；缺迁移时该固定规则能力不可工作。
+ *
+ * `0094_facebook_rule_two_tier_config` 与 `0095_facebook_rule_two_tier_runtime`（同样分属
+ * api/automation）把 0092/0093 钉死的定义号 / 定义版本 CHECK 放宽为「新旧都接受」，并给 batch
+ * 三个动作状态列加上 `not_scheduled`。两条都是**硬依赖**：代码常量已切到两级节奏定义
+ * （`facebook_browse_5_like_1_join_contact_every_2@2`），缺这两条迁移时任何配置写入与进度写入
+ * 都会被旧 CHECK 以 23514 拒绝，规则模式整体不可工作。
+ *
+ * `0096_facebook_rule_fallback_comment_state`（automation）再放宽一次 batch 三个动作状态列的 CHECK，
+ * 容纳 `confirmed_without_contact`——账号缺联系方式时降级发出的普通评论。同样是硬依赖：缺它时该终态
+ * 写不进去，规则轮次终结失败，故 REQUIRED 与 KNOWN_MAX 抬到 0096。
+ *
+ * 注：`0097_environment_level_rule_mode_and_approval`（change environment-level-rule-mode-and-approval）
+ * 给规则模式配置与评论审批覆盖策略加环境键并回填。两个存储的 schema probe **都显式要求 env_key**：
+ * 缺列时它们在 init 处带 version id fail-closed（规则模式=不启用、审批=按来源规则），而不是回落读旧账号列
+ * ——回落等于把「设置跟账号走」这条已被否决的语义偷偷放回来。故 REQUIRED 与 KNOWN_MAX 一并抬到 0097。
+ *
+ * 注：`0098_facebook_group_join_daily_cap_50`（change raise-facebook-group-join-cap-ceiling）
+ * 把自动加群日上限的库侧 CHECK 从 0..10 放宽到 0..50。**只抬 KNOWN_MAX、不抬 REQUIRED**：
+ * 它是放宽方向的约束替换，缺它时旧库仍能正常跑（只是写不进大于 10 的值、写入被库拒并有明确报错），
+ * 不构成「缺列就写不进、链路失败」的硬依赖，故不满足抬 REQUIRED 的门槛。
  */
-export const KNOWN_MAX_SCHEMA_VERSION = '0087_automation_account_projection_shared_cursor';
+export const KNOWN_MAX_SCHEMA_VERSION = '0098_facebook_group_join_daily_cap_50';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 

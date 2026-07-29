@@ -235,6 +235,112 @@ describe('CommentScheduler.triggerManual', () => {
     assert.equal(takeovers, 0);
   });
 
+  // ── change facebook-rule-comment-plain-fallback：缺联系方式的**范围化**降级 ──
+  //
+  // 默认仍是 fail-closed（上面两条用例守着）。只有调用方**显式**声明 contactFallback 才降级，
+  // 且当前唯一获授权的调用方是 Facebook 规则模式的加群联系评论。
+
+  it('未声明 contactFallback 的调用方 MUST 保持 fail-closed（默认安全侧不因新能力而松动）', async () => {
+    // 六个入口共用同一道闸。这条锁住「默认值」本身——任何人把默认改成降级都会打红。
+    let takeovers = 0;
+    const s = new CommentScheduler(
+      baseDeps({ getPlatform: () => 'facebook', getContactInfo: async () => null, onTakeoverStart: () => { takeovers += 1; } }),
+    );
+    const r = await s.triggerManual('acc-1', { injectContact: true, joinFirst: true });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /联系方式/);
+    assert.equal(takeovers, 0, '未声明降级时 MUST NOT 接管边端——连加群都不该发生');
+  });
+
+  it('显式声明 contactFallback 后缺联系方式 → 降级发普通评论，且触发回执按实际值说「不带联系方式」', async () => {
+    const joined: string[] = [];
+    const s = new CommentScheduler(
+      baseDeps({
+        getPlatform: () => 'facebook',
+        getContactInfo: async () => null,
+        facebookConfigFor: () => ({
+          enabled: true,
+          keywords: ['k'],
+          containers: [{ url: 'https://www.facebook.com/groups/1' }],
+          commentMode: 'template' as const,
+          commentTemplates: ['你好'],
+        }),
+        facebookJoinNewGroup: async () => { joined.push('acc-1'); return { triggered: true, outcome: 'joined', groupUrl: 'https://www.facebook.com/groups/1' }; },
+      }),
+    );
+    const r = await s.triggerManual('acc-1', {
+      injectContact: true,
+      joinFirst: true,
+      contactFallback: { kind: 'plain', approvalMode: 'review' },
+    });
+    assert.equal(r.ok, true, '声明降级后 MUST 继续，而不是整段停住');
+    assert.match(r.message, /未配联系方式/, '回执 MUST 说清本次为什么不带联系方式');
+    assert.match(r.message, /降级/);
+    assert.doesNotMatch(
+      r.message,
+      /（带联系方式/,
+      '回执 MUST NOT 按请求意图宣称带了联系方式——那是对运营说谎',
+    );
+  });
+
+  it('降级产出走**普通评论**车道的审批模式，MUST NOT 继承联系评论车道的免审', async () => {
+    // 运营给的是「联系评论免审」，授权对象是带码的模板评论。把它外溢到一条从未为该车道
+    // 授权的普通评论正文，就是授权外溢——这条用最容易出事的组合锁住：联系评论免审、普通评论需人审。
+    const sources: Array<string | undefined> = [];
+    const s = new CommentScheduler(
+      baseDeps({
+        getPlatform: () => 'facebook',
+        getContactInfo: async () => null,
+        resolveApprovalMode: async (_accountId, sourceMode) => { sources.push(sourceMode); return sourceMode; },
+        facebookConfigFor: () => ({
+          enabled: true,
+          keywords: ['k'],
+          containers: [{ url: 'https://www.facebook.com/groups/1' }],
+          commentMode: 'template' as const,
+          commentTemplates: ['你好'],
+        }),
+        facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: 'https://www.facebook.com/groups/1' }),
+      }),
+    );
+    const r = await s.triggerManual('acc-1', {
+      injectContact: true,
+      joinFirst: true,
+      approvalMode: 'auto_approve',                                   // 联系评论车道：免审
+      contactFallback: { kind: 'plain', approvalMode: 'review' },      // 普通评论车道：需人审
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(sources, ['review'], '降级后 MUST 用普通评论车道的来源模式解析审批');
+    assert.match(r.message, /人审/, '回执也要如实说这条要走人审');
+  });
+
+  it('有联系方式时声明 contactFallback 不改变任何行为（降级只在缺联系方式时生效）', async () => {
+    const sources: Array<string | undefined> = [];
+    const s = new CommentScheduler(
+      baseDeps({
+        getPlatform: () => 'facebook',
+        getContactInfo: async () => 'wx: abc',
+        resolveApprovalMode: async (_accountId, sourceMode) => { sources.push(sourceMode); return sourceMode; },
+        facebookConfigFor: () => ({
+          enabled: true,
+          keywords: ['k'],
+          containers: [{ url: 'https://www.facebook.com/groups/1' }],
+          commentMode: 'template' as const,
+          commentTemplates: ['你好'],
+        }),
+        facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: 'https://www.facebook.com/groups/1' }),
+      }),
+    );
+    const r = await s.triggerManual('acc-1', {
+      injectContact: true,
+      joinFirst: true,
+      approvalMode: 'auto_approve',
+      contactFallback: { kind: 'plain', approvalMode: 'review' },
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(sources, ['auto_approve'], '拿得到联系方式时 MUST 走联系评论车道，与改造前一致');
+    assert.match(r.message, /带联系方式/);
+  });
+
   it('--contact + 有联系方式 → 触发成功，且联系方式注入到人审卡文本（端到端，审=发）', async () => {
     const bus = new EventBus();
     const cardDone = deferred<void>();
@@ -617,7 +723,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
   function fbDeps(over: Partial<CommentSchedulerDeps> & {
     keywords?: string[]; containers?: string[]; auto?: boolean; shadow?: boolean;
     commentMode?: 'generated' | 'template'; commentTemplates?: string[];
-    compose?: string | null; canComment?: boolean; cap?: number; done?: number;
+    compose?: string | null; canComment?: boolean;
   } = {}): { deps: CommentSchedulerDeps; audits: Audit[]; posted: string[] } {
     const audits: Audit[] = [];
     const posted: string[] = [];
@@ -632,7 +738,17 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
           if (e.type === 'search.execute') {
             bus.emit('page.cards.arrived', { cards: [{ index: 0, noteId: 'https://fb.com/g/1/posts/9' }], ts: 0 } as never);
           } else if (e.type === 'note.open') {
-            bus.emit('note.detail.arrived', { detail: { noteId: (e.payload as { url?: string }).url, content: '', comments: ['原评论：手冲咖啡真香'] }, ts: 0 } as never);
+            const payload = e.payload as { url?: string; selection?: string };
+            bus.emit('note.detail.arrived', {
+              detail: {
+                noteId: payload.selection === 'first_commentable_group_post'
+                  ? 'https://www.facebook.com/groups/1/posts/9'
+                  : payload.url,
+                content: '',
+                comments: ['原评论：手冲咖啡真香'],
+              },
+              ts: 0,
+            } as never);
           } else if (e.type === 'interaction.comment') {
             bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
           }
@@ -643,7 +759,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
       stepTimeoutMs: 60,
       random: () => 0,
       facebookConfigFor: () => ({
-        enabled: (over.keywords ?? ['咖啡']).length > 0 && ((over.commentMode ?? 'generated') === 'generated' || (over.commentTemplates ?? []).length > 0),
+        enabled: (over.commentMode ?? 'generated') === 'generated' || (over.commentTemplates ?? []).length > 0,
         keywords: over.keywords ?? ['咖啡'],
         containers: (over.containers ?? ['g1']).map((u) => ({ url: u })),
         commentMode: over.commentMode ?? 'generated',
@@ -651,7 +767,8 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
       }),
       facebookCoverageConfigFor: () => ({
         coverageEnabled: true,
-        enabled: (over.keywords ?? ['咖啡']).length > 0 && (over.containers ?? ['g1']).length > 0,
+        enabled: ((over.commentMode ?? 'generated') === 'generated' || (over.commentTemplates ?? []).length > 0)
+          && (over.containers ?? ['g1']).length > 0,
         keywords: over.keywords ?? ['咖啡'],
         containers: (over.containers ?? ['g1']).map((u) => ({ url: u })),
         commentMode: over.commentMode ?? 'generated',
@@ -659,8 +776,6 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
       }),
       facebookCompose: async () => (over.compose === undefined ? '这家手冲咖啡很不错' : over.compose),
       facebookCanComment: async () => over.canComment ?? true,
-      facebookDailyCap: () => over.cap ?? 5,
-      facebookCommentedToday: async () => over.done ?? 0,
       facebookAudit: (row) => audits.push(row),
       ...over,
     });
@@ -714,8 +829,8 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
     assert.ok(!posted.includes('interaction.comment'));
   });
 
-  // 注：以下两个 quota_denied 测试**不带** manualOverride → 模型的是「自动排期评论」路径（ContentScheduler 的 priority:automatic 调用），
-  // 此路径配额闸照旧。飞书手动 /comment 由 server.ts 显式带 manualOverride:true（见下方 change manual-comment-bypass-quota 用例）。
+  // 注：该 quota_denied 测试**不带** manualOverride → 模型的是「自动排期评论」路径（ContentScheduler 的 priority:automatic 调用），
+  // 此路径由 RiskController 单一配额闸控制。飞书手动 /comment 由 server.ts 显式带 manualOverride:true。
   it('真发路径 canDo 拒 → quota_denied，不发（自动路径：无 manualOverride）', async () => {
     const { deps, audits, posted } = fbDeps({ canComment: false });
     await new CommentScheduler(deps).triggerManual('fb-1');
@@ -723,14 +838,6 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
     assert.equal(audits[0].outcome, 'quota_denied');
     assert.equal(audits[0].reason, 'canDo');
     assert.deepEqual(posted, []);
-  });
-
-  it('真发路径日上限满 → quota_denied(daily_cap)（自动路径：无 manualOverride）', async () => {
-    const { deps, audits } = fbDeps({ cap: 2, done: 2 });
-    await new CommentScheduler(deps).triggerManual('fb-1');
-    await tick();
-    assert.equal(audits[0].outcome, 'quota_denied');
-    assert.equal(audits[0].reason, 'daily_cap');
   });
 
   // 回归：自动排期评论调用形态（ContentScheduler 传 priority:'automatic'、绝不带 manualOverride，见 server.ts）→ 配额闸照旧生效。
@@ -759,6 +866,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
 
   /** FB 真发流水线的假边端：按命令类型 emit 对应上报到同一私有总线；可配搜索失败/开帖失败/提交结果/候选集。 */
   function fbFlowDeps(cfg: {
+    keywords?: string[];
     candidates?: string[];
     searchFail?: string;
     openOk?: boolean;
@@ -769,6 +877,8 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     coverageRelaxed?: boolean;
     commentMode?: 'generated' | 'template';
     commentTemplates?: string[];
+    regionalTemplates?: string[];
+    regionalFailure?: 'missing_group_region' | 'regional_template_missing';
     /** 连接在 trigger 通过后掉线：resolveConnection 首次（trigger 闸）返回连接、其后（真发内）返回 null。 */
     dropAfterTrigger?: boolean;
     /** 边缘回传的真实群名（undefined=默认 PR 群名，null=不回传）。 */
@@ -776,6 +886,8 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     /** 开帖回读的帖子正文/他人评论（读了再写：喂给撰写器）。 */
     postText?: string;
     comments?: string[];
+    /** 空关键词首帖可返回 canonical permalink 或 Edge 同页 targetRef。 */
+    firstPostTarget?: string;
   } = {}): {
     deps: CommentSchedulerDeps;
     audits: Audit[];
@@ -784,6 +896,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     dedupRecorded: string[];
     resolvedNames: Array<{ url: string; name: string }>;
     composeArgs: Array<{ keyword: string; container: string; postText?: string; comments?: string[] }>;
+    regionResolutionCalls: string[];
   } {
     const audits: Audit[] = [];
     const posted: string[] = [];
@@ -791,6 +904,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     const dedupRecorded: string[] = [];
     const resolvedNames: Array<{ url: string; name: string }> = [];
     const composeArgs: Array<{ keyword: string; container: string; postText?: string; comments?: string[] }> = [];
+    const regionResolutionCalls: string[] = [];
     const seen = new Set(cfg.seen ?? []);
     const bus = new EventBus();
     const candidates = cfg.candidates ?? [PERMALINK];
@@ -811,7 +925,10 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
             } as never);
           }
         } else if (env.type === 'note.open') {
-          const url = (env.payload as { url?: string }).url;
+          const payload = env.payload as { url?: string; selection?: string };
+          const url = payload.selection === 'first_commentable_group_post'
+            ? cfg.firstPostTarget ?? PERMALINK
+            : payload.url;
           if (cfg.openOk === false) {
             bus.emit('action.completed', { action: 'open_note', ok: false, reason: cfg.openReason ?? 'editor_not_found', ts: 0 } as never);
           } else {
@@ -854,7 +971,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
       }),
       facebookConfigFor: () => ({
         enabled: true,
-        keywords: ['咖啡'],
+        keywords: cfg.keywords ?? ['咖啡'],
         containers: [{ url: 'https://www.facebook.com/groups/legacy-config' }],
         commentMode: cfg.commentMode ?? 'generated',
         commentTemplates: cfg.commentTemplates ?? [],
@@ -862,12 +979,21 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
       facebookCoverageConfigFor: () => ({
         coverageEnabled: true,
         enabled: (cfg.coverageContainers ?? ['https://www.facebook.com/groups/1']).length > 0,
-        keywords: ['咖啡'],
+        keywords: cfg.keywords ?? ['咖啡'],
         containers: (cfg.coverageContainers ?? ['https://www.facebook.com/groups/1']).map((url) => ({ url })),
         commentMode: cfg.commentMode ?? 'generated',
         commentTemplates: cfg.commentTemplates ?? [],
         ...(cfg.coverageRelaxed ? { relaxed: true } : {}),
       }),
+      facebookRegionCommentTemplatesForGroup: async (groupUrl) => {
+        regionResolutionCalls.push(groupUrl);
+        if (cfg.regionalFailure) return { ok: false, reason: cfg.regionalFailure };
+        return {
+          ok: true,
+          region: '河南区域',
+          commentTemplates: cfg.regionalTemplates ?? ['这家区域咖啡很不错'],
+        };
+      },
       facebookResolveContainerName: async (_acct: string, url: string, name: string) => {
         resolvedNames.push({ url, name });
       },
@@ -876,11 +1002,18 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
         return '这家手冲咖啡很不错';
       },
       facebookCanComment: async () => true,
-      facebookDailyCap: () => 5,
-      facebookCommentedToday: async () => 0,
       facebookAudit: (row) => audits.push(row),
     });
-    return { deps, audits, posted, envelopes, dedupRecorded, resolvedNames, composeArgs };
+    return {
+      deps,
+      audits,
+      posted,
+      envelopes,
+      dedupRecorded,
+      resolvedNames,
+      composeArgs,
+      regionResolutionCalls,
+    };
   }
   const tick = () => new Promise((r) => setTimeout(r, 120));
 
@@ -895,6 +1028,67 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     // 群名自动回填：边缘回传真名 → 调 resolveContainerName（url→真名）；审计用群名、不用 id。
     assert.deepEqual(resolvedNames, [{ url: 'https://www.facebook.com/groups/1', name: 'Puerto Rico Y Sus Encantos e Historia' }]);
     assert.equal(audits.at(-1)?.container, 'Puerto Rico Y Sus Encantos e Historia');
+  });
+
+  it('空关键词：直接取群内首帖→评论，不发 search.execute、不回退搜索', async () => {
+    const { deps, audits, posted, envelopes, dedupRecorded, composeArgs } = fbFlowDeps({
+      keywords: [],
+      submit: { ok: true },
+      postText: '群内首帖正文',
+      comments: ['首帖评论'],
+    });
+    await new CommentScheduler(deps).triggerManual('fb-1');
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.deepEqual(posted, ['note.open', 'interaction.comment']);
+    const open = envelopes.find((env) => env.type === 'note.open');
+    assert.equal(open?.payload.selection, 'first_commentable_group_post');
+    assert.equal(open?.payload.container, 'https://www.facebook.com/groups/1');
+    assert.equal(open?.payload.url, undefined);
+    assert.deepEqual(dedupRecorded, [PERMALINK]);
+    assert.equal(composeArgs[0].keyword, '');
+    assert.equal(composeArgs[0].postText, '群内首帖正文');
+    assert.deepEqual(composeArgs[0].comments, ['首帖评论']);
+  });
+
+  it('空关键词 permalinkless 首帖：targetRef 贯穿去重、审批和提交', async () => {
+    const targetRef = `aidcp:facebook-group-feed-post:v1:${'c3'.repeat(32)}`;
+    const { deps, audits, posted, envelopes, dedupRecorded } = fbFlowDeps({
+      keywords: [],
+      firstPostTarget: targetRef,
+      submit: { ok: true },
+      postText: '群内没有 permalink 的首帖正文',
+    });
+    const approvals: string[] = [];
+    await new CommentScheduler({
+      ...deps,
+      approval: {
+        request: async (request) => { approvals.push(request.noteId); },
+        isApproved: async () => true,
+        timeoutMs: 20,
+        pollMs: 1,
+      },
+    }).triggerManual('fb-1');
+    await tick();
+
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.deepEqual(posted, ['note.open', 'interaction.comment']);
+    assert.deepEqual(approvals, [targetRef]);
+    assert.equal(envelopes.find((env) => env.type === 'interaction.comment')?.payload.noteId, targetRef);
+    assert.deepEqual(dedupRecorded, [targetRef]);
+  });
+
+  it('空关键词首帖已评过：不顺延第二帖、不搜索、不提交', async () => {
+    const { deps, audits, posted, dedupRecorded } = fbFlowDeps({
+      keywords: [],
+      seen: [PERMALINK],
+    });
+    await new CommentScheduler(deps).triggerManual('fb-1');
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'no_strong_candidate');
+    assert.equal(audits.at(-1)?.reason, 'all_deduped');
+    assert.deepEqual(posted, ['note.open']);
+    assert.deepEqual(dedupRecorded, []);
   });
 
   // ── change facebook-manual-comment-keepopen-lease：keep-open 租约贯穿人审、三命令透传 taskId ──
@@ -1174,7 +1368,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     assert.ok(!/未满足冷却/.test(titles[0]!), '非 relaxed 不应带警示');
   });
 
-  it('放开时限兜底：relaxed pick 仍受日上限约束——超额 → quota_denied、不发人审卡（只放开单群时限、不放开账号日量）', async () => {
+  it('放开时限兜底：relaxed pick 仍受 RiskController 约束——拒绝时不发人审卡', async () => {
     const { deps, audits } = fbFlowDeps({ submit: { ok: true } });
     const titles: string[] = [];
     await new CommentScheduler({
@@ -1188,13 +1382,12 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
         commentTemplates: [],
         relaxed: true,
       }),
-      facebookDailyCap: () => 2,
-      facebookCommentedToday: async () => 5,
+      facebookCanComment: async () => false,
       approval: { request: async (r) => { titles.push(r.title ?? ""); }, isApproved: async () => true, timeoutMs: 20, pollMs: 1 },
     }).triggerManual('fb-1');
     await tick();
     assert.equal(audits.at(-1)?.outcome, 'quota_denied');
-    assert.equal(audits.at(-1)?.reason, 'daily_cap');
+    assert.equal(audits.at(-1)?.reason, 'canDo');
     assert.deepEqual(titles, []);
   });
 
@@ -1245,26 +1438,85 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     assert.equal(envelopes.find((e) => e.type === 'interaction.comment')?.payload.text, '这家手冲咖啡很不错');
   });
 
-  it('模板模式：无模板 → compose_skipped(empty_template)，不搜索不提交', async () => {
-    const { deps, audits, posted } = fbFlowDeps({
+  it('显式生成模式保持权威，不读取区域通用模板', async () => {
+    const { deps, audits, regionResolutionCalls } = fbFlowDeps({
       submit: { ok: true },
-      commentMode: 'template',
+      commentMode: 'generated',
       commentTemplates: [],
     });
     await new CommentScheduler(deps).triggerManual('fb-1');
     await tick();
-    assert.equal(audits.at(-1)?.outcome, 'compose_skipped');
-    assert.equal(audits.at(-1)?.reason, 'empty_template');
-    assert.deepEqual(posted, []);
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.deepEqual(regionResolutionCalls, []);
   });
 
-  it('模板模式：模板正文含联系方式 → contains_contact，绝不靠 contact lane 救回', async () => {
+  it('模板模式：账号无模板 → 按已选群区域使用通用模板，仍走人审和提交', async () => {
+    const { deps, audits, envelopes, regionResolutionCalls } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'template',
+      commentTemplates: [],
+      regionalTemplates: ['这家区域咖啡很不错'],
+    });
+    const approvals: string[] = [];
+    await new CommentScheduler({
+      ...deps,
+      approval: {
+        request: async (request) => { approvals.push(request.text); },
+        isApproved: async () => true,
+        timeoutMs: 20,
+        pollMs: 1,
+      },
+    }).triggerManual('fb-1');
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.deepEqual(regionResolutionCalls, ['https://www.facebook.com/groups/1']);
+    assert.deepEqual(approvals, ['这家区域咖啡很不错']);
+    assert.equal(
+      envelopes.find((e) => e.type === 'interaction.comment')?.payload.text,
+      '这家区域咖啡很不错',
+    );
+  });
+
+  for (const reason of ['missing_group_region', 'regional_template_missing'] as const) {
+    it(`模板模式：账号无模板且区域解析为 ${reason} → 诚实停止，不搜索不提交`, async () => {
+      const { deps, audits, posted } = fbFlowDeps({
+        submit: { ok: true },
+        commentMode: 'template',
+        commentTemplates: [],
+        regionalFailure: reason,
+      });
+      await new CommentScheduler(deps).triggerManual('fb-1');
+      await tick();
+      assert.equal(audits.at(-1)?.outcome, 'compose_skipped');
+      assert.equal(audits.at(-1)?.reason, reason);
+      assert.deepEqual(posted, []);
+    });
+  }
+
+  it('模板模式：模板正文含联系方式照发（运营手写、内容归其负责）', async () => {
+    // change facebook-comment-template-blocks：内容政策闸是给无人值守生成文设的——作者是模型、没有能负责的人。
+    // 模板的作者是运营本人。2026-07-28 真机：自带电话的招聘模板恒判 contains_contact、整段广告永远发不出去。
+    // 用户定案：模板内容不再由系统审查，联系方式与正文并存由人工保证。生成式路径五条内容闸一条不放（见下条）。
     const { deps, audits, posted } = fbFlowDeps({
       submit: { ok: true },
       commentMode: 'template',
       commentTemplates: ['LINE ID: abc123'],
     });
     await new CommentScheduler(deps).triggerManual('fb-1');
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.ok(posted.includes('interaction.comment'));
+  });
+
+  it('生成模式：正文含联系方式仍 contains_contact，绝不靠 contact lane 救回', async () => {
+    const { deps, audits, posted } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'generated',
+    });
+    await new CommentScheduler({
+      ...deps,
+      facebookCompose: async () => 'LINE ID: abc123',
+    }).triggerManual('fb-1');
     await tick();
     assert.equal(audits.at(-1)?.outcome, 'compose_skipped');
     assert.equal(audits.at(-1)?.reason, 'contains_contact');
@@ -1325,7 +1577,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     assert.deepEqual(dedupRecorded, [PERMALINK], '即便确认失败，也已标记以防重复真评同一目标');
   });
 
-  it('提交硬失败（如权限门/找不到评论框）→ 不打去重标记，可重试、不白占当日上限', async () => {
+  it('提交硬失败（如权限门/找不到评论框）→ 不打去重标记，可重试', async () => {
     const { deps, audits, dedupRecorded } = fbFlowDeps({ submit: { ok: false, reason: 'permission_gated' } });
     await new CommentScheduler(deps).triggerManual('fb-1');
     await tick();
@@ -1385,11 +1637,13 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
   it('加群评论：joined → 在刚加入的群里评论（search 容器 pin 到该群，非配置容器）+ 合并成功卡', async () => {
     const JOINED = 'https://www.facebook.com/groups/joined-x';
     const { deps, audits, posted, envelopes } = fbFlowDeps({ submit: { ok: true } });
-    const cards: Array<{ ok: boolean; level: string; title: string; message: string }> = [];
+    const cards: Array<{ ok: boolean; level: string; title: string; message: string; source?: string }> = [];
     await new CommentScheduler({
       ...deps,
       facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED }),
-      postResultCard: (_a, r) => { cards.push({ ok: r.ok, level: r.level, title: r.title, message: r.message }); },
+      postResultCard: (_a, r, source) => {
+        cards.push({ ok: r.ok, level: r.level, title: r.title, message: r.message, source });
+      },
     }).triggerManual('fb-1', { joinFirst: true });
     await tick();
     assert.equal(envelopes.find((e) => e.type === 'search.execute')?.payload.container, JOINED);
@@ -1398,6 +1652,107 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     assert.equal(cards.at(-1)?.ok, true);
     assert.equal(cards.at(-1)?.level, 'success');
     assert.match(cards.at(-1)!.title, /加群 \+ 评论成功/);
+    assert.equal(cards.at(-1)?.source, undefined, '手动加群评论保持既有 /comment 默认来源');
+  });
+
+  it('规则批次加群评论结果卡标注 Facebook 规则模式，不冒充手动 /comment', async () => {
+    const { deps } = fbFlowDeps({ submit: { ok: true }, commentMode: 'template', commentTemplates: ['欢迎交流'] });
+    const sources: Array<string | undefined> = [];
+    await new CommentScheduler({
+      ...deps,
+      facebookJoinNewGroup: async () => ({
+        triggered: true,
+        outcome: 'joined',
+        groupUrl: 'https://www.facebook.com/groups/rule-source',
+      }),
+      postResultCard: (_accountId, _receipt, source) => { sources.push(source); },
+    }).triggerManual('fb-1', {
+      joinFirst: true,
+      source: 'facebook_rule_batch',
+    });
+    await tick();
+    assert.equal(sources.at(-1), 'Facebook 规则模式');
+  });
+
+  it('规则批次即时闸在加群前失效 → 不加群、不评论，并回传 risk_suppressed 终态', async () => {
+    const { deps, posted } = fbFlowDeps({ submit: { ok: true } });
+    let joinCalls = 0;
+    const results: Array<{ outcome: string; joinOutcome?: string; reason?: string }> = [];
+    const receipt = await new CommentScheduler({
+      ...deps,
+      facebookJoinNewGroup: async () => {
+        joinCalls += 1;
+        return { triggered: true, outcome: 'joined', groupUrl: 'https://www.facebook.com/groups/blocked' };
+      },
+    }).triggerManual('fb-1', {
+      joinFirst: true,
+      actionGate: (action) => action === 'join_group'
+        ? { allowed: false, reason: 'slow_start_active' }
+        : { allowed: true },
+      onResult: (result) => { results.push(result); },
+    });
+    assert.equal(receipt.ok, true);
+    await tick();
+    assert.equal(joinCalls, 0);
+    assert.deepEqual(posted, []);
+    assert.deepEqual(results, [{
+      outcome: 'no_targets',
+      joinOutcome: 'risk_suppressed',
+      reason: 'slow_start_active',
+    }]);
+  });
+
+  it('规则批次已确认加群后评论闸失效 → 保留 joined，评论 risk_suppressed 且不下发评论', async () => {
+    const JOINED = 'https://www.facebook.com/groups/rule-joined';
+    const { deps, posted } = fbFlowDeps({ submit: { ok: true } });
+    const results: Array<{ outcome: string; joinOutcome?: string; reason?: string }> = [];
+    await new CommentScheduler({
+      ...deps,
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED }),
+    }).triggerManual('fb-1', {
+      joinFirst: true,
+      actionGate: (action) => action === 'comment'
+        ? { allowed: false, reason: 'comment_quota_exhausted' }
+        : { allowed: true },
+      onResult: (result) => { results.push(result); },
+    });
+    await tick();
+    assert.deepEqual(posted, []);
+    assert.deepEqual(results, [{
+      outcome: 'quota_denied',
+      reason: 'comment_quota_exhausted',
+      joinOutcome: 'joined',
+      groupUrl: JOINED,
+    }]);
+  });
+
+  it('规则批次审批完成后再次现读闸；冷启动接管时不提交已批准评论', async () => {
+    const JOINED = 'https://www.facebook.com/groups/rule-approval';
+    const { deps, posted } = fbFlowDeps({ submit: { ok: true } });
+    let commentGateCalls = 0;
+    const results: Array<{ outcome: string; joinOutcome?: string; reason?: string }> = [];
+    await new CommentScheduler({
+      ...deps,
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED }),
+    }).triggerManual('fb-1', {
+      joinFirst: true,
+      actionGate: (action) => {
+        if (action === 'join_group') return { allowed: true };
+        commentGateCalls += 1;
+        return commentGateCalls === 1
+          ? { allowed: true }
+          : { allowed: false, reason: 'slow_start_active' };
+      },
+      onResult: (result) => { results.push(result); },
+    });
+    await tick();
+    assert.deepEqual(posted, ['search.execute', 'note.open'], '审批前可定位，但最终闸失败后不得提交评论');
+    assert.equal(commentGateCalls, 2);
+    assert.equal(results.length, 1);
+    assert.equal(results[0]?.outcome, 'quota_denied');
+    assert.equal(results[0]?.reason, 'slow_start_active');
+    assert.equal(results[0]?.joinOutcome, 'joined');
+    assert.equal((results[0] as { groupUrl?: string }).groupUrl, JOINED);
   });
 
   // ── Feature B（change facebook-comment-review-and-targeted-join）：/comment --join=<url> 加入指定群再评论 ──
@@ -1469,18 +1824,6 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     await tick();
     assert.ok(!audits.some((a) => a.outcome === 'quota_denied'), '手动命令绝不因风控/速率配额被拒');
     assert.equal(audits.at(-1)?.outcome, 'commented');
-    assert.deepEqual(posted, ['search.execute', 'note.open', 'interaction.comment']);
-  });
-
-  it('手动 override：评论日上限满也照发 → commented（change manual-comment-bypass-quota）', async () => {
-    const { deps, audits, posted } = fbFlowDeps({ submit: { ok: true } });
-    await new CommentScheduler({ ...deps, facebookDailyCap: () => 2, facebookCommentedToday: async () => 5 }).triggerManual('fb-1', {
-      manualOverride: true,
-    });
-    await tick();
-    assert.ok(!audits.some((a) => a.outcome === 'quota_denied'), '手动命令绝不因评论日上限被拒');
-    assert.equal(audits.at(-1)?.outcome, 'commented');
-    // 钉住真下发命令序列（不只信审计标签）：证明日上限旁路走到了真提交，绝非「假成功审计」。
     assert.deepEqual(posted, ['search.execute', 'note.open', 'interaction.comment']);
   });
 
@@ -1667,6 +2010,219 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     gate.resolve();
     await tick();
   });
+
+  // ── change facebook-rule-mode-without-persona：评论触发口的人设闸按来源 + 有效正文方案分流 ──
+  const JOINED_GROUP = 'https://www.facebook.com/groups/joined-rule';
+
+  it('规则批次 + 模板正文 + 未绑人设 → 放行，且正文照走校验/人审/提交确认（全程不读人设）', async () => {
+    const { deps, audits, envelopes } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'template',
+      commentTemplates: ['这家手冲咖啡很不错'],
+    });
+    const approvals: string[] = [];
+    let composeCalled = 0;
+    let soulReads = 0;
+    const receipt = await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      getSoul: () => { soulReads += 1; throw new Error('no_persona'); },
+      facebookCompose: async () => { composeCalled += 1; return '模型正文不应使用'; },
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+      approval: { request: async (r) => { approvals.push(r.text); }, isApproved: async () => true, timeoutMs: 20, pollMs: 1 },
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    assert.equal(receipt.ok, true, '规则批次的模板正文不因未绑人设被拒');
+    await tick();
+    assert.equal(composeCalled, 0, '模板链路绝不调用生成器');
+    assert.equal(soulReads, 0, '模板链路一次都不读人设');
+    assert.deepEqual(approvals, ['这家手冲咖啡很不错'], '仍走审批策略');
+    assert.equal(audits.at(-1)?.outcome, 'commented', '仍以平台确认为准记真实终态');
+    assert.equal(envelopes.find((e) => e.type === 'interaction.comment')?.payload.text, '这家手冲咖啡很不错');
+  });
+
+  it('规则批次 + 未显式选择正文方案（默认模板）+ 未绑人设 → 放行并用区域通用模板', async () => {
+    const { deps, audits, regionResolutionCalls } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'template', // effectiveConfigFor 对「未显式选择」返回的就是 template
+      commentTemplates: [],
+      regionalTemplates: ['这家区域咖啡很不错'],
+    });
+    const receipt = await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    assert.equal(receipt.ok, true);
+    await tick();
+    assert.deepEqual(regionResolutionCalls, [JOINED_GROUP]);
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+  });
+
+  it('规则批次 + 模板方案但区域模板缺失 → 仍按既有具名停止收敛，绝不回落生成器或任意默认文本', async () => {
+    for (const reason of ['missing_group_region', 'regional_template_missing'] as const) {
+      const { deps, audits, posted } = fbFlowDeps({
+        submit: { ok: true },
+        commentMode: 'template',
+        commentTemplates: [],
+        regionalFailure: reason,
+      });
+      let composeCalled = 0;
+      await new CommentScheduler({
+        ...deps,
+        personaBinding: () => 'unbound',
+        facebookCompose: async () => { composeCalled += 1; return '不该被用到'; },
+        facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+        postResultCard: () => {},
+      }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+      await tick();
+      assert.equal(audits.at(-1)?.outcome, 'compose_skipped');
+      assert.equal(audits.at(-1)?.reason, reason);
+      assert.equal(composeCalled, 0);
+      assert.ok(!posted.includes('interaction.comment'));
+    }
+  });
+
+  it('规则批次 + 模板正文超长 → 结构校验先拒，绝不提交、绝不报评论成功', async () => {
+    // change facebook-comment-template-blocks：内容政策闸（链接/联系方式/@/垃圾短语/相关性）只管无人值守
+    // 生成文；运营手写模板不再受审（用户 2026-07-28 定案）。结构闸对模板照旧——这里改用超长正文，
+    // 守住本条本来要守的不变量「校验先拒、绝不提交、绝不报成功」。超长是物理约束而非政策：
+    // 边端拟人逐字输入跑在有界的平台步预算里，超长正文的结局是打字超时而不是评论发出去。
+    const { deps, audits, posted } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'template',
+      commentTemplates: ['招'.repeat(501)],
+    });
+    await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'compose_skipped');
+    assert.equal(audits.at(-1)?.reason, 'too_long');
+    assert.ok(!posted.includes('interaction.comment'));
+  });
+
+  it('规则批次 + 模板正文带链接/联系方式 → 照发（运营手写、内容归其负责）', async () => {
+    const { deps, audits, posted } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'template',
+      commentTemplates: ['来看看 https://spam.example/promo 电话 0335 610 868'],
+    });
+    await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.ok(posted.includes('interaction.comment'));
+  });
+
+  it('规则批次 + 模板正文 + --contact → 联系方式仍与正文分离注入，人审见合体、提交走 groupChatCode', async () => {
+    const { deps, audits, envelopes } = fbFlowDeps({
+      submit: { ok: true },
+      commentMode: 'template',
+      commentTemplates: ['这家手冲咖啡很不错'],
+    });
+    const approvals: string[] = [];
+    await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      getContactInfo: async () => 'LINE ID: abc123',
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+      approval: { request: async (r) => { approvals.push(r.text); }, isApproved: async () => true, timeoutMs: 20, pollMs: 1 },
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, injectContact: true, source: 'facebook_rule_batch' });
+    await tick();
+    assert.equal(audits.at(-1)?.outcome, 'commented');
+    assert.equal(approvals[0], '这家手冲咖啡很不错\nLINE ID: abc123');
+    const submit = envelopes.find((e) => e.type === 'interaction.comment');
+    assert.equal(submit?.payload.text, '这家手冲咖啡很不错');
+    assert.equal(submit?.payload.groupChatCode, 'LINE ID: abc123');
+  });
+
+  it('规则批次 + 显式生成方案 + 未绑人设 → 逐字保持既有拒绝行为，不接管边端、不调生成器', async () => {
+    const { deps, posted } = fbFlowDeps({ submit: { ok: true }, commentMode: 'generated' });
+    let composeCalled = 0;
+    let joinCalled = 0;
+    const receipt = await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      facebookCompose: async () => { composeCalled += 1; return '不该被用到'; },
+      facebookJoinNewGroup: async () => { joinCalled += 1; return { triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }; },
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    assert.equal(receipt.ok, false);
+    assert.match(receipt.message, /未绑定人设/);
+    await tick();
+    assert.equal(composeCalled, 0);
+    assert.equal(joinCalled, 0);
+    assert.deepEqual(posted, []);
+  });
+
+  it('规则批次 + 模板方案：配置在飞行途中被改成显式生成 → 评论段以具名原因收敛，绝不调生成器', async () => {
+    const { deps, audits, posted } = fbFlowDeps({ submit: { ok: true }, commentMode: 'template', commentTemplates: ['这家手冲咖啡很不错'] });
+    let composeCalled = 0;
+    let reads = 0;
+    const receipt = await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      // 触发口读到 template（放行），真发前再读已变成显式 generated。
+      facebookConfigFor: () => {
+        reads += 1;
+        return {
+          enabled: true,
+          keywords: ['咖啡'],
+          containers: [],
+          commentMode: reads === 1 ? 'template' : 'generated',
+          commentTemplates: ['这家手冲咖啡很不错'],
+        };
+      },
+      facebookCompose: async () => { composeCalled += 1; return '不该被用到'; },
+      facebookJoinNewGroup: async () => ({ triggered: true, outcome: 'joined', groupUrl: JOINED_GROUP }),
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    assert.equal(receipt.ok, true, '触发口按当时的权威读值放行');
+    await tick();
+    assert.equal(composeCalled, 0, '真发前的方案硬闸挡住生成器');
+    assert.equal(audits.at(-1)?.outcome, 'compose_skipped');
+    assert.equal(audits.at(-1)?.reason, 'comment_body_scheme_generated');
+    assert.ok(!posted.includes('interaction.comment'));
+  });
+
+  it('例外不外溢：同一账号经飞书手工 /comment（无来源标记）触发，未绑人设仍诚实拒绝', async () => {
+    const { deps, posted } = fbFlowDeps({ submit: { ok: true }, commentMode: 'template', commentTemplates: ['这家手冲咖啡很不错'] });
+    const s = new CommentScheduler({ ...deps, personaBinding: () => 'unbound', postResultCard: () => {} });
+    const manual = await s.triggerManual('fb-rule');
+    assert.equal(manual.ok, false);
+    assert.match(manual.message, /未绑定人设/);
+    const manualJoin = await s.triggerManual('fb-rule', { joinFirst: true });
+    assert.equal(manualJoin.ok, false);
+    assert.match(manualJoin.message, /未绑定人设/);
+    // 排期 / 精选定向来源（triggerTargeted）同样不受例外影响。
+    const targeted = await s.triggerTargeted('fb-rule', { noteId: 'n1', title: 't' });
+    assert.equal(targeted.ok, false);
+    assert.equal(targeted.reason, 'needs_persona');
+    await tick();
+    assert.deepEqual(posted, []);
+  });
+
+  it('规则批次但 FB 配置入口未接线 → 方案不可解析，人设闸 fail-closed 照旧拒绝', async () => {
+    const { deps } = fbFlowDeps({ submit: { ok: true }, commentMode: 'template' });
+    const receipt = await new CommentScheduler({
+      ...deps,
+      personaBinding: () => 'unbound',
+      facebookConfigFor: undefined,
+      postResultCard: () => {},
+    }).triggerManual('fb-rule', { joinFirst: true, source: 'facebook_rule_batch' });
+    assert.equal(receipt.ok, false);
+    assert.match(receipt.message, /未绑定人设/);
+  });
 });
 
 // ── change facebook-manual-join-comment：加群/评论结果卡绝不显裸群 id/URL（回执按群名，见 facebook-scheduled-comment 约定）──
@@ -1706,6 +2262,23 @@ describe('join-comment 结果卡不泄露裸群 id/URL', () => {
     const msg = commentOutcomeReason({ outcome: 'pending_group_approval' });
     assert.match(msg, /管理员批准/);
     assert.match(msg, /未上墙/);
+  });
+  it('commentOutcomeReason：首帖打开失败保留具体阶段，不再统一误报为未找到帖子', () => {
+    const cases = [
+      ['timeout', /读取超时/],
+      ['no_candidates', /有界下滚探测后仍未找到/],
+      ['editor_not_found', /评论入口未就绪或不可用/],
+      ['ambiguous_target', /帖子边界或评论入口不唯一/],
+      ['target_context_mismatch', /帖子身份或上下文无法唯一确认/],
+      ['all_deduped', /已评论过/],
+      ['invalid_target', /目标无效/],
+      ['open_failed', /打开失败/],
+    ] as const;
+    for (const [reason, expected] of cases) {
+      const message = commentOutcomeReason({ outcome: 'no_strong_candidate', reason });
+      assert.match(message, expected);
+      assert.doesNotMatch(message, /群内未找到合适的可评论帖子/);
+    }
   });
   it('joinCommentReceipt：评论撞群参与审批闸 → 黄卡（绝不染绿），说明待管理员批准', () => {
     const r = joinCommentReceipt({ outcome: 'joined' }, { outcome: 'pending_group_approval', container: 'PR Café' }, false);

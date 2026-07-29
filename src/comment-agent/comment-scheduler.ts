@@ -44,6 +44,7 @@ import {
 } from '../platform/index.js';
 import { validateFacebookComment } from './facebook-comment-validators.js';
 import type { EffectiveFacebookCommentConfig } from 'aidcp-kernel/kernel/facebook-comment-config-types.js';
+import type { ResolveFacebookRegionCommentTemplatesResult } from 'aidcp-kernel/kernel/facebook-group-types.js';
 import type { FacebookCommentAuditRow, FacebookCommentOutcome } from './facebook-comment-audit-store.js';
 import { EdgeTaskLeaseError, type EdgeTaskLeaseClient } from '../comm/edge-task-lease-client.js';
 import type { EdgeTaskPriority } from '../comm/protocol.js';
@@ -52,7 +53,7 @@ export interface FacebookCoverageCommentConfig extends EffectiveFacebookCommentC
   coverageEnabled: boolean;
   /**
    * 放开时限兜底命中标记（change facebook-coverage-relax-and-keyword-space）：正常预热/冷却约束下无可评群、
-   * 降级放开时限选出的群 → true。仅用于在飞书人审卡标注「未满足冷却/预热」，不改变任何其它闸（日上限/人审照旧）。
+   * 降级放开时限选出的群 → true。仅用于在飞书人审卡标注「未满足冷却/预热」，不改变 RiskController 配额闸或人审。
    */
   relaxed?: boolean;
 }
@@ -72,6 +73,41 @@ export interface FacebookCommentRunResult {
   outcome: FacebookCommentOutcome;
   reason?: string;
   container?: string;
+  /** join-then-comment 调用的独立加群终态；普通评论省略。 */
+  joinOutcome?: string;
+  groupUrl?: string;
+  /**
+   * 本次**实际**是否注入了联系方式。MUST NOT 用请求意图（injectContact）代替它对外表述——
+   * 允许降级之后两者可以不一致，任何按意图渲染的地方都会对一条不带码的评论宣称「带联系方式」。
+   */
+  contactIncluded?: boolean;
+  /** 本次是「要求带联系方式但账号没配、按显式声明降级发出的普通评论」。 */
+  contactFallbackApplied?: boolean;
+}
+
+/**
+ * 本次评论的联系方式**实际**处置（change facebook-rule-comment-plain-fallback）。
+ *
+ * 拆这个类型的理由：原来「要不要带」和「实际带没带」共用一个布尔，所以只要允许两者不一致，
+ * 所有按它渲染的回执都会说谎。把实际值做成独立事实后，`injected` 结构上保证 contactInfo 非空，
+ * 「解析出来没有」这条路只能由调用方显式声明的降级承接，不存在第三种默认。
+ */
+export type ContactResolution =
+  /** 本次本就不要求带联系方式（普通评论）。 */
+  | { kind: 'not_requested' }
+  /** 要求带且拿到了；contactInfo 恒非空。 */
+  | { kind: 'injected'; contactInfo: string }
+  /** 要求带但账号没配，且调用方**显式**声明允许降级 → 发一条不带联系方式的普通评论。 */
+  | { kind: 'fallback_plain' };
+
+/** 缺联系方式时的处置声明。不传 = fail-closed（默认安全侧）。 */
+export interface ContactFallbackDeclaration {
+  kind: 'plain';
+  /**
+   * 降级产出归属**普通评论**车道的审批模式。必填不是形式：降级发的是一条普通评论正文，
+   * 沿用联系评论车道的授权等于把「对带码模板评论的免审」外溢到一条从未为该车道授权的正文。
+   */
+  approvalMode: ContentScheduleApprovalMode;
 }
 
 /** Stable terminal observation used by queued delegated tasks; only verified `commented` is a success. */
@@ -141,8 +177,16 @@ export function joinOnlyReceipt(join: {
 export function commentOutcomeReason(c: FacebookCommentRunResult): string {
   switch (c.outcome) {
     case 'no_targets':
-      return c.reason === 'no_keywords' ? '该账号未配置 Facebook 评论关键词' : '群内无可评论目标';
+      return '群内无可评论目标';
     case 'no_strong_candidate':
+      if (c.reason === 'timeout') return '群内首帖读取超时，未进入评论';
+      if (c.reason === 'no_candidates') return '有界下滚探测后仍未找到可评论的群内首帖';
+      if (c.reason === 'editor_not_found') return '已找到群内首帖，但评论入口未就绪或不可用';
+      if (c.reason === 'ambiguous_target') return '群内首帖的帖子边界或评论入口不唯一，未评论';
+      if (c.reason === 'target_context_mismatch') return '已打开群内首帖，但帖子身份或上下文无法唯一确认';
+      if (c.reason === 'all_deduped') return '群内首帖已评论过，本次未重复评论';
+      if (c.reason === 'invalid_target') return '群内首帖目标无效';
+      if (c.reason === 'open_failed' || c.reason === 'nav_error') return '群内首帖打开失败';
       return '群内未找到合适的可评论帖子';
     case 'compose_skipped':
       if (c.reason === 'contact_info_missing') return '未配置联系方式';
@@ -158,7 +202,7 @@ export function commentOutcomeReason(c: FacebookCommentRunResult): string {
     case 'comment_rejected':
       return 'Facebook 已拒绝该评论（未上墙，需人工处理）';
     case 'quota_denied':
-      return c.reason === 'daily_cap' ? '当日评论已达上限' : '评论配额不足';
+      return c.reason === 'daily_cap' || c.reason === 'quota:day' ? '当日评论已达安全策略上限' : '评论配额不足';
     default:
       return `评论失败（${c.outcome}${c.reason ? ':' + c.reason : ''}）`;
   }
@@ -168,17 +212,27 @@ export function commentOutcomeReason(c: FacebookCommentRunResult): string {
 export function joinCommentReceipt(
   join: { outcome?: string; groupUrl?: string },
   comment: FacebookCommentRunResult,
+  /**
+   * 本次**实际**是否带了联系方式。MUST NOT 传请求意图——降级后会对一条不带码的评论渲染
+   * 「已发出一条带联系方式的评论（服务器已确认）」，而同一次动作的人审卡上运营刚看过不带码的正文，
+   * 两张卡自相矛盾比单张卡说谎更难排查。
+   */
   withContact: boolean,
 ): CommentResultReceipt {
   // 群名优先用评论侧回填的真名；裸 URL / 缺失 → 中性占位（回执绝不显裸群 id/URL）。join.groupUrl 恒为裸链接故不入回执。
   const groupLabel = humanGroupLabel(comment.container);
   const joinedWord = join.outcome === 'already_member' ? '（已是该群成员）' : '已加入新群';
   if (comment.outcome === 'commented') {
+    const contactPhrase = withContact
+      ? '带联系方式的'
+      : comment.contactFallbackApplied
+        ? '**不带**联系方式的（该账号未配联系方式，已按设置降级为普通评论）'
+        : '';
     return {
       ok: true,
       level: 'success',
       title: '加群 + 评论成功',
-      message: `${joinedWord}「${groupLabel}」，并已在群内发出一条${withContact ? '带联系方式的' : ''}评论（服务器已确认）。`,
+      message: `${joinedWord}「${groupLabel}」，并已在群内发出一条${contactPhrase}评论（服务器已确认）。`,
     };
   }
   return {
@@ -266,6 +320,10 @@ export interface CommentSchedulerDeps {
   // ── facebook-scheduled-comment 2.2/2.3：Facebook 定向评论执行（缺省全不注入 → FB 分支继续诚实拒绝，零回归） ──
   /** 读该账号 FB 定向评论配置（关键词 + 正文模式 / 模板；目标群由 joined ledger 另选）。 */
   facebookConfigFor?: (accountId: string) => EffectiveFacebookCommentConfig;
+  /** 账号模板缺失时，按已确定的 canonical 群 URL 解析该群区域的通用模板。 */
+  facebookRegionCommentTemplatesForGroup?: (
+    groupUrl: string,
+  ) => Promise<ResolveFacebookRegionCommentTemplatesResult>;
   /**
    * FB 评论撰写（无人值守，不走人审）：**读了再写**（change facebook-comment-read-before-write）——
    * 按关键词/容器 + **帖子正文（图片帖常空）+ 顶部他人评论** 产草稿，顺着讨论、用**内容语言**写；返回 null=撰写失败。
@@ -274,11 +332,8 @@ export interface CommentSchedulerDeps {
     accountId: string,
     ctx: { keyword: string; container: string; postText?: string; comments?: string[] },
   ) => Promise<string | null>;
-  /** 真发路径风控闸：canDo('comment')。 */
+  /** 自动真发路径的唯一评论配额闸：RiskController.canDo('comment')。 */
   facebookCanComment?: (accountId: string) => Promise<boolean>;
-  /** 真发路径日上限（当日已评数 / 上限）。 */
-  facebookCommentedToday?: (accountId: string) => Promise<number>;
-  facebookDailyCap?: (accountId: string) => number;
   /** best-effort 审计 sink（每次触发一行，含影子）。 */
   facebookAudit?: (row: FacebookCommentAuditRow) => void;
   /** 回填容器真实群名（change facebook-container-display-name）：边缘搜索时读出真名 → 刷新配置容器名（人只看群名）。 */
@@ -397,6 +452,26 @@ export class CommentScheduler {
     return this.running.has(accountId);
   }
 
+  /**
+   * 该账号 Facebook 评论的**有效正文方案**现读（change facebook-rule-mode-without-persona）。
+   *
+   * 口径与 `facebook-global-group-regional-comment-templates` 一致，直接取权威入口的有效值：
+   * 账号显式模板 → `template`；账号未显式选择 → 既有默认即 `template`（区域通用模板兜底在正文解析处）；
+   * 账号**显式**选择生成式 → `generated`。
+   * 未接线 / 读抛错 → `unavailable`：不可解析即不豁免人设闸（fail-closed），绝不猜成模板。
+   */
+  private effectiveFacebookBodyScheme(accountId: string): 'template' | 'generated' | 'unavailable' {
+    if (!this.deps.facebookConfigFor) return 'unavailable';
+    try {
+      return this.deps.facebookConfigFor(accountId).commentMode === 'template' ? 'template' : 'generated';
+    } catch (err) {
+      (this.deps.logger ?? console).warn(
+        `[comment-scheduler] FB 有效正文方案读取失败 account=${accountId}：${(err as Error).message}`,
+      );
+      return 'unavailable';
+    }
+  }
+
   /** 飞书 /comment 触发：返回「触发态」结构化回执；最终结果异步补发结果卡片。 */
   async triggerManual(
     accountId: string,
@@ -409,29 +484,57 @@ export class CommentScheduler {
       force?: boolean;
       fastReturnToFeed?: boolean;
       approvalMode?: ContentScheduleApprovalMode;
+      /**
+       * 缺联系方式时允许降级为不带联系方式的普通评论（change facebook-rule-comment-plain-fallback）。
+       * **不传 = fail-closed**，这是六个入口共用同一道闸的默认安全侧：飞书手动 `--contact`、内容排期、
+       * 精选定向、引流热帖、委托任务都 MUST NOT 传它——运营显式要求带码却发出不带码的，正是那条保证的判例本身。
+       * 当前**唯一**获授权的调用方是 Facebook 规则模式的加群联系评论。
+       */
+      contactFallback?: ContactFallbackDeclaration;
       /** 命令来源会话（change unify-card-routing-origin-then-team）：审批卡 / 终态卡回下命令的会话；缺省 → 账号团队群 → 默认群。 */
       originChatId?: string;
       /** Async terminal observation. Existing callers may omit it; queued tasks use it for honest accounting. */
       onResult?: (result: CommentTerminalObservation) => Promise<void> | void;
+      /** Rule-batch-only just-in-time ownership/risk gate, re-read before join and before comment submit. */
+      actionGate?: (action: 'join_group' | 'comment') => { allowed: boolean; reason?: string };
+      /**
+       * 触发来源（change facebook-rule-mode-without-persona）。人设闸按**来源 + 有效正文方案**分流：
+       * 只有 `facebook_rule_batch` 且该账号有效正文方案为模板时才免人设——那条链路取模板文本、
+       * 不构造撰写 prompt、不做人设口吻改写。其余来源（飞书手工 /comment、排期评论、mandatory 评论…）
+       * 与生成式正文逐字保持既有拒绝行为。缺省 = 既有来源。
+       */
+      source?: 'facebook_rule_batch';
     },
   ): Promise<CommentCommandReceipt> {
     if (!accountId || accountId === 'default') {
       return { ok: false, level: 'error', title: '按需评论触发失败', message: '未解析到有效账号（绝不回落 default）' };
     }
     const binding = this.deps.personaBinding?.(accountId) ?? 'bound';
-    if (binding === 'unbound') {
+    // 人设闸的**唯一豁免**：规则批次 + 有效正文方案为模板。两个条件都由本方法现读，缺一即不豁免。
+    const personaExempt = options?.source === 'facebook_rule_batch'
+      && this.effectiveFacebookBodyScheme(accountId) === 'template';
+    if (!personaExempt && binding === 'unbound') {
       return { ok: false, level: 'warning', title: '未触发按需评论', message: '该账号未绑定人设——请先到后台「人设」页设置；未绑人设不启动评论任务，绝不以默认人设代评。' };
     }
-    if (binding === 'unknown') {
+    if (!personaExempt && binding === 'unknown') {
       // 人设副本陈旧：MUST NOT 说「未绑定人设」——那是对运营的错误指认，会让人去补一份早就存在的配置。
       return { ok: false, level: 'warning', title: '未触发按需评论', message: '云端暂时读不到该账号的人设配置（配置副本陈旧），本次不发；稍后自动恢复，无需改配置。' };
     }
-    // 联系方式闸（change account-group-chat-injection）：--contact 时**解析一次**——缺联系方式 fail-closed（本次不发，
-    // 绝不静默降级成无联系方式评论，镜像上面的 isPersonaBound 闸）；有则用同一个已解析值注入（gate 与注入同源，无 TOCTOU）。
-    let contactInfo: string | null = null;
+    // 联系方式闸（change account-group-chat-injection）：--contact 时**解析一次**（gate 与注入同源，无 TOCTOU）。
+    // 缺联系方式默认 fail-closed（本次不发，绝不静默降级成无联系方式评论，镜像上面的 isPersonaBound 闸）。
+    // 唯一例外是调用方**显式**声明 contactFallback（change facebook-rule-comment-plain-fallback）：
+    // 那是「具名放弃」、不是默认行为——共用这道闸的另外五个入口一个都不传它。
+    let contact: ContactResolution = { kind: 'not_requested' };
     if (options?.injectContact) {
-      contactInfo = this.deps.getContactInfo ? await this.deps.getContactInfo(accountId) : null;
-      if (!contactInfo) {
+      const resolved = this.deps.getContactInfo ? await this.deps.getContactInfo(accountId) : null;
+      if (resolved) {
+        contact = { kind: 'injected', contactInfo: resolved };
+      } else if (options.contactFallback?.kind === 'plain') {
+        contact = { kind: 'fallback_plain' };
+        (this.deps.logger ?? console).log?.(
+          `[comment-scheduler] 缺联系方式，按调用方显式声明降级为普通评论 account=${accountId}`,
+        );
+      } else {
         return {
           ok: false,
           level: 'warning',
@@ -459,7 +562,12 @@ export class CommentScheduler {
         message: `该账号平台暂不支持评论调度：${(err as Error).message}`,
       };
     }
-    const approvalMode = await this.effectiveApprovalMode(accountId, options?.approvalMode ?? 'review');
+    // 审批来源车道跟着**实际**处置走：降级产出是一条普通评论正文，MUST NOT 沿用联系评论车道的授权
+    // （两者是两个独立配置，运营可以只给前者免审）。账号级全局免审仍按同一函数施加，语义不变。
+    const approvalSourceMode = contact.kind === 'fallback_plain' && options?.contactFallback
+      ? options.contactFallback.approvalMode
+      : options?.approvalMode ?? 'review';
+    const approvalMode = await this.effectiveApprovalMode(accountId, approvalSourceMode);
 
     // 加群评论（change facebook-manual-join-comment）：--join 仅 Facebook 有效。非 FB 账号诚实拒——绝不静默降级成普通评论。
     if (options?.joinFirst && platformProfile.platform !== 'facebook') {
@@ -505,21 +613,27 @@ export class CommentScheduler {
         }
         this.running.add(accountId);
         void this.runFacebookJoinThenComment(accountId, {
-          injectContact: options?.injectContact,
-          contactInfo,
+          contact,
           ...(targetedUrl ? { joinGroupUrl: targetedUrl } : {}),
           manualOverride: options?.manualOverride === true,
           force: options?.force === true,
           fastReturnToFeed: options?.fastReturnToFeed === true,
           approvalMode,
+          ...(options?.actionGate ? { actionGate: options.actionGate } : {}),
           ...(options?.originChatId ? { originChatId: options.originChatId } : {}),
+          ...(options?.source ? { source: options.source } : {}),
         })
           .then((result) => options?.onResult?.(result))
-          .catch((err) =>
+          .catch(async (err) => {
             (this.deps.logger ?? console).warn(
               `[comment-scheduler] FB 加群评论任务异常 account=${accountId}：${(err as Error).message}`,
-            ),
-          )
+            );
+            await options?.onResult?.({
+              outcome: 'submit_failed',
+              reason: `join_comment_exception:${(err as Error).message}`,
+              joinOutcome: 'ambiguous',
+            });
+          })
           .finally(() => this.running.delete(accountId));
         return {
           ok: true,
@@ -528,18 +642,22 @@ export class CommentScheduler {
           message: `已触发 Facebook 加群 + 评论：${
             targetedUrl ? '加入指定群' : '先加入一个新群'
           }，加入成功（或已是成员）后在该群里发一条评论${
-            options?.injectContact
+            contact.kind === 'injected'
               ? approvalMode === 'auto_approve' ? '（带联系方式，全局免审）' : '（带联系方式，走飞书人审）'
-              : ''
+              : contact.kind === 'fallback_plain'
+                // 按**实际**处置渲染。用请求意图渲染的话，这里会对一条不带码的评论宣称「带联系方式」。
+                ? approvalMode === 'auto_approve'
+                  ? '（该账号未配联系方式，已按设置降级为不带联系方式的普通评论，全局免审）'
+                  : '（该账号未配联系方式，已按设置降级为不带联系方式的普通评论，走飞书人审）'
+                : ''
           }${options?.force ? '（--force：跳过相关性/去重）' : ''}；结果稍后回报。`,
         };
       }
       this.running.add(accountId);
-      // 手动 /comment（本方法为飞书手动出口）：manualOverride 透传到评论体 → 真发路径跳过评论配额 / 日上限闸。
+      // 手动 /comment（本方法为飞书手动出口）：manualOverride 透传到评论体 → 真发路径跳过 RiskController 前置闸。
       // 自动排期评论走独立入口（triggerTargeted / ContentScheduler），不带此旗标、配额照旧。
       void this.runFacebookTargetedTask(accountId, {
-        injectContact: options?.injectContact,
-        contactInfo,
+        contact,
         manualOverride: options?.manualOverride === true,
         force: options?.force === true,
         fastReturnToFeed: options?.fastReturnToFeed === true,
@@ -566,7 +684,7 @@ export class CommentScheduler {
       accountId,
       bus,
       edgeId,
-      contactInfo,
+      contact.kind === 'injected' ? contact.contactInfo : null,
       platformProfile,
       options?.priority ?? 'human',
       options?.force === true,
@@ -611,6 +729,7 @@ export class CommentScheduler {
       approvalMode?: ContentScheduleApprovalMode;
       /** 命令来源会话（change unify-card-routing-origin-then-team）：审批卡 / 终态卡回下命令的会话；缺省 → 账号团队群 → 默认群。 */
       originChatId?: string;
+      actionGate?: (action: 'join_group' | 'comment') => { allowed: boolean; reason?: string };
     },
   ): Promise<CommentCommandReceipt & { reason?: string }> {
     if (!accountId || accountId === 'default') {
@@ -626,10 +745,12 @@ export class CommentScheduler {
     if (binding === 'unknown') {
       return { ok: false, level: 'warning', title: '未触发定向评论', message: '云端暂时读不到该账号的人设配置（配置副本陈旧），本次不发；稍后自动恢复，无需改配置。', reason: PERSONA_UNAVAILABLE_REASON };
     }
-    let contactInfo: string | null = null;
+    // 定向评论（精选定向 / 引流热帖）**不**提供降级：这条链路始终 fail-closed，
+    // change facebook-rule-comment-plain-fallback 的具名例外只授予规则模式的加群联系评论。
+    let contact: ContactResolution = { kind: 'not_requested' };
     if (options?.injectContact) {
-      contactInfo = this.deps.getContactInfo ? await this.deps.getContactInfo(accountId) : null;
-      if (!contactInfo) {
+      const resolved = this.deps.getContactInfo ? await this.deps.getContactInfo(accountId) : null;
+      if (!resolved) {
         return {
           ok: false,
           level: 'warning',
@@ -638,6 +759,7 @@ export class CommentScheduler {
           reason: 'contact_info_missing',
         };
       }
+      contact = { kind: 'injected', contactInfo: resolved };
     }
     // 去重前置：已评过该笔记 → 诚实拒绝，不发起边端任务（PG 出错按未评处理，与 /comment 去重同容错取向）。
     // 位置铁律：这个 await 必须排在下面的单飞闸「has→add」之前——否则闸的检查与置位被 await 切开、
@@ -685,8 +807,7 @@ export class CommentScheduler {
       }
       this.running.add(accountId);
       void this.runFacebookTargetedTask(accountId, {
-        injectContact: options?.injectContact,
-        contactInfo,
+        contact,
         approvalMode,
         ...(options?.originChatId ? { originChatId: options.originChatId } : {}),
       })
@@ -705,7 +826,7 @@ export class CommentScheduler {
       conn.bus,
       conn.edgeId,
       { ...target, currentNote: options?.currentNote },
-      contactInfo,
+      contact.kind === 'injected' ? contact.contactInfo : null,
       platformProfile,
       options?.priority ?? 'human',
       options?.onResult,
@@ -732,7 +853,7 @@ export class CommentScheduler {
   /**
    * Facebook 定向评论执行（facebook-scheduled-comment 2.2/2.3 + 真发接线 task 4.x）。
    * 闸链 → 随机选关键词/容器 → 撰写 → 只拒不修校验：
-   * - 真发路径：过账号审批策略、canDo + 日上限闸后，经边端评论能力真发——
+   * - 真发路径：过账号审批策略和 RiskController 评论闸后，经边端评论能力真发——
    *   容器内搜索 → 选未评候选 → 开帖 → 提交并「服务器确认」。每步有界超时（此路径无巡视看门狗）。
    *
    * 红线：
@@ -746,8 +867,8 @@ export class CommentScheduler {
   private async runFacebookTargetedTask(
     accountId: string,
     options: {
-      injectContact?: boolean;
-      contactInfo?: string | null;
+      /** 本次联系方式的**实际**处置。缺省视为「本就不要求带」。 */
+      contact?: ContactResolution;
       overrideContainerUrl?: string;
       manualOverride?: boolean;
       force?: boolean;
@@ -755,16 +876,24 @@ export class CommentScheduler {
       approvalMode?: ContentScheduleApprovalMode;
       /** 命令来源会话（change unify-card-routing-origin-then-team）：审批卡 / 终态卡回下命令的会话；缺省 → 账号团队群 → 默认群。 */
       originChatId?: string;
+      actionGate?: (action: 'join_group' | 'comment') => { allowed: boolean; reason?: string };
+      /** 触发来源；`facebook_rule_batch` 时评论段只允许模板正文。 */
+      source?: 'facebook_rule_batch';
     } = {},
   ): Promise<FacebookCommentRunResult> {
     // 终态捕获（change facebook-manual-join-comment）：包一层把「最后一次审计」升级为返回值，供「加群 + 评论」
     // 合并结果卡取用；body 内所有 return; 保持 void 语义不动（普通 /comment / 排期路径零回归、只是丢弃返回值）。
     let last: FacebookCommentRunResult = { outcome: 'no_targets' };
+    // 「实际带没带 / 是否降级」在这里统一盖章，而不是逐个 audit 调用点自己带：
+    // 这条链上有十几处 audit()，逐点带必然漏，而漏掉的那点正好会让回执按请求意图去猜。
+    const resolution: ContactResolution = options.contact ?? { kind: 'not_requested' };
     const audit = (row: FacebookCommentAuditRow) => {
       last = {
         outcome: row.outcome,
         ...(row.reason ? { reason: row.reason } : {}),
         ...(row.container ? { container: row.container } : last.container ? { container: last.container } : {}),
+        contactIncluded: resolution.kind === 'injected',
+        ...(resolution.kind === 'fallback_plain' ? { contactFallbackApplied: true } : {}),
       };
       try {
         this.deps.facebookAudit?.(row);
@@ -780,7 +909,12 @@ export class CommentScheduler {
       (this.deps.logger ?? console).warn?.(
         `[comment-scheduler] FB 评论任务异常 account=${accountId}：${(err as Error).message}`,
       );
-      last = { outcome: 'submit_failed', reason: 'exception' };
+      last = {
+        outcome: 'submit_failed',
+        reason: 'exception',
+        contactIncluded: resolution.kind === 'injected',
+        ...(resolution.kind === 'fallback_plain' ? { contactFallbackApplied: true } : {}),
+      };
     }
     return last;
   }
@@ -788,8 +922,8 @@ export class CommentScheduler {
   private async runFacebookTargetedTaskBody(
     accountId: string,
     options: {
-      injectContact?: boolean;
-      contactInfo?: string | null;
+      /** 本次联系方式的**实际**处置。缺省视为「本就不要求带」。 */
+      contact?: ContactResolution;
       overrideContainerUrl?: string;
       manualOverride?: boolean;
       force?: boolean;
@@ -797,6 +931,9 @@ export class CommentScheduler {
       approvalMode?: ContentScheduleApprovalMode;
       /** 命令来源会话（change unify-card-routing-origin-then-team）：审批卡 / 终态卡回下命令的会话；缺省 → 账号团队群 → 默认群。 */
       originChatId?: string;
+      actionGate?: (action: 'join_group' | 'comment') => { allowed: boolean; reason?: string };
+      /** 触发来源；`facebook_rule_batch` 时评论段只允许模板正文。 */
+      source?: 'facebook_rule_batch';
     },
     audit: (row: FacebookCommentAuditRow) => void,
   ): Promise<void> {
@@ -806,16 +943,17 @@ export class CommentScheduler {
     const shadow = false;
 
     const cfg = d.facebookConfigFor!(accountId);
-    if (cfg.keywords.length === 0) {
-      audit({ accountId, outcome: 'no_targets', reason: 'no_keywords', shadow, ...(manualTarget ? { container: manualTarget } : {}) });
+    // 关键词是定位策略而非启用闸：有词走群内搜索；空词直接打开群讨论流第一条可评论帖。
+    const keyword = cfg.keywords.length > 0
+      ? (cfg.keywords[Math.floor(rand() * cfg.keywords.length)] ?? cfg.keywords[0] ?? '')
+      : '';
+    // 规则批次的正文方案硬闸（change facebook-rule-mode-without-persona）：只有模板这条链路不读人设。
+    // 触发口已预解析过一次；这里在做任何浏览/撰写之前**再现读一次**，杜绝配置在飞行途中被改成显式生成后
+    // 仍走到生成器。收敛为稳定具名原因，绝不以模板顶替运营的显式选择。
+    if (options.source === 'facebook_rule_batch' && cfg.commentMode !== 'template') {
+      audit({ accountId, outcome: 'compose_skipped', reason: 'comment_body_scheme_generated', shadow, keyword });
       return;
     }
-    if (cfg.commentMode === 'template' && cfg.commentTemplates.length === 0) {
-      audit({ accountId, outcome: 'compose_skipped', reason: 'empty_template', shadow, ...(manualTarget ? { container: manualTarget } : {}) });
-      return;
-    }
-
-    const keyword = cfg.keywords[Math.floor(rand() * cfg.keywords.length)] ?? cfg.keywords[0];
     let containerUrl: string;
     let container: string;
     let coverageCfg: FacebookCoverageCommentConfig | undefined;
@@ -835,6 +973,24 @@ export class CommentScheduler {
       container = chosen.name ?? chosen.url;
     }
 
+    let effectiveCommentTemplates = cfg.commentTemplates;
+    if (cfg.commentMode === 'template' && effectiveCommentTemplates.length === 0) {
+      const regional = await d.facebookRegionCommentTemplatesForGroup?.(containerUrl)
+        ?? { ok: false as const, reason: 'regional_template_missing' as const };
+      if (!regional.ok) {
+        audit({
+          accountId,
+          outcome: 'compose_skipped',
+          reason: regional.reason,
+          shadow,
+          keyword,
+          container,
+        });
+        return;
+      }
+      effectiveCommentTemplates = regional.commentTemplates;
+    }
+
     // ── 读了再写（change facebook-comment-read-before-write）：撰写挪到开帖之后，吃到帖子正文+他人评论+内容语言 ──
     // 影子与真发都需要「搜 → 开帖」读上下文；影子做只读浏览、到校验为止绝不提交，真发再往后走。
 
@@ -845,22 +1001,14 @@ export class CommentScheduler {
       return;
     }
 
-    // 真发路径先过风控 + 日上限闸（在浏览之前收口——被限额则不白跑一趟浏览）。影子跳过这两闸。
-    // 手动操作员命令（manualOverride，飞书 /comment）跳过这两个配额闸——含风控状态 + 速率配额 + 评论日上限，
+    // 真发路径先过 RiskController 评论闸（在浏览之前收口——被限额则不白跑一趟浏览）。影子跳过该闸。
+    // 手动操作员命令（manualOverride，飞书 /comment）跳过该前置闸——含风控状态 + 速率配额，
     // 与手动加群侧一致（用户定案 2026-07-10：手动命令不受配额限制、硬风控状态也强行）。自动排期评论 manualOverride=false、配额照旧。
     // 注：成功的风控计数仍走 interaction.occurred → RiskController.record 自动路径（handler.ts），绕的是**前置闸**、不漏计。
     if (!shadow && !options.manualOverride) {
       if (d.facebookCanComment && !(await d.facebookCanComment(accountId))) {
         audit({ accountId, outcome: 'quota_denied', reason: 'canDo', shadow: false, keyword, container });
         return;
-      }
-      if (d.facebookDailyCap && d.facebookCommentedToday) {
-        const cap = d.facebookDailyCap(accountId);
-        const done = await d.facebookCommentedToday(accountId);
-        if (cap > 0 && done >= cap) {
-          audit({ accountId, outcome: 'quota_denied', reason: 'daily_cap', shadow: false, keyword, container });
-          return;
-        }
       }
     }
 
@@ -875,7 +1023,7 @@ export class CommentScheduler {
     // 提交命令被挡（对抗复核 wf_933f178c 确证）。窗内两段纯云无命令：撰写（成功可逼近 LLM 天花板 ~180s）+ 飞书人审（≤90s）。
     // 故取 6min 严格 > (撰写 ~180s + 人审 90s + 搜索/开帖 + 往返余量)，远低于边端 30min 绝对上限。
     // 注：小红书 keep-open（:1307 的 4min）同样只按 ~150s 预算、未含撰写，存在同一薄裕度隐患——本 change 不动它（越界），登记 backlog。
-    const FB_KEEP_OPEN_LEASE_MS = 6 * 60_000;
+    const FB_KEEP_OPEN_LEASE_MS = 9 * 60_000;
     const priority: EdgeTaskPriority = options.manualOverride ? 'human' : 'automatic';
     // conn.edgeId / conn.bus 在此已过 `!conn || !conn.edgeId` 守卫（narrowed 为非空）；捕成 const 供闭包用——
     // 控制流收窄不穿透嵌套闭包，闭包内直接读 conn.edgeId 会被 TS 当 string|undefined。
@@ -895,45 +1043,62 @@ export class CommentScheduler {
           });
           const dedup = d.dedupFor(accountId);
 
-          // 1) 容器内搜索候选帖（边端只在 joined/pinned 群内搜、绝不全站）。用 url 下发。
-          const search = await steps.searchInContainer(keyword, containerUrl);
-          // 边缘回传的真实群名 → 回填配置容器名（人只看群名、不看 id）；本轮后续审计也改用真名。
-          if (search.containerName) {
-            container = search.containerName;
-            void d.facebookResolveContainerName?.(accountId, containerUrl, search.containerName);
-          }
-          if (!search.ok) {
-            audit({ accountId, outcome: mapFacebookBlockOutcome(search.reason), reason: search.reason, shadow, keyword, container });
-            if (usingCoverage && search.reason) void d.facebookCoverageOnFailure?.(accountId, containerUrl, search.reason);
-            return;
-          }
-          // 2) 选一个未评过的候选（防重复真发：跳过 dedup 已标记的 permalink）。
-          // --force（manual-comment-force-flag）：放开每帖去重，直接取第一个候选（已评过的也可再评）；否则跳过已评过的。
           let target: string | undefined;
-          if (options.force) {
-            target = search.candidates[0]?.permalink;
-          } else {
-            for (const c of search.candidates) {
-              const seen = await dedup.hasInteracted(c.permalink, 'comment').catch(() => false);
-              if (!seen) {
-                target = c.permalink;
-                break;
+          let open: Awaited<ReturnType<typeof steps.openPost>>;
+          if (keyword) {
+            // 有关键词：维持既有群内搜索 → 候选 → 开帖链，绝不回落首帖。
+            const search = await steps.searchInContainer(keyword, containerUrl);
+            if (search.containerName) {
+              container = search.containerName;
+              void d.facebookResolveContainerName?.(accountId, containerUrl, search.containerName);
+            }
+            if (!search.ok) {
+              audit({ accountId, outcome: mapFacebookBlockOutcome(search.reason), reason: search.reason, shadow, keyword, container });
+              if (usingCoverage && search.reason) void d.facebookCoverageOnFailure?.(accountId, containerUrl, search.reason);
+              return;
+            }
+            // --force 放开每帖去重；否则按搜索顺序找第一条未评候选。
+            if (options.force) {
+              target = search.candidates[0]?.permalink;
+            } else {
+              for (const c of search.candidates) {
+                const seen = await dedup.hasInteracted(c.permalink, 'comment').catch(() => false);
+                if (!seen) {
+                  target = c.permalink;
+                  break;
+                }
               }
             }
+            if (!target) {
+              audit({
+                accountId,
+                outcome: 'no_strong_candidate',
+                reason: search.candidates.length === 0 ? 'no_candidates' : 'all_deduped',
+                shadow,
+                keyword,
+                container,
+              });
+              return;
+            }
+            open = await steps.openPost(target);
+          } else {
+            // 空关键词：不发 search.execute，Edge 直接选择并打开群讨论流第一条可评论帖子。
+            open = await steps.openFirstPost(containerUrl);
+            target = open.permalink ?? open.targetRef;
+            if (!open.ok || !target) {
+              audit({ accountId, outcome: mapFacebookOpenOutcome(open.reason), reason: open.reason ?? 'invalid_target', shadow, container });
+              if (usingCoverage && open.reason) void d.facebookCoverageOnFailure?.(accountId, containerUrl, open.reason);
+              return;
+            }
+            if (!options.force && await dedup.hasInteracted(target, 'comment').catch(() => false)) {
+              // “首帖”是确定目标；已评过也不顺延第二帖、不偷偷改走搜索。
+              audit({ accountId, outcome: 'no_strong_candidate', reason: 'all_deduped', shadow, container });
+              return;
+            }
           }
-          if (!target) {
-            audit({
-              accountId,
-              outcome: 'no_strong_candidate',
-              reason: search.candidates.length === 0 ? 'no_candidates' : 'all_deduped',
-              shadow,
-              keyword,
-              container,
-            });
-            return;
-          }
-          // 3) 开帖（permalink 直驱详情页），读回帖子正文（图片帖常空）+ 顶部他人评论。
-          const open = await steps.openPost(target);
+
+          // 两种定位策略在此收敛：搜索必须是 canonical permalink；空关键词首帖也可使用 Edge 在
+          // 当前 keep-open 页面内签发的严格 targetRef。两者都已读回同一目标正文 + 顶部他人评论。
           if (!open.ok) {
             audit({ accountId, outcome: mapFacebookOpenOutcome(open.reason), reason: open.reason, shadow, keyword, container });
             if (usingCoverage && open.reason) void d.facebookCoverageOnFailure?.(accountId, containerUrl, open.reason);
@@ -944,7 +1109,11 @@ export class CommentScheduler {
 
           // 4) 正文来源：生成评论读了再写；模板评论只选账号模板，不调用 LLM。
           const draft = cfg.commentMode === 'template'
-            ? (cfg.commentTemplates[Math.floor(rand() * cfg.commentTemplates.length)] ?? cfg.commentTemplates[0] ?? null)
+            ? (
+                effectiveCommentTemplates[Math.floor(rand() * effectiveCommentTemplates.length)]
+                ?? effectiveCommentTemplates[0]
+                ?? null
+              )
             : d.facebookCompose
               ? await d.facebookCompose(accountId, { keyword, container, ...(postText ? { postText } : {}), ...(comments.length > 0 ? { comments } : {}) })
               : null;
@@ -952,31 +1121,35 @@ export class CommentScheduler {
             audit({ accountId, outcome: 'compose_skipped', reason: 'empty_compose', shadow, keyword, container });
             return;
           }
-          // 只拒不修的确定性校验（llm-output-honesty）：相关性以「关键词 + 帖子正文 + 他人评论」为语境
-          //（评论既由这些产出、天然相关；仍守零重叠即拒的兜底）。任一违规 → compose_skipped 终局，绝不修复后发。
+          // 只拒不修的确定性校验（llm-output-honesty）。配置了关键词时，相关性以「关键词 + 帖子正文 +
+          // 他人评论」为语境；空关键词首帖模式没有稳定的词法锚点，帖子整段文本（尤其 CJK）不能冒充
+          // “关键词”做子串闸，否则自然改写几乎必被 weak_relevance 误拒。该模式由读上下文 prompt + 人审/免审策略把关，
+          // 链接、联系方式、@、刷屏、长度、低信号等确定性安全闸仍全部执行。
           // --force（manual-comment-force-flag）：传空 targetKeywords → 校验器 keywords.length>0 守卫使相关性分支 no-op；
           // 但 url/联系方式/@提及/刷屏/长度/低信号等**安全校验**在其之前、照常执行（force 绝不放开安全校验）。
-          const relevanceCtx = options.force ? [] : [keyword, ...(postText ? [postText] : []), ...comments].filter(Boolean);
-          const v = validateFacebookComment(draft, { targetKeywords: relevanceCtx });
+          const relevanceCtx = options.force || !keyword
+            ? []
+            : [keyword, ...(postText ? [postText] : []), ...comments].filter(Boolean);
+          // 模板模式的正文是运营手写的投放素材，作者是人不是模型 → 只过结构闸（空/无实义/过短/过长），
+          // 不过内容政策闸（链接/联系方式/@/垃圾短语/相关性）。用户 2026-07-28 定案：模板内容由人工负责，
+          // 联系方式与正文并存由人工保证。生成式路径逐字不变、五条内容闸照旧全执行。
+          const operatorAuthored = cfg.commentMode === 'template';
+          const v = validateFacebookComment(draft, { targetKeywords: relevanceCtx, operatorAuthored });
           if (!v.ok) {
             audit({ accountId, outcome: 'compose_skipped', reason: v.reason, shadow, keyword, container, textLength: draft.length });
             return;
           }
 
-          // 4a) 联系方式 fail-closed：--contact 但账号没配联系方式 → 诚实退，绝不发无码评论。
+          // 4a) 联系方式取值：处置已在触发闸处一次性解析完（gate 与注入同源、无 TOCTOU）。
+          // `injected` 由类型保证 contactInfo 非空，所以这里不再需要第二处 fail-closed——
+          // 「解析出来没有」那条路只能由调用方显式声明的降级承接，不存在静默的第三种默认。
+          const contact: ContactResolution = options.contact ?? { kind: 'not_requested' };
+          const contactInfo: string | null = contact.kind === 'injected' ? contact.contactInfo : null;
           let groupChatCode: string | undefined;
-          let contactInfo: string | null = null;
-          if (options.injectContact) {
-            contactInfo = options.contactInfo ?? null;
-            if (!contactInfo) {
-              audit({ accountId, outcome: 'compose_skipped', reason: 'contact_info_missing', shadow, keyword, container, textLength: v.text.length });
-              return;
-            }
-          }
 
           // 5) 结构化账号/来源审批策略是唯一审批授权；未接线/超时/拒绝均不提交。
           const approved = await this.approveFacebookComment(accountId, {
-            permalink: target,
+            target,
             text: v.text,
             ...(contactInfo ? { contactInfo } : {}),
             container,
@@ -989,11 +1162,24 @@ export class CommentScheduler {
           if (contactInfo) groupChatCode = approved.contactInfo;
 
           // 6) 提交评论 + 服务器确认（边端 own-identity 收窄）。成功记风控走 interaction.occurred 自动路径，绝不在此重复 record。
+          const finalGate = options.actionGate?.('comment');
+          if (finalGate && !finalGate.allowed) {
+            audit({
+              accountId,
+              outcome: 'quota_denied',
+              reason: finalGate.reason ?? 'rule_comment_gate_denied',
+              shadow: false,
+              keyword,
+              container,
+              textLength: v.text.length,
+            });
+            return;
+          }
           // 提交被更高优先级任务抢占 / 边端失配 taskId 静默丢弃 → submitComment 超时回 ok:false → 走 else 诚实非提交（不打去重、可重试）。
           const submit = await steps.submitComment(target, v.text, groupChatCode, options.fastReturnToFeed === true);
           // 防重复真发（BLOCKING §5.4）：仅在**真提交了**（成功 或 提交后确认不了 verification_ambiguous）时打去重标记——
-          // 硬失败（权限门/找不到评论框/被拦/身份未知）没真点提交、无重复真发风险，不打标记（可重试、不白占当日上限）。
-          // 该标记同时使 facebookCommentedToday 计入当日配额；仅计「真发过一次」的目标，不误伤硬失败重试。
+          // 硬失败（权限门/找不到评论框/被拦/身份未知）没真点提交、无重复真发风险，不打标记（可重试）。
+          // 该标记只承担同目标去重；账号日配额由 RiskController 的 risk_counters 单独计量。
           //
           // 🔴 这是**白名单**（只有列出的两档打去重），新增 outcome 默认落在闸外 = 不去重（安全侧）。
           // `comment_rejected` MUST NOT 进这个白名单：平台已明确拒绝该评论、它**没有上墙**，打去重等于
@@ -1035,8 +1221,8 @@ export class CommentScheduler {
   private async runFacebookJoinThenComment(
     accountId: string,
     options: {
-      injectContact?: boolean;
-      contactInfo?: string | null;
+      /** 本次联系方式的**实际**处置。缺省视为「本就不要求带」。 */
+      contact?: ContactResolution;
       joinGroupUrl?: string;
       manualOverride?: boolean;
       force?: boolean;
@@ -1044,9 +1230,21 @@ export class CommentScheduler {
       approvalMode?: ContentScheduleApprovalMode;
       /** 命令来源会话（change unify-card-routing-origin-then-team）：审批卡 / 终态卡回下命令的会话；缺省 → 账号团队群 → 默认群。 */
       originChatId?: string;
+      actionGate?: (action: 'join_group' | 'comment') => { allowed: boolean; reason?: string };
+      /** 触发来源；`facebook_rule_batch` 时评论段只允许模板正文（见 runFacebookTargetedTaskBody 的方案硬闸）。 */
+      source?: 'facebook_rule_batch';
     } = {},
   ): Promise<FacebookCommentRunResult> {
     const d = this.deps;
+    const resultSource = options.source === 'facebook_rule_batch' ? 'Facebook 规则模式' : undefined;
+    const joinGate = options.actionGate?.('join_group');
+    if (joinGate && !joinGate.allowed) {
+      return {
+        outcome: 'no_targets',
+        reason: joinGate.reason ?? 'rule_join_gate_denied',
+        joinOutcome: 'risk_suppressed',
+      };
+    }
     let join: { triggered: boolean; reason?: string; groupUrl?: string; outcome?: string };
     try {
       // manual=true：手动 /comment --join 加群跳过配额闸（会话额度 + 风控速率/状态）。见 triggerScheduled 契约。
@@ -1060,29 +1258,60 @@ export class CommentScheduler {
         level: 'error',
         title: '加群失败',
         message: `加群调度异常：${(err as Error).message}；未评论。`,
-      }, undefined, options.originChatId);
-      return { outcome: 'submit_failed', reason: `join_exception:${(err as Error).message}` };
+      }, resultSource, options.originChatId);
+      return {
+        outcome: 'submit_failed',
+        reason: `join_exception:${(err as Error).message}`,
+        joinOutcome: 'failed',
+      };
     }
     const isMember =
       join.triggered && (join.outcome === 'joined' || join.outcome === 'already_member') && !!join.groupUrl;
     if (!isMember) {
-      await d.postResultCard?.(accountId, joinOnlyReceipt(join), undefined, options.originChatId);
-      return { outcome: 'no_targets', reason: `join_${join.reason ?? join.outcome ?? 'not_completed'}` };
+      await d.postResultCard?.(accountId, joinOnlyReceipt(join), resultSource, options.originChatId);
+      return {
+        outcome: 'no_targets',
+        reason: `join_${join.reason ?? join.outcome ?? 'not_completed'}`,
+        joinOutcome: join.outcome ?? 'not_started',
+        ...(join.groupUrl ? { groupUrl: join.groupUrl } : {}),
+      };
+    }
+    const commentGate = options.actionGate?.('comment');
+    if (commentGate && !commentGate.allowed) {
+      return {
+        outcome: 'quota_denied',
+        reason: commentGate.reason ?? 'rule_comment_gate_denied',
+        joinOutcome: join.outcome,
+        groupUrl: join.groupUrl,
+      };
     }
     // 已加入（或已是成员）→ 在该新群里发一条评论。override 容器强制真发；contactInfo 已在 triggerManual 解析一次（gate 同源）。
-    // manualOverride 透传 → 群内评论亦跳过评论配额 / 日上限闸（整条链一致，绝不「加了群却被评论配额拦住」）。
+    // manualOverride 透传 → 群内评论亦跳过 RiskController 前置闸（整条链一致）。
     const comment = await this.runFacebookTargetedTask(accountId, {
-      injectContact: options.injectContact,
-      contactInfo: options.contactInfo ?? null,
+      contact: options.contact,
       overrideContainerUrl: join.groupUrl,
       manualOverride: options.manualOverride === true,
       force: options.force === true,
       fastReturnToFeed: options.fastReturnToFeed === true,
       approvalMode: options.approvalMode,
+      ...(options.actionGate ? { actionGate: options.actionGate } : {}),
       ...(options.originChatId ? { originChatId: options.originChatId } : {}),
+      ...(options.source ? { source: options.source } : {}),
     });
-    await d.postResultCard?.(accountId, joinCommentReceipt(join, comment, options.injectContact === true), undefined, options.originChatId);
-    return comment;
+    // 结果卡按**实际**注入值渲染（comment.contactIncluded），不按请求意图——
+    // 用意图渲染会对一条降级发出的普通评论宣称「带联系方式（服务器已确认）」，
+    // 而运营刚在人审卡上看过不带码的正文，两张卡自相矛盾。
+    await d.postResultCard?.(
+      accountId,
+      joinCommentReceipt(join, comment, comment.contactIncluded === true),
+      resultSource,
+      options.originChatId,
+    );
+    return {
+      ...comment,
+      joinOutcome: join.outcome,
+      groupUrl: join.groupUrl,
+    };
   }
 
   /**
@@ -1092,7 +1321,7 @@ export class CommentScheduler {
    */
   private async approveFacebookComment(
     accountId: string,
-    input: { permalink: string; text: string; contactInfo?: string | null; container: string; coverageRelaxed?: boolean },
+    input: { target: string; text: string; contactInfo?: string | null; container: string; coverageRelaxed?: boolean },
     approvalMode: ContentScheduleApprovalMode = 'review',
     originChatId?: string,
   ): Promise<{ text: string; contactInfo?: string } | null> {
@@ -1110,7 +1339,7 @@ export class CommentScheduler {
         notify: this.deps.autoApproveNotify,
         payload: {
           requestId,
-          noteId: input.permalink,
+          noteId: input.target,
           text: reviewText,
           title,
           authorName: 'Facebook',
@@ -1133,7 +1362,7 @@ export class CommentScheduler {
     try {
       await approval.request({
         requestId,
-        noteId: input.permalink,
+        noteId: input.target,
         text: reviewText,
         title,
         authorName: 'Facebook',
@@ -1375,7 +1604,7 @@ export class CommentScheduler {
         // 拿不到浏览器、不会把页面带走，故发布前无需再复搜关键词（根治 target_not_found_on_commit / read_failed，
         // 见 2026-07-11 Tmax 故障）。「commit 不信旧 DOM」的新鲜度改由边端发布前【就地重读当前详情页 noteId】保证。
         // leaseMs 覆盖 搜索(~30s)+pick(~5s)+读正文(~10s)+人审超时(90s)+发布(~15s) 最坏 ≈ 150s，留足 TTL 余量。
-        const KEEP_OPEN_LEASE_MS = 4 * 60_000;
+        const KEEP_OPEN_LEASE_MS = 6 * 60_000;
         let tried = 0;
         let final: CommentTaskResult | undefined;
         for (const term of terms) {

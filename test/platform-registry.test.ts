@@ -14,6 +14,10 @@ import {
   scheduledAutomationDeclarationsForPlatform,
   identityCaptureStrategyForPlatform,
 } from '../src/platform/index.js';
+import {
+  NEW_ACCOUNT_AUTOMATION_SEED_ACTOR,
+  newAccountAutomationDefaultsFor,
+} from 'aidcp-kernel/kernel/scheduled-automation-catalog.js';
 import type { NoteScopedAction, PlatformRegistryEntry } from '../src/platform/index.js';
 
 const NOTE_SCOPED_ACTIONS: NoteScopedAction[] = [
@@ -152,8 +156,10 @@ test('platform registry: catalog projection is ordered, honest, and detached fro
   assert.deepEqual(availableScheduledAutomationActionsForPlatform('fb'), [
     { action: 'post', allowedModes: ['review'], maxDailyCap: 50 },
     { action: 'comment', allowedModes: ['review', 'auto_approve'], maxDailyCap: 50 },
+    // 联系评论保持 10、加群抬到 50（change raise-facebook-group-join-cap-ceiling）。
+    // 两者刻意不同值：这一行同时守住「加群已抬」与「联系评论没被顺带抬」。
     { action: 'contact_comment', allowedModes: ['review', 'auto_approve'], maxDailyCap: 10 },
-    { action: 'join_group', allowedModes: [], maxDailyCap: 10 },
+    { action: 'join_group', allowedModes: [], maxDailyCap: 50 },
   ]);
   assert.deepEqual(availableScheduledAutomationActionsForPlatform('wechat_channels'), []);
   assert.deepEqual(availableScheduledAutomationActionsForPlatform('future-platform'), []);
@@ -213,4 +219,62 @@ test('platform registry: named catalog functions are the single reader implement
     allowedModes: ['review', 'auto_approve'],
     maxDailyCap: 50,
   });
+});
+
+// ── change seed-facebook-automation-defaults-on-registration：新账号种入默认值 ──
+
+test('新账号种入默认值: Facebook 取值逐字符合用户拍板值，且联系评论刻意缺席', () => {
+  const fb = newAccountAutomationDefaultsFor('facebook');
+  assert.notEqual(fb, null);
+  assert.deepEqual(fb!.schedule, {
+    autoEnabled: true,
+    postMode: 'review',
+    postDailyCap: 5,
+    // 评论免审（用户 2026-07-29 定）。这条断言同时守住「发帖仍必须是需人审」——
+    // 两个模式刻意不同值，一起改成免审会在下一条用例当场红。
+    commentMode: 'auto_approve',
+    commentDailyCap: 20,
+  });
+  assert.deepEqual(fb!.joinGroup, { enabled: true, dailyCap: 20 });
+  // 联系评论 MUST NOT 出现：带「先加群再评论」标记的复合动作只挂在它上面，
+  // 种它等于让新账号具备「加入新群后同一轮立即在该群评论」这一已知风险形态。
+  const keys = Object.keys(fb!.schedule);
+  assert.equal(keys.some((k) => k.toLowerCase().includes('contact')), false);
+});
+
+test('新账号种入默认值: 别名归一后仍命中 Facebook', () => {
+  assert.notEqual(newAccountAutomationDefaultsFor('fb'), null);
+});
+
+test('新账号种入默认值: 其余平台一律不种（无条目 = 不种）', () => {
+  for (const p of ['xiaohongshu', 'wechat_channels', 'future-platform', null, undefined, '']) {
+    assert.equal(newAccountAutomationDefaultsFor(p), null, `${String(p)} MUST NOT 被种入`);
+  }
+});
+
+test('新账号种入默认值: 取值不得越过各自动作的硬上限', () => {
+  const fb = newAccountAutomationDefaultsFor('facebook')!;
+  const declared = availableScheduledAutomationActionsForPlatform('facebook');
+  const capOf = (action: string) => declared.find((d) => d.action === action)?.maxDailyCap ?? -1;
+  assert.ok(fb.schedule.postDailyCap <= capOf('post'));
+  assert.ok(fb.schedule.commentDailyCap <= capOf('comment'));
+  assert.ok(fb.joinGroup.dailyCap <= capOf('join_group'));
+});
+
+test('新账号种入默认值: 发帖必须需人审、评论必须免审，且各自都在平台允许的模式集合内', () => {
+  const fb = newAccountAutomationDefaultsFor('facebook')!;
+  const declared = availableScheduledAutomationActionsForPlatform('facebook');
+  const modesOf = (action: string) => declared.find((d) => d.action === action)?.allowedModes ?? [];
+  // 发帖：平台只允许需人审，种入值别无选择。
+  assert.deepEqual(modesOf('post'), ['review']);
+  assert.equal(fb.schedule.postMode, 'review');
+  // 评论：平台允许免审，种入值取免审（用户 2026-07-29 定）。
+  assert.ok(modesOf('comment').includes('auto_approve'));
+  assert.equal(fb.schedule.commentMode, 'auto_approve');
+  // 两者刻意不同值：这一行专挡「把两个模式一起改掉」的误编辑。
+  assert.notEqual(fb.schedule.postMode, fb.schedule.commentMode);
+});
+
+test('种入署名可辨识，便于区分系统种入与运营手工写入', () => {
+  assert.match(NEW_ACCOUNT_AUTOMATION_SEED_ACTOR, /^system:/);
 });

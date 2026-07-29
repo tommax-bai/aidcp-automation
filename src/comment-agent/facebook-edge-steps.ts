@@ -16,7 +16,9 @@ import type { EventBus } from '../event-bus/index.js';
 import { facebookPostKey } from '../platform/facebook-presented-video.js';
 import type { EdgePusher } from './edge-steps.js';
 
-export const FACEBOOK_STEP_TIMEOUT_MS = 28_000;
+// Facebook 时间预算整体 ×1.5（用户口径，2026-07-29）。云端各步只做**兜底上界**：
+// 必须晚于边端自掐表，否则会把边端一个具名失败改判成 timeout，诊断信息被烧掉却救不回任何一条评论。
+export const FACEBOOK_STEP_TIMEOUT_MS = 42_000;
 const DEFAULT_MAX_CANDIDATES = 8;
 
 /**
@@ -26,26 +28,48 @@ const DEFAULT_MAX_CANDIDATES = 8;
  * 云端先掐表只会把一个诚实的 `open_failed` 改判成 `timeout`（经 `mapFacebookOpenOutcome` 塌进同一个
  * `no_strong_candidate`、运营看到的卡片一模一样），等于把诊断信息烧掉却没救回任何一条评论。
  *
- * Native-only 边端开帖：文档就绪上限 8s + 目标身份水合窗 15s，外层 Native 命令原子上限 30s。
- * 因此 Cloud 不能沿用固定 28s 抢先掐断；取 45s = 边端 30s 上限 + 传输余量，仍远在加群步上限
- *（90s）内、绝不无界等待；超此上限仍诚实 `timeout`。
+ * Native-only 边端开帖：文档就绪上限 12s + 目标身份水合窗 23s，外层 Native 命令原子上限 45s。
+ * 因此 Cloud 不能沿用固定 42s 抢先掐断；取 68s = 边端 45s 上限 + 传输余量，仍远在加群步上限
+ *（135s）内、绝不无界等待；超此上限仍诚实 `timeout`。
  *
- * **搜索步继续用 `FACEBOOK_STEP_TIMEOUT_MS`（28s）**：它的探测跑在 `editorScrollRounds` 循环内、每轮仍是 4 轮预算，
- * 预算未变，不跟着放宽。改 Native 详情水合窗或命令原子上限时须同步复算此值。
+ * **搜索步继续用 `FACEBOOK_STEP_TIMEOUT_MS`（42s）**：它的探测跑在 `editorScrollRounds` 循环内、每轮仍是 4 轮预算，
+ * 轮数未变，只随整体 ×1.5。改 Native 详情水合窗或命令原子上限时须同步复算此值。
  */
-export const FACEBOOK_OPEN_STEP_TIMEOUT_MS = 45_000;
+export const FACEBOOK_OPEN_STEP_TIMEOUT_MS = 68_000;
+
+/**
+ * **空关键词首帖开帖步**的超时（change restore-facebook-post-join-comment-continuity）。
+ *
+ * 首帖开帖与按 URL 开帖是两条预算完全不同的路径，不能共用一个上界。首帖那条在边端是一串**串行**
+ * 有界窗口：群页导航后就绪 12s + 首次探测约 2s + 四轮下滚约 12s + 可选固链导航后就绪 12s +
+ * 评论框绑定 18s + 身份回读 30s ≈ 86s，外层 Native 原子上限因此为 135s
+ *（`aidcp-edge/src/native-page-engine/browse-session.ts`）。
+ *
+ * 沿用本文件既有的推导形状：**云端 = 边端原子上限 + 传输余量**，故 158s。仍在评论 keep-open 租约
+ *（9min）与会话空转看门狗内，绝不无界等待；超上限仍诚实 `timeout`。
+ *
+ * 按 URL 开帖走 `FACEBOOK_OPEN_STEP_TIMEOUT_MS`（68s）——两条路径的内层窗口不同，别合并。
+ */
+export const FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS = 158_000;
 
 /**
  * Facebook 评论提交步的**长度感知超时**（change facebook-join-comment-resilience，P0-1）。
- * 边端提交 = 逐字拟人输入（text.length × median ~110ms）+ Enter + 等待（waitAfterSubmit 4s）+ reload +
- * 等待（waitAfterReload 5s）+ own-identity 收窄校验。长评论在慢网下整段耗时会超过固定 28s 步超时 →
- * 云端误判 `timeout` → 调度器 `reallySubmitted` 为假 → 不打去重标记 → 下一轮同帖再发一条**真评论**
- *（平台可见重复）。故提交步超时按文案字符数放大；search 仍用固定 28s（open 见
- * `FACEBOOK_OPEN_STEP_TIMEOUT_MS`）。上限对齐加群步（90s）防边端真挂时无界等待——超上限仍诚实 `timeout`，绝不假成功。
+ * 边端提交 = 逐字拟人输入 + Enter + 等待（waitAfterSubmit 4s）+ reload + 等待（waitAfterReload 5s）
+ * + own-identity 收窄校验。长评论在慢网下整段耗时会超过固定步超时 → 云端误判 `timeout` →
+ * 调度器 `reallySubmitted` 为假 → 不打去重标记 → 下一轮同帖再发一条**真评论**（平台可见重复）。
+ * 故提交步超时按文案字符数放大。
+ *
+ * **逐字输入的实测均速约 165ms/字符**（边端 `input.rs`：对数正态中位 110ms + 标点 ×1.4
+ * + 8% 概率插入 300–600ms 停顿），故 per-char 系数必须明显高于它才留得下固定开销。
+ * 2026-07-29 真机：约 277 字符的越南语招聘长文按旧参数只有 78s 预算，没输完就撞 deadline，
+ * 边端如实回 `comment_deadline_exceeded` 并清空编辑框。
+ *
+ * **上限才是长评论的真正约束**：公式再大也被它夹回去。整体 ×1.5 的同时上限单独抬到 180s
+ *（用户 2026-07-29 决定），覆盖约 880 字符，且仍在会话空转看门狗之内——超上限仍诚实 `timeout`，绝不假成功。
  */
-export const FACEBOOK_COMMENT_SUBMIT_BASE_MS = 18_000;
-export const FACEBOOK_COMMENT_SUBMIT_PER_CHAR_MS = 220;
-export const FACEBOOK_COMMENT_SUBMIT_MAX_MS = 90_000;
+export const FACEBOOK_COMMENT_SUBMIT_BASE_MS = 27_000;
+export const FACEBOOK_COMMENT_SUBMIT_PER_CHAR_MS = 330;
+export const FACEBOOK_COMMENT_SUBMIT_MAX_MS = 180_000;
 
 /**
  * 按评论字符数算提交步超时：`clamp(base + perChar×len, 传入步超时, 上限)`。
@@ -61,6 +85,37 @@ function canonicalFacebookPostKey(value: string | undefined): string | null {
   if (!value) return null;
   const key = facebookPostKey(value);
   return key && key !== value ? key : null;
+}
+
+const FACEBOOK_FIRST_POST_TARGET_PREFIX = 'aidcp:facebook-group-feed-post:v1:';
+
+export function isFacebookFirstPostTargetRef(value: string | undefined): boolean {
+  return typeof value === 'string'
+    && value.startsWith(FACEBOOK_FIRST_POST_TARGET_PREFIX)
+    && /^[0-9a-f]{64}$/.test(value.slice(FACEBOOK_FIRST_POST_TARGET_PREFIX.length));
+}
+
+function isCanonicalFacebookGroupPostPermalink(value: string): boolean {
+  if (!canonicalFacebookPostKey(value)) return false;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || (host !== 'facebook.com' && !host.endsWith('.facebook.com')) || url.hash) {
+      return false;
+    }
+    if (/^\/groups\/[^/]+\/(?:posts|permalink)\/[^/?#]+\/?$/i.test(url.pathname)) {
+      return !url.search;
+    }
+    if (!/^\/groups\/[^/]+\/?$/i.test(url.pathname)) return false;
+    const keys = [...url.searchParams.keys()];
+    return (
+      keys.length === 1 &&
+      keys[0] === 'multi_permalinks' &&
+      (url.searchParams.get('multi_permalinks') ?? '').trim().length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 export interface FacebookEdgeStepsDeps {
@@ -96,6 +151,10 @@ export interface FacebookSearchStepResult {
 export interface FacebookOpenStepResult {
   ok: boolean;
   reason?: string;
+  /** First-post mode returns this only when Facebook exposed a canonical group-post URL. */
+  permalink?: string;
+  /** First-post-only Edge-issued live-container target; never a Facebook permalink or post ID. */
+  targetRef?: string;
   /** 帖子文字正文（图片帖常空）+ 顶部他人评论（change facebook-comment-read-before-write）——供撰写器读了再写。 */
   postText?: string;
   comments?: string[];
@@ -158,13 +217,17 @@ function sendAndRace<T>(
 
 export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
   searchInContainer(keyword: string, container: string): Promise<FacebookSearchStepResult>;
+  openFirstPost(container: string): Promise<FacebookOpenStepResult>;
   openPost(url: string): Promise<FacebookOpenStepResult>;
-  submitComment(permalink: string, text: string, groupChatCode?: string, fastReturnToFeed?: boolean): Promise<FacebookCommentStepResult>;
+  submitComment(target: string, text: string, groupChatCode?: string, fastReturnToFeed?: boolean): Promise<FacebookCommentStepResult>;
 } {
   const timeout = deps.stepTimeoutMs ?? FACEBOOK_STEP_TIMEOUT_MS;
   // 开帖步专用上界（边端先答，见 FACEBOOK_OPEN_STEP_TIMEOUT_MS）。与上一行同形：显式注入优先（测试用小值快速验超时），
   // 未注入才取 45s 默认——生产未注入（server.ts 不传 stepTimeoutMs），故实际取 45s。
   const openTimeout = deps.stepTimeoutMs ?? FACEBOOK_OPEN_STEP_TIMEOUT_MS;
+  // 首帖开帖是另一条预算（见 FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS）：边端串行窗口更长，
+  // 沿用 45s 会在边端答话前先掐断，把具名失败改判成 timeout。显式注入仍优先（测试用小值）。
+  const firstPostOpenTimeout = deps.stepTimeoutMs ?? FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS;
   const maxCandidates = deps.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
   const log = deps.logger ?? console;
   const push = (env: unknown): number => deps.pusher.pushToEdges(env, deps.edgeId);
@@ -221,6 +284,70 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
       return { ok: true, candidates: outcome.cards, ...(outcome.containerName ? { containerName: outcome.containerName } : {}) };
     },
 
+    async openFirstPost(container) {
+      if (!container.trim()) {
+        return { ok: false, reason: 'invalid_target' };
+      }
+      const outcome = await sendAndRace<
+        {
+          kind: 'detail';
+          target: string;
+          canonical: boolean;
+          postText?: string;
+          comments?: string[];
+        } | { kind: 'fail'; reason: string }
+      >(
+        deps.bus,
+        [
+          {
+            event: 'note.detail.arrived',
+            match: (data) => {
+              const d = data as NoteDetailArrived;
+              const target = String(d.detail?.noteId ?? '').trim();
+              const canonical = isCanonicalFacebookGroupPostPermalink(target);
+              if (!canonical && !isFacebookFirstPostTargetRef(target)) {
+                return undefined;
+              }
+              const postText = (d.detail.content ?? '').trim();
+              const comments = Array.isArray(d.detail.comments) ? d.detail.comments : [];
+              return {
+                kind: 'detail',
+                target,
+                canonical,
+                ...(postText ? { postText } : {}),
+                ...(comments.length > 0 ? { comments } : {}),
+              };
+            },
+          },
+          {
+            event: 'action.completed',
+            match: (data) => {
+              const d = data as ActionCompleted;
+              if (d.action !== 'open_note') return undefined;
+              return { kind: 'fail', reason: d.reason ?? 'open_failed' };
+            },
+          },
+        ],
+        firstPostOpenTimeout,
+        () => push(makeEnvelope('note.open', randomUUID(), Date.now(), {
+          selection: 'first_commentable_group_post',
+          container,
+          ...(deps.taskId ? { taskId: deps.taskId } : {}),
+        } as never)),
+      );
+      if (outcome === null) {
+        log.warn?.('[fb-edge-steps] first-post open 超时/离线');
+        return { ok: false, reason: 'timeout' };
+      }
+      if (outcome.kind === 'fail') return { ok: false, reason: outcome.reason };
+      return {
+        ok: true,
+        ...(outcome.canonical ? { permalink: outcome.target } : { targetRef: outcome.target }),
+        ...(outcome.postText ? { postText: outcome.postText } : {}),
+        ...(outcome.comments ? { comments: outcome.comments } : {}),
+      };
+    },
+
     async openPost(url) {
       const targetPostKey = canonicalFacebookPostKey(url);
       if (!targetPostKey) {
@@ -264,10 +391,16 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
       return { ok: true, ...(outcome.postText ? { postText: outcome.postText } : {}), ...(outcome.comments ? { comments: outcome.comments } : {}) };
     },
 
-    async submitComment(permalink, text, groupChatCode, fastReturnToFeed = false) {
-      // 长度感知超时（P0-1）：长评论逐字输入+提交后 reload/校验整段耗时可超固定 28s；用文案长度放大提交步超时，
+    async submitComment(target, text, groupChatCode, fastReturnToFeed = false) {
+      // 长度感知超时（P0-1）：长评论逐字输入+提交后 reload/校验整段耗时可超固定步超时；用文案长度放大提交步超时，
       // 让慢但成功的提交等到真实回执（ok / verification_ambiguous，两者都会打去重标记），杜绝「误判 timeout → 再发一条」。
-      const submitTimeout = facebookCommentSubmitTimeoutMs(text, timeout);
+      //
+      // **字数口径必须与边端逐字打的内容一致**：边端真正要输入的是「正文 + 换行 + 联系方式」
+      //（`aidcp-edge/src/native-page-engine/browse-session.ts` 的 facebookCommandTimeoutMs 就是这么算的）。
+      // 这里只数正文 ⇒ 算出比边端更小的预算 ⇒ 云端反而先掐断，把一个还在正常输入的提交判成 timeout。
+      // 带联系方式的评论一直是这个形状（既有单测里就并排写着 40 000 与 40 980），与本次 ×1.5 无关。
+      const pacedText = groupChatCode && groupChatCode.length > 0 ? `${text}\n${groupChatCode}` : text;
+      const submitTimeout = facebookCommentSubmitTimeoutMs(pacedText, timeout);
       const outcome = await sendAndRace<{ ok: boolean; reason?: string }>(
         deps.bus,
         [
@@ -284,7 +417,7 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
         () =>
           push(
             makeEnvelope('interaction.comment', randomUUID(), Date.now(), {
-              noteId: permalink,
+              noteId: target,
               text,
               ...(groupChatCode && groupChatCode.length > 0 ? { groupChatCode } : {}),
               ...(fastReturnToFeed ? { fastReturnToFeed: true } : {}),

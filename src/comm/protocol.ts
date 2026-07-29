@@ -859,6 +859,16 @@ export interface NoteOpenPayload {
    */
   url?: string;
   /**
+   * Facebook 评论无关键词路径（changes facebook-join-contact-first-post,
+   * facebook-first-post-container-fallback）：从 `container` 群讨论流选择第一条可评论帖子。
+   * 有 canonical permalink 时进入详情；无 permalink 但可唯一绑定同页帖子容器时，就地读取并用严格
+   * `aidcp:facebook-group-feed-post:v1:<sha256>` targetRef 作为 note.detail.noteId。
+   * 这是只读选帖/开帖，不得伪装成 `search.execute`；缺省保持既有按 url/noteId/index 开帖语义。
+   */
+  selection?: 'first_commentable_group_post';
+  /** `selection='first_commentable_group_post'` 的 Facebook 群完整链接；其它 note.open 调用省略。 */
+  container?: string;
+  /**
    * 浏览读取所在界面（change platform-browse-protocol，可选）。'detail'=导航进详情页读取（今天默认）；
    * 'feed'=在信息流就地展开读取、不离开列表（Facebook 就地浏览，旗标+能力 gated）。缺省='detail'⇒逐位等价。
    */
@@ -1504,6 +1514,7 @@ export interface InteractionFollowPayload {
 export interface InteractionCommentPayload {
   /** 评论 commit 任务租约。 */
   taskId?: string;
+  /** canonical note id；或仅在 Facebook 首帖 keep-open 流内使用 Edge 签发的严格同页 targetRef。 */
   noteId: string;
   /** 评论正文（云端已撰写 / 去AI味 / 人审通过后下发）。边缘**逐字符拟人输入**这一段。 */
   text: string;
@@ -1612,6 +1623,16 @@ export interface PageCardsPayload {
     collectCount: number;
     coverDesc?: string;
     noteId?: string;
+    /**
+     * `noteId` 的身份分档（change generalize-facebook-content-derived-post-identity）。
+     * 缺省 = `permalink` ⇒ 老边端与既有路径逐位等于今天。
+     * `content_ref` = 内容派生的**会话内**引用（形如 `aidcp:facebook-group-feed-post:v1:<sha256>`，
+     * 前缀为历史命名、语义已不止群组）：可参与内容评估、可计入浏览、可就地点赞；
+     * **MUST NOT** 用于导航 / 打开详情 / 定向评论 / 交付人工线索 / 跨会话去重。
+     * 消费方 MUST 读本字段判能力，**MUST NOT** 靠正则匹配 `noteId` 的字符串形态来猜——
+     * 把契约藏在字符串格式里，漏判一处就是把会话内引用当地址用（静默假成功）。
+     */
+    noteIdKind?: 'permalink' | 'content_ref';
     isVideo?: boolean;
   }>;
   /**
@@ -1643,6 +1664,7 @@ export interface NoteImagePayload {
 }
 
 export interface NoteDetailPayload {
+  /** canonical note id；或 Facebook 首帖选择返回的严格同页 targetRef（不得当作 permalink 展示）。 */
   noteId: string;
   title: string;
   content: string;

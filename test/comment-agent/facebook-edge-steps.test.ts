@@ -7,9 +7,11 @@ import {
   facebookCommentSubmitTimeoutMs,
   FACEBOOK_STEP_TIMEOUT_MS,
   FACEBOOK_OPEN_STEP_TIMEOUT_MS,
+  FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS,
   FACEBOOK_COMMENT_SUBMIT_BASE_MS,
   FACEBOOK_COMMENT_SUBMIT_PER_CHAR_MS,
   FACEBOOK_COMMENT_SUBMIT_MAX_MS,
+  isFacebookFirstPostTargetRef,
 } from '../../src/comment-agent/facebook-edge-steps.js';
 
 interface Env {
@@ -116,6 +118,121 @@ describe('buildFacebookEdgeSteps', () => {
     const r = await steps(bus, pusher).openPost(url);
     assert.equal(r.ok, true);
     assert.equal(sent[0].payload.url, url);
+  });
+
+  it('openFirstPost：下发群内首帖选择，不发 search.execute，并接受实际群帖 permalink', async () => {
+    const bus = new EventBus();
+    const container = 'https://www.facebook.com/groups/1';
+    const permalink = 'https://www.facebook.com/groups/1/posts/2';
+    const { pusher, sent } = makePusher((env) => {
+      if (env.type === 'note.open') {
+        bus.emit('note.detail.arrived', {
+          detail: { noteId: permalink, content: '首帖正文', comments: ['首条评论'] },
+          ts: 0,
+        } as never);
+      }
+    });
+    const r = await steps(bus, pusher).openFirstPost(container);
+    assert.deepEqual(r, {
+      ok: true,
+      permalink,
+      postText: '首帖正文',
+      comments: ['首条评论'],
+    });
+    assert.deepEqual(sent.map((env) => env.type), ['note.open']);
+    assert.equal(sent[0].payload.selection, 'first_commentable_group_post');
+    assert.equal(sent[0].payload.container, container);
+    assert.equal(sent[0].payload.url, undefined);
+  });
+
+  it('openFirstPost：接受等价 canonical multi_permalinks 群帖身份', async () => {
+    const bus = new EventBus();
+    const permalink = 'https://www.facebook.com/groups/1?multi_permalinks=2';
+    const { pusher } = makePusher((env) => {
+      if (env.type === 'note.open') {
+        bus.emit('note.detail.arrived', {
+          detail: { noteId: permalink, content: '首帖正文' },
+          ts: 0,
+        } as never);
+      }
+    });
+
+    const r = await steps(bus, pusher).openFirstPost('https://www.facebook.com/groups/1');
+    assert.deepEqual(r, { ok: true, permalink, postText: '首帖正文' });
+  });
+
+  it('openFirstPost：接受严格的 Edge 同页 targetRef，并原样用于评论', async () => {
+    const bus = new EventBus();
+    const targetRef = `aidcp:facebook-group-feed-post:v1:${'a1'.repeat(32)}`;
+    const { pusher, sent } = makePusher((env) => {
+      if (env.type === 'note.open') {
+        bus.emit('note.detail.arrived', {
+          detail: { noteId: targetRef, content: '无 permalink 的首帖正文' },
+          ts: 0,
+        } as never);
+      }
+      if (env.type === 'interaction.comment') {
+        bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
+      }
+    });
+
+    const open = await steps(bus, pusher).openFirstPost('https://www.facebook.com/groups/1');
+    assert.deepEqual(open, { ok: true, targetRef, postText: '无 permalink 的首帖正文' });
+    assert.equal(isFacebookFirstPostTargetRef(targetRef), true);
+    const submit = await steps(bus, pusher).submitComment(targetRef, 'good 6666');
+    assert.equal(submit.ok, true);
+    assert.equal(sent.at(-1)?.payload.noteId, targetRef);
+  });
+
+  it('openFirstPost：拒绝畸形 targetRef；ordinary open 也不接受严格 targetRef', async () => {
+    const bus = new EventBus();
+    const malformed = `aidcp:facebook-group-feed-post:v1:${'A1'.repeat(32)}`;
+    const strict = `aidcp:facebook-group-feed-post:v1:${'b2'.repeat(32)}`;
+    const { pusher, sent } = makePusher((env) => {
+      if (env.type === 'note.open') {
+        bus.emit('note.detail.arrived', { detail: { noteId: malformed }, ts: 0 } as never);
+      }
+    });
+    const first = await steps(bus, pusher, 30).openFirstPost('https://www.facebook.com/groups/1');
+    assert.equal(first.ok, false);
+    assert.equal(first.reason, 'timeout');
+    assert.equal(isFacebookFirstPostTargetRef(malformed), false);
+
+    sent.length = 0;
+    const ordinary = await steps(bus, pusher).openPost(strict);
+    assert.deepEqual(ordinary, { ok: false, reason: 'invalid_target' });
+    assert.deepEqual(sent, []);
+  });
+
+  it('openFirstPost：透传 Native 有界探测的具体失败原因', async () => {
+    const bus = new EventBus();
+    const { pusher } = makePusher((env) => {
+      if (env.type === 'note.open') {
+        bus.emit('action.completed', {
+          action: 'open_note',
+          ok: false,
+          reason: 'no_candidates',
+          ts: 0,
+        } as never);
+      }
+    });
+    const r = await steps(bus, pusher).openFirstPost('https://www.facebook.com/groups/1');
+    assert.deepEqual(r, { ok: false, reason: 'no_candidates' });
+  });
+
+  it('openFirstPost：边端回非群帖 permalink 不误认，最终诚实超时', async () => {
+    const bus = new EventBus();
+    const { pusher } = makePusher((env) => {
+      if (env.type === 'note.open') {
+        bus.emit('note.detail.arrived', {
+          detail: { noteId: 'https://www.facebook.com/123/posts/2', content: '背景帖' },
+          ts: 0,
+        } as never);
+      }
+    });
+    const r = await steps(bus, pusher, 30).openFirstPost('https://www.facebook.com/groups/1');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'timeout');
   });
 
   it('open：note.detail 的 noteId 不匹配 url → 不误认（超时）', async () => {
@@ -237,23 +354,52 @@ describe('buildFacebookEdgeSteps — keep-open 租约 taskId 透传（change fac
 
 describe('开帖步超时上界（change fb-comment-open-hydration-window）', () => {
   it('开帖步上界必须容纳边端详情水合窗最坏耗时，且严格大于固定步超时（边端先答）', () => {
-    // Native-only 详情打开受 30s 原子命令上限保护（内部文档就绪 8s + 身份水合 15s）。
+    // Native-only 详情打开受 45s 原子命令上限保护（内部文档就绪 12s + 身份水合 23s）。
     // 低于此值 → 云端先掐表，把边端诚实的 open_failed 改判成 timeout。
-    const EDGE_WORST_CASE_MS = 30_000;
+    const EDGE_WORST_CASE_MS = 45_000;
     assert.ok(
       FACEBOOK_OPEN_STEP_TIMEOUT_MS >= EDGE_WORST_CASE_MS,
       `开帖步上界 ${FACEBOOK_OPEN_STEP_TIMEOUT_MS}ms 必须 >= 边端最坏 ${EDGE_WORST_CASE_MS}ms，否则边端答不完`,
     );
     assert.ok(
       FACEBOOK_OPEN_STEP_TIMEOUT_MS > FACEBOOK_STEP_TIMEOUT_MS,
-      '开帖步必须脱离固定 28s（那正是本 change 的成因）',
+      '开帖步必须脱离搜索步的固定预算（那正是 fb-comment-open-hydration-window 的成因）',
     );
-    // 仍有界：对齐加群步 90s 上限，绝不无界等待。
-    assert.ok(FACEBOOK_OPEN_STEP_TIMEOUT_MS <= FACEBOOK_COMMENT_SUBMIT_MAX_MS, '开帖步上界不得超过 90s 无界化');
+    // 仍有界：不得超过评论提交上限，绝不无界等待。
+    assert.ok(
+      FACEBOOK_OPEN_STEP_TIMEOUT_MS <= FACEBOOK_COMMENT_SUBMIT_MAX_MS,
+      '开帖步上界不得越过评论提交上限而无界化',
+    );
   });
 
-  it('搜索步不跟着放宽：仍用固定 28s（其探测在催拉循环内、预算未变）', () => {
-    assert.equal(FACEBOOK_STEP_TIMEOUT_MS, 28_000);
+  it('搜索步与开帖步是两条预算：搜索步不得因开帖放宽而跟着放开', () => {
+    // 2026-07-29 整体 ×1.5 后不再钉死具体秒数——钉死数值只会让下次调整变成"改测试"，
+    // 这里真正要守的是两者的**关系**：搜索步的探测跑在催拉循环内、轮数未变，必须更短。
+    assert.ok(
+      FACEBOOK_STEP_TIMEOUT_MS < FACEBOOK_OPEN_STEP_TIMEOUT_MS,
+      '搜索步预算必须短于开帖步',
+    );
+    assert.ok(FACEBOOK_STEP_TIMEOUT_MS >= 28_000, '不得低于历史下限，否则慢网下会误判 timeout');
+  });
+
+  it('首帖开帖另有上界：容得下边端 90s 原子上限，且按 URL 开帖预算不动', () => {
+    // 首帖那条在边端是一串串行有界窗（就绪 12s + 首探 ~2s + 四轮下滚 ~18s + 可选二次导航就绪 12s +
+    // 绑定 18s + 身份回读 30s ≈ 92s），外层原子上限因此为 135s。云端沿用按 URL 那条会在边端答话前
+    // 先掐断，把一个具名失败改判成 timeout —— 那正是本 change 要消除的那类信息损失。
+    const EDGE_FIRST_POST_CEILING_MS = 135_000;
+    assert.ok(
+      FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS >= EDGE_FIRST_POST_CEILING_MS,
+      `首帖开帖步 ${FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS}ms 必须 >= 边端原子上限 ${EDGE_FIRST_POST_CEILING_MS}ms`,
+    );
+    assert.ok(
+      FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS > FACEBOOK_OPEN_STEP_TIMEOUT_MS,
+      '首帖与按 URL 开帖是两条预算，前者必须更宽',
+    );
+    // 两条路径的内层窗口不同，云端上界必须分开；这里守"分开"而不是守某个具体秒数。
+    assert.ok(
+      FACEBOOK_FIRST_POST_OPEN_STEP_TIMEOUT_MS > FACEBOOK_OPEN_STEP_TIMEOUT_MS * 1.5,
+      '首帖步必须明显宽于按 URL 开帖步，否则等于又合并成一条预算',
+    );
   });
 
   it('显式注入 stepTimeoutMs 时开帖步按注入值走（测试可快速验超时，不被 45s 默认拖死）', async () => {

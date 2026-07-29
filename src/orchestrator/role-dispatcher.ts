@@ -113,6 +113,15 @@ import {
   isCanonicalFacebookFeedVideoNoteId,
   isCanonicalFacebookReelNoteId,
 } from '../platform/facebook-presented-video.js';
+import type {
+  ApplyFacebookRuleViewResult,
+  FacebookRuleActionState,
+} from 'aidcp-kernel/kernel/facebook-rule-mode-types.js';
+import {
+  selectFacebookRuleCard,
+  stableFacebookRuleContentKey,
+  type FacebookRuleModeDecision,
+} from './facebook-rule-mode.js';
 
 export {
   FACEBOOK_REELS_FOLLOW_PROBABILITY,
@@ -218,6 +227,16 @@ const EMPTY_CONCEPT_POOL: ConceptPool = { known: [], candidates: [] };
 const VIEW_QUOTA_RECHECK_FALLBACK_MS = 60_000;
 const VIEW_QUOTA_WAKE_GRACE_MS = 250;
 const FACEBOOK_REELS_FALLBACK_MAX_RECOVERY_ATTEMPTS = 2;
+/**
+ * 一场之内允许「已在 Reels epoch 却又收到普通 Feed 决定性空/到底证据」而重开 epoch 的次数上限
+ *（change restore-facebook-post-join-comment-continuity）。
+ *
+ * 原先这个次数是 0——解回可授权态的唯一路径是「非空普通 Feed 权威回归」，而首页恒空的账号
+ * 永远等不到它，被送回首页即钉死。放开成无上限又会在「首页空、Reels 也空」时来回弹，
+ * 故取一个小的有界值：既破死锁，又保留原来的「重复空态不刷屏导航」意图。
+ * 用尽后不再重开，交由滚动无目标分支诚实终止本场。
+ */
+const FACEBOOK_REELS_REENTRY_MAX_PER_SESSION = 2;
 /** 评论角色单次 LLM 硬 deadline；不沿用面向慢 thinking 角色的全局 180s。 */
 export const DEFAULT_COMMENT_LLM_TIMEOUT_MS = 30_000;
 /** 整条评论子链的安全兜底；局部 LLM / 人审超时应更早结束。 */
@@ -230,6 +249,16 @@ export interface ViewQuotaDecision {
   allowed: boolean;
   reason?: string;
   retryAfterMs?: number;
+}
+
+export interface FacebookRuleJoinContactResult {
+  started: boolean;
+  reason?: string;
+  onTerminal?: Promise<{
+    joinState: FacebookRuleActionState;
+    commentState: FacebookRuleActionState;
+    blocker?: string;
+  }>;
 }
 
 // MandatoryCommentOutcome 与 MandatoryCommentOutcomeNoticeInput 纯数据模型抬入 kernel
@@ -302,6 +331,45 @@ export interface RoleDispatcherOptions {
    * 由 server 接线为 `() => riskController.explain('view')`。被拒则进入浏览休眠，不打开下一篇。
    */
   explainView?: () => ViewQuotaDecision;
+  /** Facebook 规则模式的权威现读；缺省 persona，确保旧装配零回归。 */
+  facebookRuleModeDecision?: (accountId: string) => FacebookRuleModeDecision;
+  /**
+   * 已确认 view 的持久化计数与**按云端权威规则节奏**的原子成批。缺失时规则模式 fail-closed。
+   * 刻意不写具体条数：节奏（每轮多少条确认浏览、每几轮含一次加群联系评论）由云端权威规则定义决定，
+   * 编排侧只消费成批结果，MUST NOT 内置或推断任何节奏数字。
+   */
+  applyFacebookRuleView?: (input: {
+    accountId: string;
+    contentKey: string;
+    sourceDedupeKey: string;
+    occurredAt: number;
+  }) => Promise<ApplyFacebookRuleViewResult>;
+  /** 规则批次动作终态持久化。缺失时规则模式 fail-closed。 */
+  updateFacebookRuleBatch?: (
+    batchId: string,
+    patch: {
+      likeState?: FacebookRuleActionState;
+      joinState?: FacebookRuleActionState;
+      commentState?: FacebookRuleActionState;
+      terminal?: boolean;
+      blocker?: string | null;
+    },
+  ) => Promise<unknown>;
+  /** join_group 独立即时风控解释口。 */
+  explainRuleJoin?: () => ViewQuotaDecision;
+  /** 复用现有 join-then-contact-comment 编排器；返回启动态与异步平台终态。 */
+  triggerFacebookRuleJoinContact?: (
+    accountId: string,
+    batchId: string,
+  ) => Promise<FacebookRuleJoinContactResult>;
+  /**
+   * 规则批次评论段的**有效正文方案**现读（change facebook-rule-mode-without-persona）。
+   * 在调用加群联系评论编排**之前**解析一次：`template`（账号显式模板 / 账号未显式选择的默认模板）
+   * 才允许评论段执行；`generated`（账号**显式**选择生成式）时评论段以具名原因收敛为不可执行。
+   * 未注入 / 读抛错 / 返回 `unavailable`（如配置副本陈旧）→ 视作不可解析：同样不执行评论段，
+   * 也绝不以模板顶替（fail-closed，两个方向都不猜）。
+   */
+  facebookRuleCommentBodyScheme?: (accountId: string) => 'template' | 'generated' | 'unavailable';
   /**
    * 硬暂停闸（验证码/人工接管）：边缘是否处于硬暂停态。缺省始终 false。
    * 由 server 接线为读 ws-server 的 pausedEdges（isEdgePaused）。通知准入角色据此放弃巡视——
@@ -404,6 +472,19 @@ export interface RoleDispatcherOptions {
    */
   personaBinding?: (accountId: string) => PersonaBinding;
   /**
+   * 会话启动闸的**唯一一处人设豁免**（change facebook-rule-mode-without-persona）：现读该账号的
+   * 权威规则模式配置——已启用 → 未绑人设 MUST NOT 被短路为 `needs_persona_setup`、MUST NOT 告警。
+   * 判据与规则模式裁决同源（同一个按账号读的权威入口），MUST NOT 依赖客户端自报 / 环境变量 / 缓存猜测。
+   *
+   * **fail-closed**：未注入、读抛错、返回非 `true`、或本连接平台未确认为 Facebook → 一律按未豁免
+   * 处理（未绑人设仍被短路）。绑定判据为 `unknown`（人设副本陈旧）时同样不豁免——那是「读不到」
+   * 而不是「确认未绑」，两者不能混为一谈。
+   *
+   * 本豁免**只**解除这一道闸：能不能真的浏览仍由模式裁决决定，未绑人设的账号在非规则模式下
+   * 仍是 `blocked/no_persona`，绝不会让人设浏览闭环空跑。
+   */
+  facebookRuleModeEnabled?: (accountId: string) => boolean;
+  /**
    * 配置副本停手闸（change cloud-coupling-phase4-runtime-ports）：由组合根注入 api 侧实现。
    * 未注入 = 恒不停手，逐位等于「未安装新鲜度事实源 → fresh」的既有语义。
    */
@@ -496,6 +577,13 @@ export interface VisibleCard {
   collectCount: number;
   coverDesc?: string;
   noteId?: string;
+  /**
+   * `noteId` 的身份分档（change generalize-facebook-content-derived-post-identity）。
+   * 缺省 = 平台永久链接。`content_ref` = 内容派生的会话内引用：可评估、可计浏览、可就地点赞，
+   * 但 MUST NOT 用于导航 / 打开详情 / 定向评论 / 交付人工线索 / 跨会话去重。
+   * 判能力一律读本字段，MUST NOT 去匹配 noteId 的字符串形态。
+   */
+  noteIdKind?: 'permalink' | 'content_ref';
 }
 
 export interface SessionUsageSnapshot {
@@ -544,6 +632,12 @@ export class RoleDispatcher {
   private readonly explainSearch: () => ViewQuotaDecision;
   private readonly canView: () => boolean;
   private readonly explainView: () => ViewQuotaDecision;
+  private readonly facebookRuleModeDecision: (accountId: string) => FacebookRuleModeDecision;
+  private readonly applyFacebookRuleView?: RoleDispatcherOptions['applyFacebookRuleView'];
+  private readonly updateFacebookRuleBatch?: RoleDispatcherOptions['updateFacebookRuleBatch'];
+  private readonly explainRuleJoin: () => ViewQuotaDecision;
+  private readonly triggerFacebookRuleJoinContact?: RoleDispatcherOptions['triggerFacebookRuleJoinContact'];
+  private readonly facebookRuleCommentBodyScheme?: RoleDispatcherOptions['facebookRuleCommentBodyScheme'];
   private readonly commentApproval?: CommentApprovalPort;
   private readonly commentAutoApproveNotify?: (input: CommentApprovalNoticeInput) => Promise<void>;
   private readonly resolveCommentApprovalMode?: RoleDispatcherOptions['resolveCommentApprovalMode'];
@@ -601,6 +695,8 @@ export class RoleDispatcher {
   private reelsFallbackState: 'idle' | 'pending' | 'confirmed' = 'idle';
   /** pending 期间已真正下发的有界恢复次数；被调度/配额闸抑制不消耗次数。 */
   private reelsFallbackRecoveryAttempts = 0;
+  /** 本场已用掉的 Reels epoch 重开次数（见 FACEBOOK_REELS_REENTRY_MAX_PER_SESSION）。 */
+  private reelsReentryCount = 0;
   private readonly isHardPaused: (edgeId?: string) => boolean;
   private readonly edgeTaskLeases?: Pick<EdgeTaskLeaseClient, 'acquire' | 'release'>;
   private currentEdgeId?: string;
@@ -609,6 +705,7 @@ export class RoleDispatcher {
   private notificationTaskEnding = false;
   private pendingNotificationCommands: EdgeCommand[] = [];
   private readonly personaBinding?: (accountId: string) => PersonaBinding;
+  private readonly facebookRuleModeEnabled?: (accountId: string) => boolean;
   private readonly configMirrorGate?: ConfigMirrorGatePort;
   private readonly onSessionRejected?: (accountId: string, reason: string) => void | Promise<void>;
   private readonly isDispatchActive: () => boolean;
@@ -696,12 +793,36 @@ export class RoleDispatcher {
   private visibleCards: VisibleCard[] = [];
   private currentNote: NoteData | null = null;
   /** Facebook 自然互动证据：必须先由 content_evaluator 选中，再由 content_curator 放行，interaction_appraiser 才能发 like。 */
+  /**
+   * 本会话内、身份为「内容派生引用」的帖子（change generalize-facebook-content-derived-post-identity）。
+   * 这类帖子拿不到平台地址（真机实测：群组帖零交互下 6/6 无地址），只能就地读、就地赞。
+   * 任何需要真地址的命令都必须在统一出口被扣住——**在这里拦，不依赖边缘兜底**：
+   * 边缘拒绝只是最后一道保险，让云端把明知做不到的命令发出去本身就是一次假动作。
+   */
+  private readonly contentRefNoteIds = new Set<string>();
   private readonly facebookContentSelectedNoteIds = new Set<string>();
   private readonly facebookQualityPassedNoteIds = new Set<string>();
   /** 已呈现 Facebook 视频的会话级一次性决策集合；命中/未命中/被安全闸挡住都不得因重报重抽。 */
   private readonly facebookPresentedVideoLikeDecisionNoteIds = new Set<string>();
   /** 已呈现 Facebook Reel 的会话级关注决策集合；与点赞独立，任何终态都不得因重报重抽。 */
   private readonly facebookPresentedReelFollowDecisionNoteIds = new Set<string>();
+  /** 规则选卡的稳定身份去重；真实跨重启去重仍由持久 view fact 负责。 */
+  private readonly facebookRuleSelectedContentKeys = new Set<string>();
+  /** 规则 view 串行应用，避免同连接并发回执绕过批次单飞。 */
+  private facebookRuleViewChain: Promise<void> = Promise.resolve();
+  private pendingFacebookRuleBatch: {
+    batchId: string;
+    /** 轮次序号（1 起、稠密），二级节奏判据的输入。 */
+    sequence: number;
+    /** 本轮是否包含加群联系评论（由 sequence 派生，建轮次时定死、不随后续状态变化）。 */
+    includesJoin: boolean;
+    noteId: string;
+    source: 'detail' | 'reels' | 'feed_video';
+    joinStarted: boolean;
+    joinContactStarted: boolean;
+    likeDispatched: boolean;
+    likeTerminal: boolean;
+  } | null = null;
   /** 当前会话剩余互动预算（从全局单场上限提供者派生，会话开始/重置时刷新）。 */
   private budget!: SessionInteractionBudget;
   /** 会话开始/重置时的预算快照（供比率闸：init−剩余；会话中途改预算不漂移）。 */
@@ -736,6 +857,13 @@ export class RoleDispatcher {
       const allowed = this.canView();
       return allowed ? { allowed } : { allowed, reason: 'view_quota_exhausted' };
     });
+    this.facebookRuleModeDecision = options.facebookRuleModeDecision
+      ?? (() => ({ mode: 'persona', blocker: null }));
+    this.applyFacebookRuleView = options.applyFacebookRuleView;
+    this.updateFacebookRuleBatch = options.updateFacebookRuleBatch;
+    this.explainRuleJoin = options.explainRuleJoin ?? (() => ({ allowed: true }));
+    this.triggerFacebookRuleJoinContact = options.triggerFacebookRuleJoinContact;
+    this.facebookRuleCommentBodyScheme = options.facebookRuleCommentBodyScheme;
     this.commentApproval = options.commentApproval;
     this.commentAutoApproveNotify = options.commentAutoApproveNotify;
     this.resolveCommentApprovalMode = options.resolveCommentApprovalMode;
@@ -758,6 +886,7 @@ export class RoleDispatcher {
     this.fireAutoContactComment = options.fireAutoContactComment;
     this.isHardPaused = options.isHardPaused ?? (() => false);
     this.personaBinding = options.personaBinding;
+    this.facebookRuleModeEnabled = options.facebookRuleModeEnabled;
     this.configMirrorGate = options.configMirrorGate;
     this.onSessionRejected = options.onSessionRejected;
     this.isDispatchActive = options.isDispatchActive ?? (() => true);
@@ -825,6 +954,365 @@ export class RoleDispatcher {
   /** 动作前犹豫时间中心值（随风控状态 + 会话进度缩放）。familiar=true 对近期已评估内容按 1/3 折扣。 */
   private thinkNow(familiar = false): number {
     return computeThinkMs({ status: this.getRiskStatus(), quotaLevel: this.getQuotaLevel(), progress: this.progress(), familiar });
+  }
+
+  private facebookRuleDecision(): FacebookRuleModeDecision {
+    try {
+      return this.facebookRuleModeDecision(this.currentAccountId);
+    } catch (err) {
+      console.warn(`[facebook-rule] mode authority unavailable account=${this.currentAccountId}: ${(err as Error).message}`);
+      return { mode: 'blocked', blocker: 'rule_projection_unavailable' };
+    }
+  }
+
+  private isFacebookRuleMode(): boolean {
+    return this.facebookRuleDecision().mode === 'facebook_rule';
+  }
+
+  private queueFacebookRuleView(payload: {
+    accountId: string;
+    noteId: string;
+    sourceDedupeKey: string;
+    source: 'detail' | 'reels' | 'feed_video';
+    occurredAt: number;
+  }): void {
+    this.facebookRuleViewChain = this.facebookRuleViewChain
+      .then(() => this.handleFacebookRuleView(payload))
+      .catch((err) => {
+        console.error(`[facebook-rule] durable progression failed account=${payload.accountId}:`, err);
+        if (this.sessionActive) this.endSession('facebook_rule_persistence_failed');
+      });
+  }
+
+  private async handleFacebookRuleView(payload: {
+    accountId: string;
+    noteId: string;
+    sourceDedupeKey: string;
+    source: 'detail' | 'reels' | 'feed_video';
+    occurredAt: number;
+  }): Promise<void> {
+    if (payload.accountId !== this.currentAccountId || !this.isFacebookRuleMode()) return;
+    if (!this.applyFacebookRuleView || !this.updateFacebookRuleBatch) {
+      throw new Error('facebook_rule_runtime_unavailable');
+    }
+    const contentKey = stableFacebookRuleContentKey(payload.noteId);
+    if (!contentKey) {
+      this.continueAfterFacebookRuleView(payload.source, 'rule_unstable_content_key');
+      return;
+    }
+    const observedText = payload.source === 'detail'
+      ? `${this.currentNote?.title ?? ''} ${this.currentNote?.content ?? ''}`.trim()
+      : this.visibleCards.find((card) => card.noteId && facebookPostKey(card.noteId) === contentKey)?.title ?? '';
+    if (observedText && hasObviousHighRiskFacebookCaption(observedText)) {
+      console.log(`[facebook-rule] skip unsafe content account=${payload.accountId} key=${contentKey}`);
+      this.continueAfterFacebookRuleView(payload.source, 'rule_content_safety_reject');
+      return;
+    }
+    const applied = await this.applyFacebookRuleView({
+      accountId: payload.accountId,
+      contentKey,
+      sourceDedupeKey: payload.sourceDedupeKey,
+      occurredAt: payload.occurredAt,
+    });
+    if (applied.kind !== 'batch_created') {
+      if (applied.kind !== 'batch_active') {
+        this.continueAfterFacebookRuleView(payload.source, `rule_view_${applied.kind}`);
+      }
+      return;
+    }
+    this.pendingFacebookRuleBatch = {
+      batchId: applied.batch.batchId,
+      sequence: applied.batch.sequence,
+      includesJoin: applied.batch.includesJoin,
+      noteId: payload.noteId,
+      source: payload.source,
+      joinStarted: false,
+      joinContactStarted: false,
+      likeDispatched: false,
+      likeTerminal: false,
+    };
+    await this.attemptFacebookRuleLike();
+  }
+
+  private continueAfterFacebookRuleView(
+    source: 'detail' | 'reels' | 'feed_video',
+    reason: string,
+  ): void {
+    if (!this.sessionActive) return;
+    if (source === 'detail') {
+      this.eventBus.emit('interaction.skipped', {
+        noteId: this.currentNote?.noteId ?? '',
+        sourcePageType: this.sessionContext.sourcePageType,
+        reason,
+        ts: this.clock(),
+      });
+      return;
+    }
+    this.sendScrollCommand(reason);
+  }
+
+  private async attemptFacebookRuleLike(): Promise<void> {
+    const pending = this.pendingFacebookRuleBatch;
+    if (!pending || !this.updateFacebookRuleBatch) return;
+    const decision = this.facebookRuleDecision();
+    if (decision.mode !== 'facebook_rule') {
+      await this.updateFacebookRuleBatch(pending.batchId, {
+        likeState: 'not_started',
+        joinState: 'not_started',
+        commentState: 'not_started',
+        terminal: true,
+        blocker: decision.blocker ?? decision.mode,
+      });
+      this.pendingFacebookRuleBatch = null;
+      this.continueAfterFacebookRuleView(pending.source, 'rule_mode_preempted');
+      return;
+    }
+    const risk = this.explainInteract('like');
+    if (!risk.allowed) {
+      await this.updateFacebookRuleBatch(pending.batchId, {
+        likeState: 'risk_suppressed',
+        blocker: risk.reason ?? 'like_risk_suppressed',
+      });
+      pending.likeTerminal = true;
+      await this.startFacebookRuleJoinContact();
+      return;
+    }
+    if (this.remainingBudget('like') <= 0) {
+      await this.updateFacebookRuleBatch(pending.batchId, {
+        likeState: 'risk_suppressed',
+        blocker: 'like_session_budget',
+      });
+      pending.likeTerminal = true;
+      await this.startFacebookRuleJoinContact();
+      return;
+    }
+    if (!this.cooldownPasses('like')) {
+      await this.updateFacebookRuleBatch(pending.batchId, {
+        likeState: 'risk_suppressed',
+        blocker: 'like_cooldown',
+      });
+      pending.likeTerminal = true;
+      await this.startFacebookRuleJoinContact();
+      return;
+    }
+    const sent = this.sendNoteScopedCommand('like', {
+      action: 'like',
+      reason: 'facebook_rule_batch_like',
+      params: { noteId: pending.noteId, thinkMs: this.thinkNow() },
+    });
+    if (!sent) {
+      await this.updateFacebookRuleBatch(pending.batchId, {
+        likeState: 'not_started',
+        blocker: 'like_dispatch_suppressed',
+      });
+      pending.likeTerminal = true;
+      await this.startFacebookRuleJoinContact();
+      return;
+    }
+    pending.likeDispatched = true;
+    await this.updateFacebookRuleBatch(pending.batchId, { likeState: 'dispatched', blocker: null });
+  }
+
+  private async finishFacebookRuleLike(ok: boolean, reason?: string): Promise<void> {
+    const pending = this.pendingFacebookRuleBatch;
+    if (!pending || !this.updateFacebookRuleBatch) return;
+    let likeState: FacebookRuleActionState;
+    if (reason === 'already_liked' || reason === 'already_reacted') likeState = 'already_satisfied';
+    else if (ok) likeState = 'confirmed';
+    else if (reason === 'submitted_unconfirmed' || reason === 'verification_ambiguous') likeState = 'submitted_unknown';
+    else if (reason === 'preempted_by_task') likeState = 'not_started';
+    else if (reason?.startsWith('no_target') || reason === 'btn_no-bar' || reason === 'btn_no-btn') likeState = 'structural_skip';
+    else likeState = 'failed';
+    await this.updateFacebookRuleBatch(pending.batchId, {
+      likeState,
+      blocker: ok ? null : reason ?? 'like_failed',
+    });
+    pending.likeTerminal = true;
+    await this.startFacebookRuleJoinContact();
+  }
+
+  /**
+   * 规则批次评论段的有效正文方案现读（change facebook-rule-mode-without-persona）。
+   * 未接线 / 读抛错 / 返回非法值 → `unavailable`：既不执行评论段，也绝不以模板顶替（fail-closed）。
+   */
+  private resolveFacebookRuleCommentBodyScheme(): 'template' | 'generated' | 'unavailable' {
+    if (!this.facebookRuleCommentBodyScheme) return 'unavailable';
+    try {
+      const scheme = this.facebookRuleCommentBodyScheme(this.currentAccountId);
+      return scheme === 'template' || scheme === 'generated' ? scheme : 'unavailable';
+    } catch (err) {
+      console.warn(
+        `[facebook-rule] comment body scheme unavailable account=${this.currentAccountId}: ${(err as Error).message}`,
+      );
+      return 'unavailable';
+    }
+  }
+
+  private async startFacebookRuleJoinContact(): Promise<void> {
+    const pending = this.pendingFacebookRuleBatch;
+    if (!pending || pending.joinStarted || !this.updateFacebookRuleBatch) return;
+    pending.joinStarted = true;
+    const decision = this.facebookRuleDecision();
+    if (decision.mode !== 'facebook_rule') {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_started',
+        commentState: 'not_started',
+        blocker: decision.blocker ?? decision.mode,
+      });
+      return;
+    }
+    // 二级节奏闸。判据内移到这个唯一入口（点赞各终态出口全汇入此处的幂等守卫），
+    // 所以 attemptFacebookRuleLike / finishFacebookRuleLike 的五个调用点一处不用改。
+    //
+    // 只点赞的轮次 MUST 走到这条终结：批次不终结 ⇒ progress.active_batch_id 永不清空 ⇒
+    // applyConfirmedView 恒返回 batch_active 且在写 view fact **之前**短路 ⇒ 该账号后续浏览
+    // 全部被丢弃，点赞与加群双双永久停摆。那是活锁，不是精度问题。
+    if (!pending.includesJoin) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_scheduled',
+        commentState: 'not_scheduled',
+        // 不写 blocker：那一列三阶段共用、后写覆盖先写，写这里会抹掉点赞阶段的抑制原因。
+        preserveBlocker: true,
+      });
+      return;
+    }
+    // 评论段的有效正文方案（change facebook-rule-mode-without-persona）：**在调用加群联系评论编排之前**
+    // 解析一次。规则模式的评论段只走模板正文——它是唯一不读人设的正文链路。账号**显式**选了生成式方案时，
+    // 该评论段以稳定具名原因收敛为不可执行：MUST NOT 调用生成器，也 MUST NOT 以模板顶替运营的显式选择。
+    // 浏览与点赞已在本批次前段各自落终态、原样保留，批次如实呈现为部分完成。
+    //
+    // 位置在二级节奏闸**之后**：只点赞的轮次压根不进评论段，在那种轮次上判正文方案会把
+    // 「本轮按节奏不做评论」误报成「正文方案不可执行」，且节奏本身与正文方案无关。
+    const bodyScheme = this.resolveFacebookRuleCommentBodyScheme();
+    if (bodyScheme !== 'template') {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_started',
+        commentState: 'rejected',
+        blocker: bodyScheme === 'generated'
+          ? 'comment_body_scheme_generated'
+          : 'comment_body_scheme_unavailable',
+      });
+      return;
+    }
+    const joinRisk = this.explainRuleJoin();
+    if (!joinRisk.allowed) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'risk_suppressed',
+        commentState: 'not_started',
+        blocker: joinRisk.reason ?? 'join_risk_suppressed',
+      });
+      return;
+    }
+    if (this.remainingBudget('join_group') <= 0) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'risk_suppressed',
+        commentState: 'not_started',
+        blocker: 'join_session_budget',
+      });
+      return;
+    }
+    // 加群联系是一个复合动作。评论配额或本场评论预算已经耗尽时，必须在不可逆的加群动作前
+    // 终结整批，避免出现「已加群，但本来就不允许评论」的部分执行。
+    const commentRisk = this.explainInteract('comment');
+    if (!commentRisk.allowed) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_started',
+        commentState: 'risk_suppressed',
+        blocker: commentRisk.reason ?? 'comment_risk_suppressed',
+      });
+      return;
+    }
+    if (this.remainingBudget('comment') <= 0) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_started',
+        commentState: 'risk_suppressed',
+        blocker: 'comment_session_budget',
+      });
+      return;
+    }
+    if (!this.triggerFacebookRuleJoinContact) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_started',
+        commentState: 'not_started',
+        blocker: 'join_contact_runtime_unavailable',
+      });
+      return;
+    }
+    await this.updateFacebookRuleBatch(pending.batchId, {
+      joinState: 'dispatched',
+      commentState: 'pending',
+      blocker: null,
+    });
+    const triggered = await this.triggerFacebookRuleJoinContact(
+      this.currentAccountId,
+      pending.batchId,
+    );
+    if (!triggered.started || !triggered.onTerminal) {
+      await this.finishFacebookRuleBatch({
+        joinState: 'not_started',
+        commentState: 'not_started',
+        blocker: triggered.reason ?? 'join_contact_not_started',
+      });
+      return;
+    }
+    pending.joinContactStarted = true;
+    const result = await triggered.onTerminal;
+    await this.finishFacebookRuleBatch(result);
+  }
+
+  private async finishFacebookRuleBatch(result: {
+    joinState: FacebookRuleActionState;
+    commentState: FacebookRuleActionState;
+    blocker?: string;
+    /**
+     * 不动 blocker 列，保留点赞阶段已写入的值。
+     * blocker 是三阶段共用一列、写入语义是后写覆盖先写；只点赞的轮次在这里补写任何值都会
+     * 抹掉「点赞为什么被抑制」这条唯一记录。
+     */
+    preserveBlocker?: boolean;
+  }): Promise<void> {
+    const pending = this.pendingFacebookRuleBatch;
+    if (!pending || !this.updateFacebookRuleBatch) return;
+    await this.updateFacebookRuleBatch(pending.batchId, {
+      joinState: result.joinState,
+      commentState: result.commentState,
+      terminal: true,
+      // 省略 blocker 键 ⇒ 存储层的 CASE 判据落到「不改」分支（见 updateBatch 的 hasOwnProperty）。
+      ...(result.preserveBlocker ? {} : { blocker: result.blocker ?? null }),
+    });
+    this.pendingFacebookRuleBatch = null;
+    // 只点赞的轮次是按节奏正常收尾，不是「终止」——续跑理由要如实区分，别让日志读成异常。
+    const continuationReason =
+      result.commentState === 'confirmed' ? 'rule_batch_complete'
+        : result.commentState === 'not_scheduled' ? 'rule_round_like_only'
+          : 'rule_batch_terminal';
+    if (pending.joinContactStarted) {
+      // 既有 join-contact 编排以 fastReturnToFeed=true 收尾；此时页面已回列表，
+      // 再走 detail 的 interaction.skipped 会多发一次 back、误离开 Feed。
+      this.sendScrollCommand(continuationReason);
+    } else {
+      this.continueAfterFacebookRuleView(pending.source, continuationReason);
+    }
+  }
+
+  private reconcileFacebookRuleBatchOnSessionBoundary(reason: string): void {
+    const pending = this.pendingFacebookRuleBatch;
+    if (!pending || pending.joinStarted || !this.updateFacebookRuleBatch) return;
+    this.pendingFacebookRuleBatch = null;
+    void this.updateFacebookRuleBatch(pending.batchId, {
+      ...(!pending.likeTerminal
+        ? { likeState: pending.likeDispatched ? 'ambiguous' as const : 'not_started' as const }
+        : {}),
+      joinState: 'not_started',
+      commentState: 'not_started',
+      terminal: true,
+      blocker: reason,
+    }).catch((err) => {
+      console.error(
+        `[facebook-rule] session-boundary reconciliation failed batch=${pending.batchId}:`,
+        err,
+      );
+    });
   }
 
   /** 通知巡视命令（巡视期放行，浏览类命令被暂停出口扣住）。 */
@@ -985,7 +1473,31 @@ export class RoleDispatcher {
     this.rawSendCommand({ action: 'pacing_update', params: { tempo } });
   }
 
+  /**
+   * 该命令是否**必须**有平台地址才能执行。
+   * - 定向评论：要跳到帖子上，必须要。
+   * - `open_note`：`purpose:'navigate'`（评论迁移）或非 feed 面（打开详情页）要；
+   *   就地读（`surface==='feed'`）不跳转、不需要地址 ⇒ 放行。
+   */
+  private commandRequiresPlatformAddress(command: EdgeCommand): boolean {
+    if (command.action === 'comment') return true;
+    if (command.action !== 'open_note') return false;
+    const params = command.params ?? {};
+    if (params.purpose === 'navigate') return true;
+    return params.surface !== 'feed';
+  }
+
   private sendCommand(command: EdgeCommand): boolean {
+    // 会话内引用闸（change generalize-facebook-content-derived-post-identity）：先于一切其他闸。
+    // 这类身份没有平台地址，导航 / 详情 / 定向评论结构性做不到；发出去只会换回一个必然的失败回执，
+    // 或者更糟——被某处当成地址用。红线：MUST NOT 静默假成功。
+    const targetNoteId = typeof command.params?.noteId === 'string' ? command.params.noteId : '';
+    if (targetNoteId && this.contentRefNoteIds.has(targetNoteId) && this.commandRequiresPlatformAddress(command)) {
+      console.warn(
+        `[RoleDispatcher] ${command.action} 的目标只有会话内引用、没有平台地址 → 不下发（content_ref_not_addressable）`,
+      );
+      return false;
+    }
     // 中途档位补推：先于软暂停/配额/去重闸——控制消息不应被抑制、不占配额（见 maybePushTempo）。
     this.maybePushTempo();
     // 闸门镜像陈旧 → 停手（change config-mirror-cross-process-invalidation task 4.8）。
@@ -1511,7 +2023,11 @@ export class RoleDispatcher {
         getNoteData,
         canScrollComments: () => this.canScrollComments(),
       }),
-      new ContentCuratorRole({ ...commonOptions, sessionContext: this.sessionContext }),
+      new ContentCuratorRole({
+        ...commonOptions,
+        sessionContext: this.sessionContext,
+        shouldEvaluate: () => !this.isFacebookRuleMode(),
+      }),
       new InteractionAppraiserRole({
         ...commonOptions,
         sessionContext: this.sessionContext,
@@ -1821,13 +2337,38 @@ export class RoleDispatcher {
     }
     // 人设三态：只有权威的「未绑」才允许 needs_persona_setup。
     const binding = this.personaBinding?.(this.currentAccountId) ?? 'bound';
-    if (binding === 'unbound') return 'needs_persona_setup';
+    // 规则模式豁免（change facebook-rule-mode-without-persona）：平台确认为 Facebook 且权威规则模式
+    // 配置现读为启用时，「确认未绑人设」不再短路——那条路全程不读人设，绑定不是它的前提。
+    // 只豁免 `unbound`：`unknown` 是云端此刻读不到，仍走 persona_unavailable（fail-closed）。
+    if (binding === 'unbound' && !this.facebookRuleModeExemptsPersonaGate()) return 'needs_persona_setup';
     if (binding === 'unknown') return PERSONA_UNAVAILABLE_REASON;
     // 其余闸门镜像陈旧 → 统一停手（不放行新会话）。
     // 这里用**不记账**的纯判据：本方法也服务只读裁决（resumeGateSnapshot，~60s 每跳一次），
     // 只读裁决什么都没拒绝。真正拒绝那一跳的记账在 canStartSession 里落（含人设那一路）。
     if (this.configMirrorGate?.hasStaleGateMirror() ?? false) return CONFIG_MIRROR_STALE_REASON;
     return 'ok';
+  }
+
+  /**
+   * 会话启动闸的规则模式豁免判据（change facebook-rule-mode-without-persona）。
+   *
+   * 三个条件全部成立才豁免：本连接平台**已确认**为 Facebook、权威规则模式配置**现读**为启用、
+   * 且读取本身没有出错。任何一条不成立（含未注入权威入口）都 fail-closed 回到未豁免行为——
+   * MUST NOT 把「读不到配置」猜成「已启用规则模式」。
+   *
+   * 判据只看权威配置，不看客户端自报、不看环境变量、不看任何缓存快照。
+   */
+  private facebookRuleModeExemptsPersonaGate(): boolean {
+    if (this.accountPlatform !== 'facebook') return false; // 平台未确认为 Facebook → 不豁免
+    if (!this.facebookRuleModeEnabled) return false; // 权威入口未接线 → 不豁免
+    try {
+      return this.facebookRuleModeEnabled(this.currentAccountId) === true;
+    } catch (err) {
+      console.warn(
+        `[facebook-rule] session-start exemption unavailable account=${this.currentAccountId}: ${(err as Error).message} → 按未豁免处理`,
+      );
+      return false;
+    }
   }
 
   /** 外部触发会话启动（经启动闸）：供面板恢复调度 / 显式启动用；已在跑则不重复。 */
@@ -1873,6 +2414,7 @@ export class RoleDispatcher {
 
   /** 启动会话：接线角色 / 指令翻译 / Edge 事件（看门狗在此随 SessionMonitor.subscribe 启动），再发 feed.entered。 */
   startSession(): void {
+    this.reconcileFacebookRuleBatchOnSessionBoundary('session_restarted');
     // 会话开始 → 取消任何待发休息计时器 + 窗口唤醒计时器（已重开，无需续场 / 唤醒）。
     this.cancelRestTimer();
     this.cancelWakeTimer();
@@ -1890,6 +2432,7 @@ export class RoleDispatcher {
     this.setupEdgeEventSubscriptions();
     this.sessionActive = true;
     this.sessionStartedAt = this.clock();
+    this.reelsReentryCount = 0; // 重开次数按**场**计（见 FACEBOOK_REELS_REENTRY_MAX_PER_SESSION）。
     // 按当前账号刷新单场预算 + 快照（热加载：会话开始即取最新配置）。
     this.budget = this.freshBudget();
     this.budgetInit = { ...this.budget };
@@ -1938,6 +2481,7 @@ export class RoleDispatcher {
    * 连接时刻起算，超时结束后下次连接也能重新驱动。
    */
   restartSession(): void {
+    this.reconcileFacebookRuleBatchOnSessionBoundary('edge_reconnected');
     // 「可活跃时间」闸（change weekly-active-window）：当前本地时刻不在后台配置的可活跃时段内 → 不开会话、保持休眠。
     // 此处为所有会话(重)启动的统一收口（边缘 hello / 绑人设自启 / 续场 / 面板手动），缺配置 / 非法掩码 = 全天活跃（零回归）。
     // 续场路径已先经 canAutoResume 同闸（此为防御性二次拦）。被拦后排一个窗口唤醒计时器：到下一个活跃整点
@@ -1982,6 +2526,7 @@ export class RoleDispatcher {
     this.setupEdgeEventSubscriptions();
     this.sessionActive = true;
     this.sessionStartedAt = this.clock();
+    this.reelsReentryCount = 0; // 重开次数按**场**计（见 FACEBOOK_REELS_REENTRY_MAX_PER_SESSION）。
     // 会话启动现问一次 view 配额（change session-start-quota-honest-sleep）：被拒即当场休眠。
     // 🔴 为什么在 feed.entered 之前：EventBus 进程内同步派发，下游角色链可能在这次 emit 内同步走到
     //    sendCommand ⇒ 刹车装在 emit 之后 = 首批命令从休眠闸底下漏出，且间歇、测试可全绿（同族判例：
@@ -2013,6 +2558,7 @@ export class RoleDispatcher {
     this.cancelWakeTimer();
     this.cancelViewQuotaSleep(false);
     this.settlePendingMandatoryCommentAsUnknown(`session_ended:${reason ?? 'manual'}`);
+    this.reconcileFacebookRuleBatchOnSessionBoundary(`session_ended:${reason ?? 'manual'}`);
     this.clearCommentSublineHold(false);
     void this.endNotificationTask();
     this.pendingSearchKeywords.clear();
@@ -2324,6 +2870,7 @@ export class RoleDispatcher {
     this.facebookQualityPassedNoteIds.clear();
     this.facebookPresentedVideoLikeDecisionNoteIds.clear();
     this.facebookPresentedReelFollowDecisionNoteIds.clear();
+    this.facebookRuleSelectedContentKeys.clear();
   }
 
   /**
@@ -2334,7 +2881,7 @@ export class RoleDispatcher {
     cards: PageCardsData[],
     listKind: 'feed' | 'reels' | undefined,
   ): void {
-    if (this.accountPlatform !== 'facebook') return;
+    if (this.accountPlatform !== 'facebook' || this.isFacebookRuleMode()) return;
     let card: PageCardsData | undefined;
     let source: 'reels' | 'feed_video';
     if (listKind === 'reels' && cards.length === 1) {
@@ -2423,7 +2970,12 @@ export class RoleDispatcher {
     cards: PageCardsData[],
     listKind: 'feed' | 'reels' | undefined,
   ): void {
-    if (this.accountPlatform !== 'facebook' || listKind !== 'reels' || cards.length !== 1) return;
+    if (
+      this.accountPlatform !== 'facebook'
+      || this.isFacebookRuleMode()
+      || listKind !== 'reels'
+      || cards.length !== 1
+    ) return;
     if (!this.hasReelFollow()) {
       console.log('[interaction_appraiser] skip reason=facebook_reel_follow_edge_capability_missing action=follow');
       return;
@@ -2976,6 +3528,33 @@ export class RoleDispatcher {
 
       // Edge 上报可见卡片 → 更新数据并触发评估
       this.eventBus.on('page.cards.arrived', (payload) => {
+        for (const card of payload.cards ?? []) {
+          if (card.noteId && card.noteIdKind === 'content_ref') this.contentRefNoteIds.add(card.noteId);
+        }
+        // 规则模式豁免的边界（change facebook-rule-mode-without-persona）：豁免**只**解除会话启动闸。
+        // 会话起来之后每一批卡都现读一次裁决——此刻若不是规则模式（活跃周之外、慢启动接管、裁决权威
+        // 读不到…），而该账号又是权威的「未绑人设」，就 MUST NOT 让人设浏览闭环跑起来：不评估、不下发，
+        // 诚实收尾。这也覆盖会话中途被解绑的账号（原先只会让取值口一路抛错空转）。
+        if (
+          this.personaBinding?.(this.currentAccountId) === 'unbound'
+          && !this.isFacebookRuleMode()
+        ) {
+          console.warn(
+            `[RoleDispatcher] 账号 ${this.currentAccountId} 未绑人设且此刻非规则模式 → 诚实收尾（no_persona_outside_rule_mode）：不评估本批卡、不下发任何指令`,
+          );
+          this.endSession('no_persona_outside_rule_mode');
+          return;
+        }
+        if (
+          this.accountPlatform === 'facebook'
+          && payload.listKind === 'feed'
+          && payload.cards.length > 0
+          && this.sessionContext.sourcePageType === 'feed'
+          && this.reelsFallbackState === 'confirmed'
+        ) {
+          this.resetFacebookReelsFallback();
+          console.log('[RoleDispatcher] Facebook 非空普通 Feed 已回归 → 开启新的 Reels fallback epoch');
+        }
         if (
           this.accountPlatform === 'facebook'
           && payload.listKind === 'reels'
@@ -3030,12 +3609,50 @@ export class RoleDispatcher {
             return; // 已发回首页指令：跳过对本批搜索卡的评估（正离开搜索页）
           }
         }
+        if (this.isFacebookRuleMode()) {
+          const videos = payload.cards.filter((card) => card.isVideo === true);
+          const presentedViewWillDrive =
+            (payload.listKind === 'reels' && payload.cards.length === 1)
+            || (
+              payload.listKind === 'feed'
+              && videos.length === 1
+              && isCanonicalFacebookFeedVideoNoteId(videos[0]?.noteId)
+            );
+          if (presentedViewWillDrive) return;
+          const card = selectFacebookRuleCard(
+            payload.cards,
+            (key) => this.facebookRuleSelectedContentKeys.has(key),
+          );
+          if (card) {
+            this.facebookRuleSelectedContentKeys.add(facebookPostKey(card.noteId!));
+            this.eventBus.emit('content.valuable', {
+              index: card.index,
+              noteId: card.noteId,
+              title: card.title,
+              reason: 'facebook_rule_feed_order',
+              confidence: 1,
+              sourcePageType: this.sessionContext.sourcePageType,
+              ts: this.clock(),
+            });
+          } else {
+            this.eventBus.emit('content.no_valuable', {
+              pageType: this.sessionContext.sourcePageType,
+              reason: 'facebook_rule_no_structural_candidate',
+              ts: this.clock(),
+            });
+          }
+          return;
+        }
         void this.contentEvaluator?.evaluate(this.sessionContext.sourcePageType);
       }),
 
       // Edge 上报笔记详情 → 更新当前笔记数据
       this.eventBus.on('note.detail.arrived', (payload) => {
         this.updateNoteData(payload.detail);
+      }),
+
+      this.eventBus.on('facebook.rule.view.confirmed', (payload) => {
+        this.queueFacebookRuleView(payload);
       }),
 
       // Edge 上报作者主页资料 → ProfileBrowser 直接消费 profile.detail.arrived 产出 profile.browsed
@@ -3064,6 +3681,9 @@ export class RoleDispatcher {
             if (payload.action === 'comment') this.pendingComment = null;
             if (payload.action === 'open_note') this.pendingMigration = null;
             this.clearCommentSublineHold(true);
+          }
+          if (payload.action === 'like' && this.pendingFacebookRuleBatch) {
+            void this.finishFacebookRuleLike(false, 'preempted_by_task');
           }
           return;
         }
@@ -3174,8 +3794,21 @@ export class RoleDispatcher {
           }
           return;
         }
-        // Facebook 普通 Feed 确认到底：复用已部署 Reels fallback 握手，每场只授权一次；重复到底回执直接吞掉，
-        // 不再刷新同一普通 Feed。其他平台保持既有 refresh 自愈，避免转 idle → 240s nudge 循环。
+        // Native 有界续滚结束但没有终止证据：保持普通 Feed，由 Cloud 现有配额/暂停/节奏闸继续下一条滚动命令。
+        // 该原因绝不授权 Reels；若命令被当前闸抑制，既有恢复事件会在闸打开后重新驱动，不制造裸定时器。
+        if (
+          payload.action === 'scroll' &&
+          payload.reason === 'feed_continuation_unconfirmed' &&
+          this.accountPlatform === 'facebook' &&
+          this.sessionActive &&
+          this.sessionContext.sourcePageType === 'feed'
+        ) {
+          console.log('[RoleDispatcher] Facebook Feed 未形成终止证据 → 继续普通 Feed 滚动');
+          this.sendScrollCommand('feed_continuation_unconfirmed');
+          return;
+        }
+        // Facebook 普通 Feed 确认到底：复用已部署 Reels fallback 握手；同一 fallback epoch 内重复到底回执吞掉，
+        // 可读 Reels 后若非空普通 Feed 已权威回归，则下一次真实到底可开启新 epoch。其他平台保持既有 refresh 自愈。
         if (
           payload.action === 'scroll' &&
           payload.reason === 'feed_exhausted' &&
@@ -3189,6 +3822,51 @@ export class RoleDispatcher {
         if (payload.reason === 'feed_exhausted' && this.canRefresh() && this.sessionActive) {
           console.log('[RoleDispatcher] feed_exhausted → 立即刷新换新批（避免 idle 空转）');
           this.sendCommand({ action: 'refresh', reason: 'feed_exhausted_refresh', params: { thinkMs: this.thinkNow() } });
+          return;
+        }
+        // 滚动「无目标」必须有处置（change restore-facebook-post-join-comment-continuity）：
+        // 此前 Reels 恢复分支只认 pending 态、feed_continuation_unconfirmed / feed_exhausted 各有自己的分支、
+        // 而下方的通用兜底把 scroll 明确排除在外——于是 confirmed 态账号收到 scroll:no_target 时**一条分支都不命中**：
+        // 既不发命令也不判终态。真机实测由此零命令悬停 60s，直到冷待机重启才终结。
+        // 处置口径：普通 Feed 滚不出任何目标 = 与「确认到底」同等决定性 ⇒ 开启新的 Reels epoch；
+        // 授权确实发不出去（非 Facebook / 已在 pending / 被闸抑制）则诚实结束本场，绝不留悬停。
+        // 只收窄到 Facebook：证据全部来自 Facebook 会话，且小红书侧另有在途 change 正在重整其滚动语义，
+        // 不在本次顺手改它的行为。
+        if (
+          payload.action === 'scroll'
+          && payload.ok === false
+          && typeof payload.reason === 'string'
+          && payload.reason.startsWith('no_target')
+          && this.accountPlatform === 'facebook'
+          && this.sessionActive
+        ) {
+          // 死锁出口（change restore-facebook-post-join-comment-continuity）：把「已确认」解回可授权态
+          // 的唯一路径原本是「非空普通 Feed 权威回归」。首页恒空的账号正是因为首页出不来内容才被切到
+          // Reels，一旦被任何命令送回首页（例如批次收尾那条不带任务标识的滚动），这个条件永远不成立。
+          //
+          // 解锁证据只用**这一条**滚动无目标回执，不用 feed.empty.confirmed：后者在 Reels 期间到达时
+          // 多半是切面之前的迟到旧报告，拿它解锁会把「陈旧空态」误当成「回到空首页」（既有用例正是
+          // 为此立的）。滚动回执是当下这一跳的结果，才是真证据。重开按场有界，防两个空面之间来回弹。
+          if (this.reelsFallbackState === 'confirmed') {
+            if (this.reelsReentryCount < FACEBOOK_REELS_REENTRY_MAX_PER_SESSION) {
+              this.reelsReentryCount += 1;
+              console.log(
+                `[RoleDispatcher] Facebook 已在 Reels epoch 却在普通 Feed 滚不出目标 → 解回可授权态重开`
+                + `（${this.reelsReentryCount}/${FACEBOOK_REELS_REENTRY_MAX_PER_SESSION}）`,
+              );
+              this.resetFacebookReelsFallback();
+            } else {
+              console.warn(
+                `[RoleDispatcher] Facebook 重开 Reels epoch 次数已用尽`
+                + `（${this.reelsReentryCount}/${FACEBOOK_REELS_REENTRY_MAX_PER_SESSION}）→ 不再重开`,
+              );
+            }
+          }
+          if (this.authorizeFacebookReelsFallback('feed_exhausted')) return;
+          console.warn(
+            `[RoleDispatcher] Facebook 滚动无目标且无法给出下一步（reason=${payload.reason}）→ 诚实结束本场，绝不无命令悬停`,
+          );
+          this.endSession('scroll_no_target_without_next_step');
           return;
         }
         // 信息流就地互动目标已从 DOM 消失（change platform-browse-protocol）：no_target(stale) 视快照过期 ⇒ 重扫换批重选，
@@ -3251,6 +3929,12 @@ export class RoleDispatcher {
             this.pendingInteractionKeys.delete(payload.action);
           }
         }
+        // 规则批次的点赞终态由固定批次接管：预算/冷却/去重账已在上面按真实回执处理，
+        // 此后不进入普通互动的一次重试，也不由人设链决定下一步。
+        if (payload.action === 'like' && this.pendingFacebookRuleBatch) {
+          void this.finishFacebookRuleLike(payload.ok === true, payload.reason);
+          return;
+        }
         // follow 配额按真实回执扣减：仅当发生了真实的新关注点击（ok:true 且非 already_followed no-op）。
         // already_followed（良性 no-op）与各类失败（ok:false）均不扣额，使配额对齐真实平台动作。
         if (payload.action === 'follow' && payload.ok === true && payload.reason !== 'already_followed') {
@@ -3261,7 +3945,8 @@ export class RoleDispatcher {
         if (payload.action === 'comment_like' && payload.ok === true) {
           this.consumeBudget('comment_like');
         }
-        // 评论回执：真发成功才扣额（对齐 follow）；无论成功/失败都 emit comment.done 触发「是否进主页评估」
+        // 评论回执：确认成功或已派发未确认都扣额；后者只表示消耗了一次潜在平台写入，仍按 unknown/
+        // comment.done.ok=false 报告。无论成功/失败都 emit comment.done 触发「是否进主页评估」
         // （评论支线唯一出口、每篇只一次），失败不死锁、不兜底滑动（否则把详情页滚走）。
         if (payload.action === 'comment' && this.pendingComment) {
           const pc = this.pendingComment;
@@ -3278,7 +3963,7 @@ export class RoleDispatcher {
           } else {
             this.reportMandatoryCommentOutcome(pc, 'failed', payload.reason ?? 'edge_failed');
           }
-          if (payload.ok === true && !pendingApproval) this.consumeBudget('comment');
+          if ((payload.ok === true || ambiguous) && !pendingApproval) this.consumeBudget('comment');
           this.eventBus.emit('comment.done', {
             noteId: pc.noteId,
             sourcePageType: pc.sourcePageType,

@@ -27,6 +27,13 @@ export interface PageCardsData {
   collectCount: number;
   coverDesc?: string;
   noteId?: string;
+  /**
+   * `noteId` 的身份分档（change generalize-facebook-content-derived-post-identity）。
+   * 缺省 = 平台永久链接 ⇒ 老边端逐位等于今天。
+   * `content_ref` = 内容派生的会话内引用：可评估、可计浏览、可就地点赞；
+   * MUST NOT 用于导航 / 打开详情 / 定向评论 / 交付人工线索 / 跨会话去重。
+   */
+  noteIdKind?: 'permalink' | 'content_ref';
   /** Existing protocol witness: this presented card contains a video. */
   isVideo?: boolean;
 }
@@ -123,6 +130,14 @@ export interface EventMap {
   'session.ended': { stats: SessionStats };
   // targetId（change interaction-feed-enrichment）：展示账本去重键——笔记动作=noteId，关注=authorId。noteId 保留（喂 likedNoteStore）。
   'interaction.occurred': { action: 'view' | 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'join_group'; accountId?: string; noteId?: string; targetId?: string };
+  /** 风控 view fact 已持久入队后的 Facebook 规则模式候选事实。 */
+  'facebook.rule.view.confirmed': {
+    accountId: string;
+    noteId: string;
+    sourceDedupeKey: string;
+    source: 'detail' | 'reels' | 'feed_video';
+    occurredAt: number;
+  };
   /** Platform-observed search fact; deliberately separate from note-scoped interaction accounting. */
   'search.occurred': {
     accountId?: string;
