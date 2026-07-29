@@ -51,6 +51,12 @@ import {
   InteractionAuthHttpClient,
   ReplyConfigResolverHttpClient,
 } from './transport/api-publish-interaction-http.js';
+// 本仓第一次有 content 方向的出边：概念池与精选库召回的属主都在内容进程，automation 独立起进程后
+// 这两条只能经 HTTP 过去。服务端一侧在 content 仓，路由名两端共这一份定义。
+import {
+  ConceptPoolAuthorityHttpClient,
+  CuratedSelectionAuthorityHttpClient,
+} from './transport/content-authority-http.js';
 import { PgAccountProjectionStore } from './transport/account-projection-store.js';
 import { createAutomationSyncReadConsumerCheckpointStore } from './transport/automation-sync-read-checkpoint-store.js';
 import { PgAutomationSyncReadGenerationStore } from './transport/automation-sync-read-generation-store.js';
@@ -94,6 +100,17 @@ export const AUTOMATION_API_CLIENT_GROUPS = [
   'automationConfigCommands',
   'offboardAdmissionLedger',
   'structuredNotification',
+] as const;
+
+/**
+ * content 方向的客户端组。**刻意与 api 那 16 组分开列**，不是洁癖：
+ * 上面那份是 `API_DIRECT_PORT_INVENTORY` 的对账面（派生 census 逐条比它），
+ * 而这两条走的是另一个属主、另一套失败语义（返回裸值、失败抛具名 `ContentPortError`）。
+ * 混进同一份清单会让那份对账当场对不上，且把两种失败约定搅成一种。
+ */
+export const AUTOMATION_CONTENT_CLIENT_GROUPS = [
+  'conceptPool',
+  'curatedSelection',
 ] as const;
 
 export const AUTOMATION_COMMAND_RECEIVER_GROUPS = [
@@ -244,6 +261,9 @@ export interface AutomationRootConfig {
   apiBaseUrl: string;
   apiInternalToken: string;
   automationInternalToken: string;
+  /** 内容进程的内部 HTTP 基址。缺了就没有概念池、没有创作素材、没有搜索词样本——故必填、不给默认。 */
+  contentBaseUrl: string;
+  contentInternalToken: string;
   automationPort: number;
   offboardWorkerId: string;
 }
@@ -272,6 +292,11 @@ export interface AutomationApiClients {
   automationConfigCommands: AutomationConfigCommandsHttpClient;
   offboardAdmissionLedger: OffboardAdmissionLedgerHttpClient;
   structuredNotification: StructuredNotificationHttpClient;
+}
+
+export interface AutomationContentClients {
+  conceptPool: ConceptPoolAuthorityHttpClient;
+  curatedSelection: CuratedSelectionAuthorityHttpClient;
 }
 
 export const AUTOMATION_SYNC_READ_CONSUMER_STREAMS = [
@@ -426,6 +451,7 @@ export interface AutomationRootSyncReadHandles {
 export interface AutomationCompositionRoot {
   ownerPool: pg.Pool;
   apiClients: AutomationApiClients;
+  contentClients: AutomationContentClients;
   structuredDeliver: StructuredNotificationHttpClient;
   commandReceivers: {
     edgeResume: EdgeResumeCommandReceiver;
@@ -455,7 +481,12 @@ export class AutomationRootNotReadyError extends Error {
 
 function requiredEnv(
   env: NodeJS.ProcessEnv,
-  name: 'AIDCP_API_URL' | 'AIDCP_API_INTERNAL_TOKEN' | 'AIDCP_AUTOMATION_INTERNAL_TOKEN',
+  name:
+    | 'AIDCP_API_URL'
+    | 'AIDCP_API_INTERNAL_TOKEN'
+    | 'AIDCP_AUTOMATION_INTERNAL_TOKEN'
+    | 'AIDCP_CONTENT_URL'
+    | 'AIDCP_CONTENT_INTERNAL_TOKEN',
 ): string {
   const value = env[name]?.trim();
   if (!value || /\s/.test(value)) {
@@ -489,6 +520,11 @@ export function readAutomationRootConfig(
     apiBaseUrl: requiredEnv(env, 'AIDCP_API_URL'),
     apiInternalToken: requiredEnv(env, 'AIDCP_API_INTERNAL_TOKEN'),
     automationInternalToken: requiredEnv(env, 'AIDCP_AUTOMATION_INTERNAL_TOKEN'),
+    // content 出边与 api 出边同档必填：没配 = 概念池读不到、精选素材问不到。
+    // 让它可缺省的代价很具体——客户端建不出来，调用点要么写成 `?.` 吞成一个空数组，
+    // 要么第一次用到才炸；前者会把「这条缝断了」画成「库里没素材」，正是本 change 要消掉的那类假成功。
+    contentBaseUrl: requiredEnv(env, 'AIDCP_CONTENT_URL'),
+    contentInternalToken: requiredEnv(env, 'AIDCP_CONTENT_INTERNAL_TOKEN'),
     automationPort: optionalPort(env),
     offboardWorkerId: `offboard-reconcile-${executionTarget}`,
   };
@@ -519,6 +555,25 @@ export function createAutomationApiClients(
   };
 }
 
+/**
+ * content 方向的客户端组，形态照抄上面那个 api 组：一条基址一个内部令牌 + 本进程的部署 target，
+ * 三样一次绑好交给每个客户端。**target 由这里注入、不由业务调用方给**——DEV/OL 长期共库，
+ * 让调用方挑 target 等于把「在哪台机器上真读」变成一个请求体字段。
+ */
+export function createAutomationContentClients(
+  config: Pick<
+    AutomationRootConfig,
+    'contentBaseUrl' | 'contentInternalToken' | 'executionTarget'
+  >,
+): AutomationContentClients {
+  const http = new InternalHttpClient(config.contentBaseUrl);
+  const args = [http, config.contentInternalToken, config.executionTarget] as const;
+  return {
+    conceptPool: new ConceptPoolAuthorityHttpClient(...args),
+    curatedSelection: new CuratedSelectionAuthorityHttpClient(...args),
+  };
+}
+
 export function createAutomationCompositionRoot(options: {
   config: AutomationRootConfig;
   runtime: AutomationRuntimeHandles;
@@ -528,6 +583,7 @@ export function createAutomationCompositionRoot(options: {
   const ownsPool = !options.ownerPool;
   const ownerPool = options.ownerPool ?? new pg.Pool(resolveOwnerPgConfig('automation'));
   const apiClients = createAutomationApiClients(options.config);
+  const contentClients = createAutomationContentClients(options.config);
   const clock = options.syncRead?.clock ?? Date.now;
   const logger = options.syncRead?.logger ?? console;
   const setTimer =
@@ -887,6 +943,7 @@ export function createAutomationCompositionRoot(options: {
   return {
     ownerPool,
     apiClients,
+    contentClients,
     structuredDeliver: apiClients.structuredNotification,
     commandReceivers,
     offboardReconciler,

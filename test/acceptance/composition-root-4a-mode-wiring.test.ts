@@ -17,6 +17,7 @@ import {
 import {
   AUTOMATION_API_CLIENT_GROUPS,
   AUTOMATION_COMMAND_RECEIVER_GROUPS,
+  AUTOMATION_CONTENT_CLIENT_GROUPS,
   AUTOMATION_ROOT_READINESS_BLOCKERS,
   AUTOMATION_ROOT_SURFACE,
   AUTOMATION_SYNC_READ_CONSUMER_STREAMS,
@@ -42,6 +43,8 @@ const CONFIG: AutomationRootConfig = {
   apiBaseUrl: 'http://127.0.0.1:1',
   apiInternalToken: 'api-token',
   automationInternalToken: 'automation-token',
+  contentBaseUrl: 'http://127.0.0.1:2',
+  contentInternalToken: 'content-token',
   automationPort: 0,
   offboardWorkerId: 'offboard-reconcile-dev',
 };
@@ -194,7 +197,14 @@ test('entry checks service mode before dependent configuration and never fakes i
     AIDCP_API_URL: 'http://127.0.0.1:8092',
     AIDCP_API_INTERNAL_TOKEN: 'api-token',
     AIDCP_AUTOMATION_INTERNAL_TOKEN: 'automation-token',
+    AIDCP_CONTENT_URL: 'http://127.0.0.1:8090',
+    AIDCP_CONTENT_INTERNAL_TOKEN: 'content-token',
   };
+  // task 2.4: the content egress is required, not optional. An unset AIDCP_CONTENT_URL means the
+  // concept pool and the curated corpus are unreachable; booting anyway would surface that as
+  // "no material" at every call site instead of as a missing configuration.
+  const { AIDCP_CONTENT_URL: _omitted, ...withoutContentUrl } = env;
+  assert.throws(() => readAutomationRootConfig(withoutContentUrl), /AIDCP_CONTENT_URL is required/);
   await assert.rejects(
     runAutomationEntry(env),
     (error: unknown) =>
@@ -212,6 +222,7 @@ test('minimal root constructs exactly 16 API clients and three automation receiv
   });
   assert.equal(root.ownerPool, ownerPool);
   assert.deepEqual(Object.keys(root.apiClients), [...AUTOMATION_API_CLIENT_GROUPS]);
+  assert.deepEqual(Object.keys(root.contentClients), [...AUTOMATION_CONTENT_CLIENT_GROUPS]);
   assert.deepEqual(Object.keys(root.commandReceivers), [...AUTOMATION_COMMAND_RECEIVER_GROUPS]);
   assert.equal(root.structuredDeliver, root.apiClients.structuredNotification);
   assert.ok(root.offboardReconciler instanceof AutomationOffboardAdmissionReconciler);
