@@ -510,6 +510,16 @@
     "note": "§4.7：认领型 worker 范式（10/10 automation）"
   },
   {
+    "path": "src/delegated-task/operator-command-ledger.ts",
+    "layer": "automation",
+    "note": "§4.7：认领型 worker 范式（10/10 automation）"
+  },
+  {
+    "path": "src/delegated-task/operator-command-receiver.ts",
+    "layer": "automation",
+    "note": "§4.7：认领型 worker 范式（10/10 automation）"
+  },
+  {
     "path": "src/delegated-task/ownership.ts",
     "layer": "automation",
     "note": "§4.7：认领型 worker 范式（10/10 automation）"
