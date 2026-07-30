@@ -126,6 +126,10 @@
 
     { "path": "src/orchestrator/content-scheduler.ts", "layer": "api", "basis": "§4.7 / §4.6.5 第 12 项：内容排期调度器归 api" },
     { "path": "src/orchestrator/facebook-rule-mode.ts", "layer": "automation", "basis": "change facebook-rule-mode-cadence：有效模式仲裁与规则浏览卡片选择直接服务 automation 浏览闭环，不持配置权威、不写数据库。（补齐：本仓这份规则表此前漏了这两条，靠已生成的 module-ownership.json 兜着，refresh 一跑就会抛）" },
+    { "path": "src/orchestrator/facebook-consumption-mode.ts", "layer": "automation", "basis": "change add-configurable-facebook-consumption-mode：消费模式收据分类、阈值推进与 revision 仲裁直接服务 automation 浏览闭环，不持配置写权" },
+    { "path": "src/orchestrator/facebook-consumption-mode-coordinator.ts", "layer": "automation", "basis": "change add-configurable-facebook-consumption-mode：消费模式的 like/join/comment 单飞编排、提交前复核与恢复直接驱动真实平台动作，归 automation" },
+    { "path": "src/orchestrator/facebook-consumption-mode-runtime-store.ts", "layer": "automation", "basis": "change add-configurable-facebook-consumption-mode：target-scoped 唯一浏览事实、进度、动作义务、回执去重与终态是 automation 运行权威；本文件只写 automation 属主表" },
+    { "path": "src/orchestrator/facebook-consumption-mode-types.ts", "layer": "automation", "basis": "change add-configurable-facebook-consumption-mode：消费运行进度、动作义务与回执形状只描述 automation 域内编排与持久运行事实" },
     { "path": "src/orchestrator/facebook-rule-mode-runtime-store.ts", "layer": "automation", "basis": "change facebook-rule-mode-cadence：target-scoped 浏览事实、进度、批次和动作终态是 automation 运行权威，本文件只读写 automation 属主表" },
 
     { "path": "src/publish-agent/publish-log-store.ts", "layer": "api", "basis": "§4.6.3：台账与审批段 7 文件之一" },

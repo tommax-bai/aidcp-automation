@@ -4,11 +4,11 @@
   "claimBlocked": true,
   "claim": "api, automation, and content are independently bootable without foreign owner pools, stores, or synchronous in-process dependencies",
   "summary": {
-    "total": 13,
+    "total": 12,
     "byCategory": {
       "4b-mirror": 0,
       "operator-command": 3,
-      "content-owner": 9,
+      "content-owner": 8,
       "composition-root": 1
     }
   },
@@ -121,16 +121,6 @@
       "consumer": "automation independent root",
       "evidence": [
         "src/automation-composition-root.ts#readiness:content-reply-generation-authority"
-      ]
-    },
-    {
-      "id": "content-publish-rejection-evidence-authority",
-      "category": "content-owner",
-      "owner": "content",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:content-publish-rejection-evidence-authority"
       ]
     },
     {

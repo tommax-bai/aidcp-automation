@@ -32,10 +32,7 @@ import { compareVersions } from './migration-plan.js';
  * 也被顺带纳入「缺了就算 behind」——那条迁移本身仍不是硬依赖（只被非 monolith 模式的消费者用），
  * 只是复合序的结果。部署时两条一起跑即可，warn 模式下缺任一条也只是响亮提示、不拒绝启动。
  */
-// Derived automation checkout: this repo only ships automation-owned migrations, so the
-// start-up contract is narrowed to its own scope. Machine-derived on every sync by
-// scripts/sync-split-repos:derived_schema_version — do not hand-edit.
-export const REQUIRED_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_state';
+export const REQUIRED_SCHEMA_VERSION = '0102_facebook_consumption_runtime';
 
 /**
  * 本构建认识的最高迁移版本 id，等于本构建 `migrations/` 目录里的最大版本。
@@ -152,6 +149,14 @@ export const REQUIRED_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_stat
  * 判据就是这条常量自己的门槛「缺了这条迁移，链路写不进 / 失败」——今天**不成立**：
  * 用这张表的接收方是新写的、**还没有接进任何进程**（组装根接线属后续批次），
  * 所以缺表时现网一行代码都不会碰它。
+ * ⚠️ **这段判断已被另一路 change 的改动盖过（2026-07-30 集成时发现，如实记下）**：
+ * `REQUIRED_SCHEMA_VERSION` 现在是 `0102_facebook_consumption_runtime`，高于 0099。
+ * 于是 0099 **按复合序被顺带纳入**「缺了就算 behind」——与上面 0075/0076 那条「副作用（有意，登记于此）」
+ * 是同一种情形：**它仍然不是任何存储的硬依赖**，只是序的结果。
+ * 实际影响是**接线那一批少一件事**：不必再为 0099 抬 REQUIRED（已被 0102 覆盖），
+ * 但**部署序列里那一步照旧不能省**——重启前必须 `npm run migrate up`，且 ol 同理。
+ *
+ * 下面这段是当时（REQUIRED 还是 0097）的原始论证，保留是因为判据本身没变：
  * 现在抬 REQUIRED 的实际后果是**给还没跑过 `npm run migrate up` 的机器装一颗静默地雷**，
  * 而且比「起不来」更难查（实测这条链路，不是推测）：schema 契约门是 `segAApiFoundation` 的**第一句**、
  * 裸 `await`、刻意无 try/catch，跑在任何连接池与存储 `init()` 之前；enforce 模式下失败即
@@ -171,7 +176,7 @@ export const REQUIRED_SCHEMA_VERSION = '0096_facebook_rule_fallback_comment_stat
  * 裁定有意保留它）。用它补完，表在库里、门读的账本却还停在旧版本 ⇒ 照样判 behind，
  * 而现场看起来「表明明建好了」，是最费时间的一种排查。
  */
-export const KNOWN_MAX_SCHEMA_VERSION = '0099_operator_command_receipt';
+export const KNOWN_MAX_SCHEMA_VERSION = '0102_facebook_consumption_runtime';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 

@@ -521,7 +521,15 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
   // — the entry counted one gap twice. The kernel contracts stay on purpose.
   // **These counts only ever go DOWN by adjudication.** A drop with no matching note above means a
   // probe stopped matching — a regression, not progress.
-  assert.equal(blockers.length, 13);
+  // 2.9：13 -> 12，content-owner 9 -> 8。`content-publish-rejection-evidence-authority`
+  // 撤条的理由是**记错了属主**、不是解决了：那个判定 `hasUserRejectionEvidence` 住在
+  // kernel（且已随 aidcp-kernel pin 存在于本包里），是一行纯字段读；数据来自 **api** 属主的
+  // publishLog 4a 端口，而本根**已经**构造着它的客户端；那个字段的唯一写入方也属 api。
+  // 全链没有 content。错因是那条 binding 的作者读到的 import 指向
+  // `src/publish-agent/types.ts`——一个 kernel `git mv` 之后留下的六行再导出壳，而那次搬迁
+  // **早于**这条 binding。
+  // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
+  assert.equal(blockers.length, 12);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -532,7 +540,7 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
     {
       '4b-mirror': 0,
       'operator-command': 3,
-      'content-owner': 9,
+      'content-owner': 8,
       'composition-root': 1,
     },
   );

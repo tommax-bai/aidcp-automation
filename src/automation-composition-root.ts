@@ -248,12 +248,27 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
       owner: 'content',
       closingChange: 'future',
     },
-    {
-      id: 'content-publish-rejection-evidence-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
+    // `content-publish-rejection-evidence-authority` retired as MIS-ATTRIBUTED, not resolved
+    // (change split-cloud-automation-production-runtime, task 2.9). Every link of its premise was
+    // checked and each one is wrong: the predicate `hasUserRejectionEvidence` lives in
+    // `kernel/publish-pipeline-types.ts` (kernel-owned, on the kernel roster) and is a two-line pure
+    // field read — **and it is already IN this package via the pinned aidcp-kernel dependency**;
+    // the data comes from the **api**-owned publishLog 4a port whose client this very root already
+    // constructs (`new AutomationPublishLogHttpClient(...)`); and the field's only writer is
+    // api-owned. Nothing in the chain touches content. The `content` label came from the import
+    // specifier the binding's author happened to read: `src/publish-agent/types.ts` is a six-line
+    // `export * from '../kernel/...'` left over from the git mv that moved the type closure into
+    // kernel — a move that PREDATES the binding.
+    //
+    // **This file is a permanent hand-written fork of the Cloud census and gets no mechanical signal
+    // from it, so the reason is restated here on purpose.** Also worth knowing: on the Cloud side the
+    // `owner` field is hardcoded on the binding and copied through by the sweep without consulting
+    // module-ownership.json — a wrong owner label survives every `--refresh-ledger`, so this class of
+    // error can only ever be caught by reading.
+    //
+    // **What was NOT retired**: if anyone ever STUBS that predicate instead of importing it from
+    // kernel, a rejected draft reads as "not rejected" and the delegated executor turns it into
+    // `failed` instead of `cancelled`. That is a different failure needing its own entry.
     {
       id: 'automation-production-runtime-composition-unwired',
       category: 'composition-root',
