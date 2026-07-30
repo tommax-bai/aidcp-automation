@@ -167,12 +167,18 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
       owner: 'automation',
       closingChange: 'future',
     },
-    {
-      id: 'feishu-operator-publish-comment',
-      category: 'operator-command',
-      owner: 'automation',
-      closingChange: 'future',
-    },
+    // `feishu-operator-publish-comment` retired by adjudication (user, 2026-07-30; change
+    // split-cloud-automation-production-runtime task 1.7b). Its two probes on the Cloud side aimed
+    // at the `mode === 'api'` arms of the command face's publish:/comment: closures, and those
+    // closures are unreachable: CommandRouter calls them only when `actions.delegate` is falsy,
+    // while `CommandFaceDeps.delegate` is `NonNullable<...>` and the composition root always injects
+    // a function (a missing service throws from inside it, it is never absent); the panel action
+    // surface has no publish/comment at all. In api mode both capabilities fail through the delegate
+    // channel, already tracked by `feishu-operator-natural-language-delegate` — so keeping this entry
+    // double-counted one gap. The kernel contracts stay (see their docblocks); only the ledger entry
+    // is gone. **This file is a permanent hand-written fork of the Cloud census and receives no
+    // mechanical signal from it, so the reason is restated here on purpose — do not assume the Cloud
+    // side's comment will reach you.** If those closures ever become reachable, re-adjudicate.
     {
       id: 'feishu-operator-delegated-card-actions',
       category: 'operator-command',

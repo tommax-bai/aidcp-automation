@@ -4,10 +4,10 @@
   "claimBlocked": true,
   "claim": "api, automation, and content are independently bootable without foreign owner pools, stores, or synchronous in-process dependencies",
   "summary": {
-    "total": 14,
+    "total": 13,
     "byCategory": {
       "4b-mirror": 0,
-      "operator-command": 4,
+      "operator-command": 3,
       "content-owner": 9,
       "composition-root": 1
     }
@@ -21,16 +21,6 @@
       "consumer": "automation independent root",
       "evidence": [
         "src/automation-composition-root.ts#readiness:feishu-operator-natural-language-delegate"
-      ]
-    },
-    {
-      "id": "feishu-operator-publish-comment",
-      "category": "operator-command",
-      "owner": "automation",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:feishu-operator-publish-comment"
       ]
     },
     {

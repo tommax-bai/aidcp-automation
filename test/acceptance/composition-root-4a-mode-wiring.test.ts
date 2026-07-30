@@ -511,7 +511,17 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
   // process executes it and it was never this root's debt. It stays in the Cloud
   // monolith ledger on its segA store and segD reader — that ledger answers a different
   // question.
-  assert.equal(blockers.length, 14);
+  // 1.7b (user adjudicated 2026-07-30): 14 -> 13, operator-command 4 -> 3.
+  // `feishu-operator-publish-comment` retired by argument, not by wiring: its Cloud-side probes
+  // aimed at the `mode === 'api'` arms of the command face's publish:/comment: closures, and those
+  // closures are unreachable (CommandRouter calls them only when `actions.delegate` is falsy, while
+  // `CommandFaceDeps.delegate` is NonNullable and the composition root always injects a function;
+  // the panel action surface has no publish/comment at all). In api mode both capabilities fail
+  // through the delegate channel, which `feishu-operator-natural-language-delegate` already tracks
+  // — the entry counted one gap twice. The kernel contracts stay on purpose.
+  // **These counts only ever go DOWN by adjudication.** A drop with no matching note above means a
+  // probe stopped matching — a regression, not progress.
+  assert.equal(blockers.length, 13);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -521,7 +531,7 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
     ),
     {
       '4b-mirror': 0,
-      'operator-command': 4,
+      'operator-command': 3,
       'content-owner': 9,
       'composition-root': 1,
     },
