@@ -214,12 +214,30 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
       owner: 'content',
       closingChange: 'future',
     },
-    {
-      id: 'content-role-factories',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
+    // `content-role-factories` retired 2026-07-31 as RESOLVED — **not** mis-attributed, and not
+    // double-counted. The other two retirements in this ledger are of those kinds, so the
+    // distinction is stated up front: this is the first entry here removed because wiring actually
+    // closed it.
+    //
+    // It was accurate when written. The four content role classes could not be imported by this
+    // package, so the composition root had to hand the dispatcher a table of factory functions, and
+    // that table was content-owned territory. Two changes removed the content side of it:
+    //   - task 0.7 re-adjudicated the four role classes, their shared base and the curated gate to
+    //     automation — all six files now live in this package's `src/`;
+    //   - task 2.4b moved the two-hop narrowing anchor from the content-owned store class to the
+    //     kernel curated write port, which was that table's last content-owned symbol.
+    // What remains is composition-root work, and every composition root is hand-written per repo.
+    // This root needs nothing content-owned to build its own table.
+    //
+    // **This file is a permanent hand-written fork of the Cloud census and gets no mechanical signal
+    // from it, so the reason is restated here on purpose.** On the Cloud side the retirement is
+    // anchored by a runnable check (`contentOwnedSymbolsInRoleFactoryTable`, pinned by a dedicated
+    // case): if a content-owned symbol ever reappears in that table it goes red and the entry comes
+    // back. **Nothing here will tell you that happened** — this ledger has no source anchor at all.
+    //
+    // Not retired with it, deliberately: those roles still write to the content-owned curated store
+    // (`content-curated-write-authority`) and the note evaluator still takes a content-owned
+    // transcriber handle (`content-textcard-transcription-authority`). Both are still below.
     {
       id: 'content-generic-llm-authority',
       category: 'content-owner',

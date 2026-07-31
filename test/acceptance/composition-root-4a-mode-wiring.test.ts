@@ -528,8 +528,18 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
   // 全链没有 content。错因是那条 binding 的作者读到的 import 指向
   // `src/publish-agent/types.ts`——一个 kernel `git mv` 之后留下的六行再导出壳，而那次搬迁
   // **早于**这条 binding。
+  // 2.4b：12 -> 11，content-owner 8 -> 7。`content-role-factories` 撤条，**而且它是本台账里
+  // 第一条真靠接线消掉的**——上面两条一条是记错属主、一条是重复计数，这条不是。
+  // 那张角色工厂表当初确实是 content 的地盘（四个角色类属 content，本包 import 不到，
+  // 只能由组装根递一张工厂函数表进来）。task 0.7 把四个角色类 + 基类 + 精选闸改判 automation
+  // （六个文件今天就在本包 src/ 里），task 2.4b 又把两跳窄化的锚点从 content 属主的存储类
+  // 换成 kernel 的精选写口——那是那张表上最后一个 content 符号。剩下的是组装根的活，
+  // 而每个仓的组装根本来就各写各的：**本根不再需要任何 content 属主的东西来建这张表。**
+  // 没跟着撤的：那些角色仍然写 content 属主的精选库（`content-curated-write-authority`），
+  // 正文评估角色仍接一个 content 属主的转写器句柄（`content-textcard-transcription-authority`），
+  // 两条都还在下面。这条撤的是**第三次数**同样那两个依赖。
   // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
-  assert.equal(blockers.length, 12);
+  assert.equal(blockers.length, 11);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -540,7 +550,7 @@ test('derived census separates the 20/55 transport package from the 19/54 automa
     {
       '4b-mirror': 0,
       'operator-command': 3,
-      'content-owner': 8,
+      'content-owner': 7,
       'composition-root': 1,
     },
   );
