@@ -35,3 +35,9 @@ export {
   DecisionTraceStore,
   type DecisionTraceInsert,
 } from './decision-trace-store.js';
+export {
+  ManagedTaskCommandStore,
+  type CancelTaskCommand,
+  type CreateTaskBundle,
+  type CreateTaskBundleResult,
+} from './command-store.js';

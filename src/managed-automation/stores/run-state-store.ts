@@ -223,6 +223,16 @@ export class RunStateStore extends ManagedTaskStoreBase {
     return result.rows[0] ? runFromRow(result.rows[0]) : null;
   }
 
+  async getLatestRunForTask(target: ExecutionTarget, taskId: string): Promise<TaskRun | null> {
+    const result = await this.pool.query<RunRow>(
+      `SELECT ${RUN_COLUMNS} FROM task_runs
+        WHERE execution_target=$1 AND task_id=$2
+        ORDER BY created_at DESC LIMIT 1`,
+      [target, taskId],
+    );
+    return result.rows[0] ? runFromRow(result.rows[0]) : null;
+  }
+
   async claimNextRun(
     target: ExecutionTarget,
     workerId: string,
