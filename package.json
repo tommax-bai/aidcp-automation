@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "aidcp-kernel": "git+ssh://git@github.com/tommax-bai/aidcp-kernel.git#ac98a30b8b53a92e2b0fe69ec39f27de8de03ad9",
+    "aidcp-transport": "git+ssh://git@github.com/tommax-bai/aidcp-transport.git#40df6def11552ccbbeb6fc799d1a6b3282d1b24d",
     "pg": "^8.13.1",
     "ws": "^8.18.0"
   },
