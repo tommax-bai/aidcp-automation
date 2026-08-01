@@ -110,7 +110,7 @@ interface StoreFake {
   renew(
     target: 'dev' | 'ol', accountId: string, workerId: string,
     expectedVersion: number, leaseMs: number, now: number,
-  ): Promise<boolean>;
+  ): Promise<AccountWorkLane | null>;
   retainForShutdown(
     target: 'dev' | 'ol', accountId: string, workerId: string,
     expectedVersion: number, retentionMs: number, evidence: readonly string[], now: number,
@@ -137,7 +137,7 @@ function storeFake(): StoreFake {
     },
     async renew(target, accountId, workerId, expectedVersion, leaseMs, now) {
       fake.calls.push(`renew:${target}:${accountId}:${workerId}:${expectedVersion}:${leaseMs}:${now}`);
-      return true;
+      return lane({ version: expectedVersion + 1, leaseExpiresAt: now + leaseMs });
     },
     async retainForShutdown(target, accountId, workerId, expectedVersion, retentionMs, evidence, now) {
       fake.calls.push(
@@ -315,7 +315,10 @@ test('legacy admission blocks every managed row, including expired, and fails sa
 test('renew, safe release, and shutdown retention remain available after the acquisition flag closes', async () => {
   const store = storeFake();
   const target = arbiter(store, snapshots(CLEAR), false);
-  assert.equal(await target.renewManaged('account-1', 'worker-1', 1), true);
+  assert.deepEqual(await target.renewManaged('account-1', 'worker-1', 1), lane({
+    version: 2,
+    leaseExpiresAt: 31_000,
+  }));
   assert.equal(await target.retainManagedForShutdown(
     'account-1', 'worker-1', 2, 60_000, ['attempt:submitted_unknown'],
   ), true);

@@ -237,6 +237,26 @@ export class ExecutionLedgerStore extends ManagedTaskStoreBase {
     return result.rows[0] ? attemptFromRow(result.rows[0]) : null;
   }
 
+  async listAttemptsByIntent(target: ExecutionTarget, intentId: string): Promise<ExecutionAttempt[]> {
+    const result = await this.pool.query<AttemptRow>(
+      `SELECT ${ATTEMPT_COLUMNS} FROM execution_attempts
+        WHERE execution_target=$1 AND intent_id=$2
+        ORDER BY ordinal ASC`,
+      [target, intentId],
+    );
+    return result.rows.map(attemptFromRow);
+  }
+
+  async listAttemptsByRun(target: ExecutionTarget, runId: string): Promise<ExecutionAttempt[]> {
+    const result = await this.pool.query<AttemptRow>(
+      `SELECT ${ATTEMPT_COLUMNS} FROM execution_attempts
+        WHERE execution_target=$1 AND run_id=$2
+        ORDER BY prepared_at ASC, ordinal ASC`,
+      [target, runId],
+    );
+    return result.rows.map(attemptFromRow);
+  }
+
   async transitionAttempt(
     target: ExecutionTarget,
     attemptId: string,

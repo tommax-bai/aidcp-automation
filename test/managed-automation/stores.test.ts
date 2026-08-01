@@ -162,12 +162,45 @@ test('run claim and renew are target-scoped, leased, and CAS-guarded', async () 
   assert.equal(await store.claimNextRun('dev', 'worker-1', 30_000, 1000), null);
   assert.match(pool.calls[0]!.text, /execution_target=\$4/);
   assert.match(pool.calls[0]!.text, /FOR UPDATE SKIP LOCKED/);
+  assert.match(pool.calls[0]!.text, /status='running' AND lease_expires_at <= \$3/);
+  assert.match(pool.calls[0]!.text, /status='waiting'.*updated_at <= \$5/s);
 
-  pool.enqueue([], 1);
-  assert.equal(await store.renewRunLease('dev', 'run-1', 'worker-1', 3, 30_000, 1000), true);
+  pool.enqueue([{
+    run_id: 'run-1',
+    execution_target: 'dev',
+    task_id: 'task-1',
+    task_revision_id: 'revision-1',
+    execution_plan_id: 'plan-1',
+    account_id: 'account-1',
+    status: 'running',
+    wait_reason: null,
+    terminal_outcome: null,
+    reason_code: null,
+    confirmed_units: 0,
+    target_units: 1,
+    last_checkpoint_ref: null,
+    current_node_id: null,
+    lease_owner: 'worker-1',
+    lease_expires_at: new Date(31_000),
+    attempt_count: 0,
+    version: 3,
+    created_at: new Date(0),
+    updated_at: new Date(1_000),
+    terminal_at: null,
+  }]);
+  const renewed = await store.renewRunLease('dev', 'run-1', 'worker-1', 3, 30_000, 1000);
+  assert.equal(renewed?.version, 3, 'lease heartbeat must not race state CAS by advancing version');
+  assert.equal(renewed?.leaseExpiresAt, 31_000);
   assert.match(pool.calls[1]!.text, /execution_target=\$3/);
   assert.match(pool.calls[1]!.text, /version=\$6/);
+  assert.doesNotMatch(pool.calls[1]!.text, /version=version\+1/);
   await assert.rejects(store.renewRunLease('dev', 'run-1', 'worker-1', 4, 0), ManagedTaskInvariantError);
+
+  pool.enqueue([], 0);
+  assert.equal(await store.claimNextCancellation('dev', 'worker-2', 30_000, 2_000), null);
+  assert.match(pool.calls[2]!.text, /status='cancel_requested'/);
+  assert.match(pool.calls[2]!.text, /execution_target=\$4/);
+  assert.match(pool.calls[2]!.text, /FOR UPDATE SKIP LOCKED/);
 });
 
 test('execution ledger rejects target drift, terminal mutation, and unsafe evidence coupling', async () => {

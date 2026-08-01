@@ -174,18 +174,19 @@ export class AccountLaneStore extends ManagedTaskStoreBase {
     expectedVersion: number,
     leaseMs: number,
     now = Date.now(),
-  ): Promise<boolean> {
+  ): Promise<AccountWorkLane | null> {
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 1) {
       throw new ManagedTaskInvariantError('lane leaseMs must be a positive integer');
     }
-    const result = await this.pool.query(
+    const result = await this.pool.query<LaneRow>(
       `UPDATE managed_account_work_lanes
           SET lease_expires_at=$1, version=version+1, updated_at=$2
         WHERE execution_target=$3 AND account_id=$4 AND lease_owner=$5 AND version=$6
-          AND lease_expires_at > $2`,
+          AND lease_expires_at > $2
+        RETURNING ${LANE_COLUMNS}`,
       [new Date(now + leaseMs), new Date(now), target, accountId, leaseOwner, expectedVersion],
     );
-    return result.rowCount === 1;
+    return result.rows[0] ? laneFromRow(result.rows[0]) : null;
   }
 
   async retainForShutdown(

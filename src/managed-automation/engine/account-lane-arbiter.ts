@@ -240,7 +240,7 @@ export class AccountLaneArbiter {
     accountId: string,
     workerId: string,
     expectedVersion: number,
-  ): Promise<boolean> {
+  ): Promise<AccountWorkLane | null> {
     return this.options.store.renew(
       this.options.executionTarget,
       accountId,

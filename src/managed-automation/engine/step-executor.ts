@@ -15,6 +15,7 @@ export interface StepExecutionRequest {
   inputRef: string;
   deadlineAt: number;
   correlationId: string;
+  signal: AbortSignal;
 }
 
 export interface StepExecutionResult {
@@ -45,4 +46,3 @@ export class StepExecutorRegistry {
     return matches[0] ?? null;
   }
 }
-

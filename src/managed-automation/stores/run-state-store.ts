@@ -238,9 +238,11 @@ export class RunStateStore extends ManagedTaskStoreBase {
     workerId: string,
     leaseMs: number,
     now = Date.now(),
+    waitingRetryMs = 5_000,
   ): Promise<TaskRun | null> {
-    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1) {
-      throw new ManagedTaskInvariantError('leaseMs must be a positive integer');
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1
+      || !Number.isSafeInteger(waitingRetryMs) || waitingRetryMs < 0) {
+      throw new ManagedTaskInvariantError('leaseMs must be positive and waitingRetryMs non-negative');
     }
     const result = await this.pool.query<RunRow>(
       `UPDATE task_runs
@@ -249,14 +251,19 @@ export class RunStateStore extends ManagedTaskStoreBase {
         WHERE run_id=(
           SELECT run_id FROM task_runs
            WHERE execution_target=$4
-             AND status IN ('queued','waiting')
-             AND (lease_expires_at IS NULL OR lease_expires_at <= $3)
-           ORDER BY created_at ASC
+             AND (
+               (status='queued' AND (lease_expires_at IS NULL OR lease_expires_at <= $3))
+               OR (status='waiting' AND (lease_expires_at IS NULL OR lease_expires_at <= $3)
+                   AND updated_at <= $5)
+               OR (status='running' AND lease_expires_at <= $3)
+             )
+           ORDER BY CASE WHEN status='queued' THEN 0 WHEN status='running' THEN 1 ELSE 2 END,
+                    created_at ASC
            FOR UPDATE SKIP LOCKED
            LIMIT 1
         ) AND execution_target=$4
         RETURNING ${RUN_COLUMNS}`,
-      [workerId, new Date(now + leaseMs), new Date(now), target],
+      [workerId, new Date(now + leaseMs), new Date(now), target, new Date(now - waitingRetryMs)],
     );
     return result.rows[0] ? runFromRow(result.rows[0]) : null;
   }
@@ -268,18 +275,45 @@ export class RunStateStore extends ManagedTaskStoreBase {
     expectedVersion: number,
     leaseMs: number,
     now = Date.now(),
-  ): Promise<boolean> {
+  ): Promise<TaskRun | null> {
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 1) {
       throw new ManagedTaskInvariantError('leaseMs must be a positive integer');
     }
-    const result = await this.pool.query(
+    const result = await this.pool.query<RunRow>(
       `UPDATE task_runs
-          SET lease_expires_at=$1, version=version+1, updated_at=$2
+          SET lease_expires_at=$1, updated_at=$2
         WHERE execution_target=$3 AND run_id=$4 AND lease_owner=$5 AND version=$6
-          AND status <> 'terminal' AND lease_expires_at > $2`,
+          AND status <> 'terminal' AND lease_expires_at > $2
+        RETURNING ${RUN_COLUMNS}`,
       [new Date(now + leaseMs), new Date(now), target, runId, workerId, expectedVersion],
     );
-    return result.rowCount === 1;
+    return result.rows[0] ? runFromRow(result.rows[0]) : null;
+  }
+
+  async claimNextCancellation(
+    target: ExecutionTarget,
+    workerId: string,
+    leaseMs: number,
+    now = Date.now(),
+  ): Promise<TaskRun | null> {
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1) {
+      throw new ManagedTaskInvariantError('leaseMs must be a positive integer');
+    }
+    const result = await this.pool.query<RunRow>(
+      `UPDATE task_runs
+          SET lease_owner=$1, lease_expires_at=$2, version=version+1, updated_at=$3
+        WHERE run_id=(
+          SELECT run_id FROM task_runs
+           WHERE execution_target=$4 AND status='cancel_requested'
+             AND (lease_expires_at IS NULL OR lease_expires_at <= $3)
+           ORDER BY updated_at ASC
+           FOR UPDATE SKIP LOCKED
+           LIMIT 1
+        ) AND execution_target=$4
+        RETURNING ${RUN_COLUMNS}`,
+      [workerId, new Date(now + leaseMs), new Date(now), target],
+    );
+    return result.rows[0] ? runFromRow(result.rows[0]) : null;
   }
 
   async transitionRun(
@@ -296,8 +330,8 @@ export class RunStateStore extends ManagedTaskStoreBase {
           SET status=$1, wait_reason=$2, terminal_outcome=$3, reason_code=$4,
               confirmed_units=$5, target_units=$6, last_checkpoint_ref=$7,
               current_node_id=$8, attempt_count=attempt_count+$9,
-              lease_owner=CASE WHEN $1='terminal' THEN NULL ELSE lease_owner END,
-              lease_expires_at=CASE WHEN $1='terminal' THEN NULL ELSE lease_expires_at END,
+              lease_owner=CASE WHEN $1='running' THEN lease_owner ELSE NULL END,
+              lease_expires_at=CASE WHEN $1='running' THEN lease_expires_at ELSE NULL END,
               terminal_at=$10, version=version+1, updated_at=now()
         WHERE execution_target=$11 AND run_id=$12 AND version=$13 AND status=$14
           AND confirmed_units <= $5`,
@@ -328,6 +362,16 @@ export class RunStateStore extends ManagedTaskStoreBase {
       [target, stepRunId],
     );
     return result.rows[0] ? stepFromRow(result.rows[0]) : null;
+  }
+
+  async listStepsByRun(target: ExecutionTarget, runId: string): Promise<StepRun[]> {
+    const result = await this.pool.query<StepRow>(
+      `SELECT ${STEP_COLUMNS} FROM step_runs
+        WHERE execution_target=$1 AND run_id=$2
+        ORDER BY started_at ASC NULLS LAST, updated_at ASC`,
+      [target, runId],
+    );
+    return result.rows.map(stepFromRow);
   }
 
   async transitionStep(

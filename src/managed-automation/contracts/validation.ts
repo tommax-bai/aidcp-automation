@@ -111,8 +111,10 @@ export function canTransitionAttemptStatus(
       || to === 'completed'
       || to === 'empty'
       || to === 'failed'
+      || to === 'timeout'
       || to === 'undeliverable'
-      || to === 'aborted';
+      || to === 'aborted'
+      || to === 'unsupported';
   }
   return isTerminalAttemptStatus(to);
 }

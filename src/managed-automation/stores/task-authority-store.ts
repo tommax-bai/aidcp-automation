@@ -304,6 +304,15 @@ export class TaskAuthorityStore extends ManagedTaskStoreBase {
     return result.rows[0] ? planFromRow(result.rows[0]) : null;
   }
 
+  async getPlan(target: ExecutionTarget, executionPlanId: string): Promise<ExecutionPlan | null> {
+    const result = await this.pool.query<PlanRow>(
+      `SELECT ${PLAN_COLUMNS} FROM execution_plans
+        WHERE execution_target=$1 AND execution_plan_id=$2`,
+      [target, executionPlanId],
+    );
+    return result.rows[0] ? planFromRow(result.rows[0]) : null;
+  }
+
   async insertCommandReceipt<TReceipt>(
     target: ExecutionTarget,
     input: Omit<CommandReceipt<TReceipt>, 'executionTarget' | 'createdAt'>,
