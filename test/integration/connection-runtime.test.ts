@@ -169,6 +169,45 @@ test('自动排期在线身份只从 welcomed 的 ads-<envKey> 解析环境，�
   assert.deepEqual(h.registry.onlineAccountIds().sort(), ['acctA', 'acctB'], '旧式连接的其它既有能力保持在线');
 });
 
+test('managed task target binds exact account, environment, capability snapshot, and connection generation', async () => {
+  const h = makeHarness({ acctA: 'facebook' });
+  const first: EdgeSession = {
+    sessionId: 'generation-1',
+    edgeId: 'ads-env-42',
+    accountId: 'acctA',
+    platform: 'facebook',
+    capabilities: ['managed_research_search_v1'],
+  };
+  await h.registry.onHandshake(first);
+  assert.equal(h.registry.managedTaskTargetFor('acctA', 'env-42'), null, 'welcome 前不得派发');
+
+  h.registry.onWelcomed(first);
+  assert.deepEqual(h.registry.managedTaskTargetFor('acctA', 'env-42'), {
+    connectionGeneration: 'generation-1',
+    edgeId: 'ads-env-42',
+    accountId: 'acctA',
+    platform: 'facebook',
+    capabilities: ['managed_research_search_v1'],
+  });
+  assert.equal(h.registry.managedTaskTargetFor('other-account', 'env-42'), null);
+  assert.equal(h.registry.managedTaskTargetFor('acctA', 'other-env'), null);
+
+  const replacement: EdgeSession = {
+    ...first,
+    sessionId: 'generation-2',
+    capabilities: ['managed_research_search_v1', 'managed_research_browse_v1'],
+  };
+  await h.registry.onHandshake(replacement);
+  h.registry.onWelcomed(replacement);
+  assert.deepEqual(h.registry.managedTaskTargetFor('acctA', 'env-42'), {
+    connectionGeneration: 'generation-2',
+    edgeId: 'ads-env-42',
+    accountId: 'acctA',
+    platform: 'facebook',
+    capabilities: ['managed_research_search_v1', 'managed_research_browse_v1'],
+  });
+});
+
 test('平台匹配：edge platform 与 accounts.platform 同为 xiaohongshu 时允许握手', async () => {
   const h = makeHarness({ acctA: 'xiaohongshu' });
   const session: EdgeSession = { sessionId: 's1', edgeId: 'eA', accountId: 'acctA', platform: 'xhs' };

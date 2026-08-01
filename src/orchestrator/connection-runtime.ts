@@ -40,6 +40,15 @@ export interface ConnectionRuntime {
   teardown(): void;
 }
 
+/** Exact welcomed connection identity exposed to owner-local managed-task dispatch. */
+export interface ManagedTaskConnectionTarget {
+  connectionGeneration: string;
+  edgeId: string;
+  accountId: string;
+  platform: PlatformId;
+  capabilities: readonly string[];
+}
+
 export type HandshakeOutcome = { ok: true } | { ok: false; code: string; message: string };
 
 /** 构造某连接 RoleDispatcher 的上下文（连接相关注入点：私有总线 / 该账号 controller / edgeId）。 */
@@ -451,6 +460,30 @@ export class ConnectionRuntimeRegistry {
       fallback ??= { bus: rt.bus, edgeId: rt.edgeId };
     }
     return fallback;
+  }
+
+  /**
+   * Resolve one exact account + AdsPower environment binding. Unlike runtimeForAccount(), this
+   * never falls back to another connection for the account. WebSocket liveness remains the send
+   * port's authority; a stale/disconnected target therefore returns not_started at handoff.
+   */
+  managedTaskTargetFor(accountId: string, envKey: string): ManagedTaskConnectionTarget | null {
+    const edgeId = `ads-${envKey.trim()}`;
+    if (accountId.trim() === '' || envKey.trim() === '') return null;
+    let selected: ManagedTaskConnectionTarget | null = null;
+    for (const runtime of this.bySession.values()) {
+      if (!runtime.welcomed || runtime.accountId !== accountId || runtime.edgeId !== edgeId) continue;
+      // onWelcomed closes the previous socket, but its disconnect callback can arrive later.
+      // Map insertion order makes the last welcomed candidate the replacement generation.
+      selected = {
+        connectionGeneration: runtime.sessionId,
+        edgeId,
+        accountId,
+        platform: runtime.platform,
+        capabilities: [...(runtime.capabilities ?? [])],
+      };
+    }
+    return selected;
   }
 
   /** Read-only current single-session quota usage for an online account/edge. */
