@@ -190,6 +190,10 @@ function optionsFor(
       onHandshake: () => ({ ok: true }),
       controllerForSession: () => undefined,
       onDisconnect: (session) => recorder.disconnected.push(session.sessionId),
+      // 批 F 的当日用量 / 待机提示读这两口；批 D 自己不读，但它们与上面几口来自**同一个注册表实例**，
+      // 所以挂在同一个端口上（拆成两个接口就可能供出两个不同实例，那种错不报错、只是数字对不上）。
+      sessionUsageForAccount: () => null,
+      resumeGateForAccount: () => null,
       onWelcomed: (session) => {
         recorder.events.push(`welcomed:${session.sessionId}`);
         recorder.welcomed.push(session.sessionId);

@@ -275,6 +275,11 @@
     "note": "change split-cloud-automation-production-runtime A-1：本仓的文本模型出口构造。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂（组装根调它）。它是本仓**唯一**允许从 aidcp-transport 取东西的地方，且只取 llm/*（非传输原语、本仓不对它做 instanceof）；src/llm/* 在归属表里是 content、派生器不会拷进本仓 src，所以这条只能走包。本地依赖只有 src/transport/ 的两个属主内客户端与 kernel 端口，零跨层边"
   },
   {
+    "path": "src/automation-publish-dispatch.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 F：发布下发与陪伴界面的装配（界面快照层 → 当日用量 → 浏览器待机提示 → 发布下发器 → 定时发布对账器 → 下发触发受理口）。与批 B/C/D 同形，是可单测的工厂、由组装根调它。装配的全是 automation 属主的东西（session_config_global、src/comm/ 界面快照、src/publish-agent/ 下发段），跨属主的五样（发布日志 / 发布授权 / 首作进度 / 结构化通知 / FB 发帖素材）一律是注入进来的端口"
+  },
+  {
     "path": "src/automation-risk-accounting.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 C 记账半：风控记账漏斗（全系统唯一的判定+记账入口）与 event_outbox 保留期剪裁。装配的全是 automation 属主的东西（risk_counters / risk_counter_outbox / event_outbox），告警出口由批 B 的底座注入"

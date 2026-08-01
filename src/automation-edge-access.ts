@@ -64,6 +64,7 @@ import { allowsTransportWhenGateUnknown } from 'aidcp-kernel/kernel/transport-ga
 import type { AlertData } from './alerts/alert-notification.js';
 import type { AlertStore } from './alerts/index.js';
 import { PgAnchorCache } from './cache/pg-anchor-cache.js';
+import type { ResumeGateVerdict } from './comm/browser-standby.js';
 import { CaptchaAssistService } from './comm/captcha-assist.js';
 import { CaptchaCoordinator } from './comm/captcha-coordinator.js';
 import { EdgeTaskLeaseClient } from './comm/edge-task-lease-client.js';
@@ -76,6 +77,7 @@ import { EdgeCloudServer } from './comm/ws-server.js';
 import type { EdgeSession, WsServerOptions } from './comm/ws-server.js';
 import { PacingConfigStore } from './config/pacing-config-store.js';
 import type { EventBus } from './event-bus/index.js';
+import type { SessionUsageSnapshot } from './orchestrator/role-dispatcher.js';
 import { SimplePlanner } from './planner/index.js';
 import { CommandSequencer } from './publish-agent/command-sequencer.js';
 import {
@@ -118,6 +120,15 @@ export interface AutomationEdgeRuntimePort {
   onDisconnect(session: EdgeSession): void;
   /** welcome 已回发（传输提交点）→ 该连接可顶替同 edgeId 旧连接并激活浏览业务。 */
   onWelcomed(session: EdgeSession): void;
+  /**
+   * 本轮会话的用量快照（批 F 的当日用量装配读它）。`null` = 无在跑会话。
+   *
+   * 这两个读口刻意**挂在同一个端口上**、不另开第二个接口：批 E 供的本来就是同一个注册表实例，
+   * 拆成两个接口的唯一后果是它有可能供出两个不同实例 —— 那种错不报错，只是数字对不上。
+   */
+  sessionUsageForAccount(accountId: string, edgeId?: string): SessionUsageSnapshot | null;
+  /** 续场闸裁决（批 F 的浏览器待机提示读它）。`null` = 拿不到（边缘离线 / 无调度器）。 */
+  resumeGateForAccount(accountId: string, edgeId?: string): ResumeGateVerdict | null;
 }
 
 /** 陪伴界面快照（批 F 供给）。 */

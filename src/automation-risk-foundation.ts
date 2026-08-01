@@ -130,6 +130,13 @@ export interface AutomationRiskFoundationOptions {
 
 export interface AutomationRiskFoundation {
   riskRegistry: RiskControllerRegistry;
+  /**
+   * 风控存储本体（批 F 的当日用量装配按窗口读计数）。
+   *
+   * **暴露的是注册表用的那一个实例**，不是让调用方另建一个：另建一份会连到同一张表、
+   * 读得出同样的数，却各自持一套连接与缓存 —— 错不报错，只是两处慢慢对不上。
+   */
+  riskStore: PgRiskStore;
   /** 每账号控制器解析。解析过的留一份缓存，供最后一道同步闸 fail-closed 用。 */
   resolveController(accountId: string): Promise<RiskController>;
   /** 已解析过的控制器（同步查，供握着租约的那道同步终闸用）。 */
@@ -350,6 +357,7 @@ export async function createAutomationRiskFoundation(
 
   return {
     riskRegistry,
+    riskStore,
     resolveController,
     resolvedController: (accountId) => resolved.get(accountId),
     raiseAlert,
