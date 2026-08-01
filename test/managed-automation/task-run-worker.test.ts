@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ExecutionAttempt, ExecutionIntent } from '../../src/managed-automation/contracts/execution-attempt.js';
 import type { ExecutionPlan } from '../../src/managed-automation/contracts/execution-plan.js';
+import type { Task } from '../../src/managed-automation/contracts/task.js';
 import type { RunStatus, StepRun, TaskRun } from '../../src/managed-automation/contracts/task-run.js';
 import {
   StepExecutorRegistry,
@@ -9,6 +10,15 @@ import {
   type StepExecutionResult,
   type TaskRunWorkerOptions,
 } from '../../src/managed-automation/engine/index.js';
+import {
+  ConnectionRuntimeResearchDispatchAdapter,
+  ResearchStepExecutor,
+  type AtomicResearchCommandChannel,
+  type AtomicResearchReceipt,
+  type ReadOnlyResearchCommand,
+} from '../../src/managed-automation/execution/index.js';
+import { createPhaseOneRegistry } from '../../src/managed-automation/registry/index.js';
+import { PERSONA_RESEARCH_CAPABILITY_IDS } from '../../src/managed-automation/registry/persona-research.js';
 import type { AccountWorkLane } from '../../src/managed-automation/stores/index.js';
 
 function taskRun(status: RunStatus = 'queued'): TaskRun {
@@ -255,6 +265,110 @@ class Harness {
   }
 }
 
+function researchTask(): Task {
+  return {
+    taskId: '00000000-0000-0000-0000-000000000102',
+    executionTarget: 'dev',
+    accountId: 'account-1',
+    envKey: 'env-1',
+    platform: 'facebook',
+    taskDefinitionId: 'persona.research',
+    taskDefinitionVersion: 1,
+    currentRevisionId: '00000000-0000-0000-0000-000000000103',
+    capabilityScope: { allow: [...PERSONA_RESEARCH_CAPABILITY_IDS], deny: [] },
+    constraints: { keywords: ['coffee'], maxItems: 3 },
+    budget: { maxBrowserMinutes: 10, maxSteps: 4, maxExecutionAttempts: 2, maxWaitMs: 60_000 },
+    schedule: { scheduledAt: 1_000, latestStartAt: 60_000, missPolicy: 'execute_when_available' },
+    authorizationRevision: 'auth-1',
+    actorRef: 'customer:1',
+    status: 'active',
+    correlationId: 'correlation-task-1',
+    aggregateVersion: 1,
+    createdAt: 1_000,
+    updatedAt: 1_000,
+  };
+}
+
+class VerticalResearchChannel implements AtomicResearchCommandChannel {
+  connected = false;
+  generation = 'generation-1';
+  outcome: 'completed' | 'empty' | 'none' = 'completed';
+  readonly sent: ReadOnlyResearchCommand[] = [];
+  private receive: ((receipt: AtomicResearchReceipt) => void) | null = null;
+
+  target() {
+    return this.connected ? {
+      connectionGeneration: this.generation,
+      edgeId: 'ads-env-1',
+      accountId: 'account-1',
+      platform: 'facebook' as const,
+      capabilities: ['managed_research_search_v1'],
+    } : null;
+  }
+
+  subscribeReceipt(
+    _target: NonNullable<ReturnType<VerticalResearchChannel['target']>>,
+    _attemptId: string,
+    receive: (receipt: AtomicResearchReceipt) => void,
+  ): () => void {
+    this.receive = receive;
+    return () => { this.receive = null; };
+  }
+
+  sendAtomic(
+    target: NonNullable<ReturnType<VerticalResearchChannel['target']>>,
+    command: ReadOnlyResearchCommand,
+  ): { outcome: 'dispatched' } {
+    this.sent.push(command);
+    if (this.outcome === 'none') return { outcome: 'dispatched' };
+    const stableContentRefs = this.outcome === 'completed'
+      ? ['facebook:post:1', 'facebook:post:1'] : [];
+    this.receive?.({
+      executionTarget: command.executionTarget,
+      accountId: command.accountId,
+      attemptId: command.attemptId,
+      edgeId: target.edgeId,
+      connectionGeneration: target.connectionGeneration,
+      capabilityId: command.capabilityId,
+      capabilityVersion: command.capabilityVersion,
+      status: this.outcome,
+      reasonCode: this.outcome === 'completed' ? 'succeeded' : 'empty_result',
+      evidence: {
+        evidenceRef: `evidence:${command.attemptId}`,
+        stableContentRefs,
+        postconditionRef: `postcondition:${command.capabilityId}@${command.capabilityVersion}:page-1`,
+      },
+    } as AtomicResearchReceipt);
+    return { outcome: 'dispatched' };
+  }
+}
+
+function verticalExecutors(
+  channel: VerticalResearchChannel,
+  traces: Array<{ reasonCode: string }>,
+  now: () => number = () => 1_000,
+): StepExecutorRegistry {
+  const dispatch = new ConnectionRuntimeResearchDispatchAdapter({
+    targets: { managedTaskTargetFor: () => channel.target() },
+    commands: channel,
+    now,
+  });
+  const executor = new ResearchStepExecutor({
+    dispatch,
+    tasks: { getTask: async () => researchTask() },
+    traces: {
+      append: async (_target, trace) => {
+        traces.push({ reasonCode: trace.reasonCode });
+        return true;
+      },
+    },
+    registry: createPhaseOneRegistry(),
+    now,
+    newTraceId: () => '00000000-0000-0000-0000-000000000999',
+  });
+  return new StepExecutorRegistry([executor]);
+}
+
 test('default-off and not-ready gates perform no durable claim', async () => {
   const disabled = new Harness();
   assert.deepEqual(await disabled.worker({ flags: { workerEnabled: () => false } }).tick(), {
@@ -276,6 +390,73 @@ test('lane contention checkpoints waiting and dispatches no executor', async () 
   assert.equal(harness.run.state.status, 'waiting');
   assert.equal(harness.run.state.waitReason, 'waiting_for_account_lane');
   assert.equal(harness.executorCalls, 0);
+});
+
+test('worker-executor-connection vertical slice waits offline, re-resolves reconnect, and dedupes evidence', async () => {
+  const harness = new Harness();
+  harness.plan.nodes.splice(1);
+  harness.plan.edges.splice(0);
+  harness.plan.bounds.maxNodes = 1;
+  const channel = new VerticalResearchChannel();
+  const traces: Array<{ reasonCode: string }> = [];
+  const worker = harness.worker({ executors: verticalExecutors(channel, traces) });
+
+  await worker.tick();
+  assert.equal(harness.run.state.status, 'waiting');
+  assert.equal(harness.run.state.waitReason, 'waiting_for_edge');
+  assert.deepEqual(harness.attempts.map((attempt) => attempt.status), ['undeliverable']);
+  assert.deepEqual(channel.sent, []);
+  assert.deepEqual(harness.laneCalls, ['release']);
+
+  channel.connected = true;
+  channel.generation = 'generation-2';
+  await worker.tick();
+  assert.equal(channel.sent.length, 1, 'reconnect creates one new bounded Attempt, not a replay of the first');
+  assert.deepEqual(harness.attempts.map((attempt) => attempt.status), ['undeliverable', 'completed']);
+  assert.equal(harness.run.state.terminalOutcome, 'succeeded');
+  assert.equal(harness.run.progress.confirmedUnits, 1);
+  assert.deepEqual(traces, [{ reasonCode: 'waiting_for_edge' }, { reasonCode: 'duplicate_evidence' }]);
+  assert.deepEqual(harness.laneCalls, ['release', 'release']);
+});
+
+test('worker-executor-connection vertical slice preserves a proven empty result', async () => {
+  const harness = new Harness();
+  harness.plan.nodes.splice(1);
+  harness.plan.edges.splice(0);
+  harness.plan.bounds.maxNodes = 1;
+  const channel = new VerticalResearchChannel();
+  channel.connected = true;
+  channel.outcome = 'empty';
+  const worker = harness.worker({ executors: verticalExecutors(channel, []) });
+
+  await worker.tick();
+  assert.equal(harness.attempts[0]?.status, 'empty');
+  assert.equal(harness.run.state.status, 'terminal');
+  assert.equal(harness.run.state.terminalOutcome, 'skipped');
+  assert.equal(harness.run.progress.confirmedUnits, 0);
+  assert.deepEqual(harness.laneCalls, ['release']);
+});
+
+test('worker-executor-connection vertical slice keeps a post-dispatch timeout submitted-unknown', async () => {
+  const harness = new Harness();
+  harness.plan.nodes.splice(1);
+  harness.plan.edges.splice(0);
+  harness.plan.bounds.maxNodes = 1;
+  harness.plan.bounds.maxWallClockMs = 50;
+  harness.run = { ...harness.run, createdAt: Date.now() };
+  const channel = new VerticalResearchChannel();
+  channel.connected = true;
+  channel.outcome = 'none';
+  const worker = harness.worker({
+    executors: verticalExecutors(channel, [], Date.now),
+    now: Date.now,
+  });
+
+  await worker.tick();
+  assert.equal(channel.sent.length, 1);
+  assert.equal(harness.attempts[0]?.status, 'submitted_unknown');
+  assert.equal(harness.run.state.waitReason, 'waiting_for_reconciliation');
+  assert.deepEqual(harness.laneCalls, ['retain']);
 });
 
 test('linear execution retries within bounds and dedupes stable content references', async () => {
@@ -312,6 +493,55 @@ test('submitted-unknown waits with lane retention and recovery never re-dispatch
   assert.equal(harness.executorCalls, 1, 'durable unknown receipt is never inferred safe to retry');
   assert.equal(harness.run.state.waitReason, 'waiting_for_reconciliation');
   assert.deepEqual(harness.laneCalls, ['retain', 'retain']);
+});
+
+test('kill switch stops subsequent steps, safely releases, and resumes from the durable checkpoint', async () => {
+  const harness = new Harness();
+  let enabled = true;
+  let announceDispatched!: () => void;
+  const dispatched = new Promise<void>((resolve) => { announceDispatched = resolve; });
+  let settle!: (result: StepExecutionResult) => void;
+  harness.behavior = (call) => call === 1
+    ? new Promise<StepExecutionResult>((resolve) => {
+      settle = resolve;
+      announceDispatched();
+    })
+    : {
+      status: 'completed',
+      reasonCode: 'succeeded',
+      evidence: {
+        evidenceRef: `evidence:${call}`,
+        stableContentRefs: [`facebook:post:${call}`],
+        postconditionRef: `postcondition:${call}`,
+      },
+    };
+  const worker = harness.worker({ flags: { workerEnabled: () => enabled } });
+  const activeTick = worker.tick();
+  await dispatched;
+  enabled = false;
+  assert.deepEqual(await worker.tick(), { outcome: 'disabled', claimed: 0 });
+  assert.deepEqual(harness.laneCalls, [], 'an in-flight Attempt keeps the account exclusion');
+
+  settle({
+    status: 'completed',
+    reasonCode: 'succeeded',
+    evidence: {
+      evidenceRef: 'evidence:1',
+      stableContentRefs: ['facebook:post:1'],
+      postconditionRef: 'postcondition:1',
+    },
+  });
+  await activeTick;
+  assert.equal(harness.executorCalls, 1);
+  assert.equal(harness.run.state.status, 'waiting');
+  assert.equal(harness.run.state.waitReason, 'waiting_until');
+  assert.deepEqual(harness.laneCalls, ['release']);
+
+  enabled = true;
+  await worker.tick();
+  assert.equal(harness.executorCalls, 2, 'completed first step is checkpointed and not replayed');
+  assert.equal(harness.run.state.terminalOutcome, 'succeeded');
+  assert.deepEqual(harness.laneCalls, ['release', 'release']);
 });
 
 test('claimed cancellation terminalizes before dispatch and releases its durable lane', async () => {

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ExecutionAttempt, ExecutionAttemptStatus } from '../contracts/execution-attempt.js';
 import type { ExecutionPlan, ExecutionPlanNode } from '../contracts/execution-plan.js';
-import type { ReasonCode } from '../contracts/reason-codes.js';
+import type { ReasonCode, WaitReasonCode } from '../contracts/reason-codes.js';
 import type { RunProgress, RunTerminalOutcome, StepRun, TaskRun } from '../contracts/task-run.js';
 import type { ExecutionTarget } from '../contracts/common.js';
 import type { AccountLaneArbiter } from './account-lane-arbiter.js';
@@ -64,6 +64,7 @@ interface ActiveRun {
   renewPromise: Promise<void>;
   retentionPromise: Promise<void> | null;
   processPromise: Promise<void> | null;
+  laneReleased: boolean;
 }
 
 interface StepOutcome {
@@ -196,6 +197,7 @@ export class TaskRunWorker {
       renewPromise: Promise.resolve(),
       retentionPromise: null,
       processPromise: null,
+      laneReleased: false,
     };
     this.active.set(run.runId, state);
     const timer = setInterval(() => this.scheduleRenew(state), this.renewIntervalMs);
@@ -207,7 +209,9 @@ export class TaskRunWorker {
       clearInterval(timer);
       state.renewing = false;
       await state.renewPromise;
-      if (state.unsettledDispatch && state.dispatchAttemptId !== null) {
+      if (state.laneReleased) {
+        // A terminal or safe waiting checkpoint already released this generation's lane.
+      } else if (state.unsettledDispatch && state.dispatchAttemptId !== null) {
         await this.retainUnsafe(state);
       } else if (this.stopped && state.abort.signal.aborted) {
         await this.options.lanes.releaseManaged(
@@ -289,6 +293,10 @@ export class TaskRunWorker {
 
     for (const nodeId of graph.order) {
       if (active.abort.signal.aborted) return;
+      if (!this.enabled()) {
+        await this.waitAndRelease(initialRun, active, 'waiting_until', 'feature_disabled');
+        return;
+      }
       const before = await this.freshRun(initialRun);
       active.runVersion = before.version;
       if (before.state.status === 'cancel_requested') {
@@ -313,7 +321,7 @@ export class TaskRunWorker {
       }
 
       const result = await this.executeStep(before, plan, node, step, active);
-      if (result === 'ownership_lost' || result === 'reconciliation') return;
+      if (result === 'ownership_lost' || result === 'reconciliation' || result === 'waiting') return;
       step = result.step;
       steps.set(nodeId, step);
       outcomes.push(result.outcome);
@@ -381,6 +389,7 @@ export class TaskRunWorker {
   ): Promise<
     | 'ownership_lost'
     | 'reconciliation'
+    | 'waiting'
     | { step: StepRun; outcome: StepOutcome; failed: boolean }
   > {
     const target = this.options.executionTarget;
@@ -574,6 +583,24 @@ export class TaskRunWorker {
           failed: false,
         };
       }
+      if (result.status === 'undeliverable' && ordinal < plan.bounds.maxExecutionAttempts) {
+        const waiting = await this.options.runState.transitionStep(
+          target,
+          step.stepRunId,
+          step.version,
+          step.state.status,
+          {
+            state: {
+              status: 'waiting', waitReason: 'waiting_for_edge',
+              terminalOutcome: null, reasonCode: 'waiting_for_edge',
+            },
+            progress: step.progress,
+          },
+        );
+        if (!waiting) return 'ownership_lost';
+        await this.waitAndRelease(run, active, 'waiting_for_edge', result.reasonCode);
+        return 'waiting';
+      }
       if (ordinal === plan.bounds.maxExecutionAttempts) {
         step = await this.finishFailedStep(step, result.status, result.reasonCode);
         return { step, outcome: { outcome: 'skipped', reasonCode: result.reasonCode }, failed: true };
@@ -629,14 +656,37 @@ export class TaskRunWorker {
     return (await this.options.runState.getRun(this.options.executionTarget, fallback.runId)) ?? fallback;
   }
 
-  private async waitRun(run: TaskRun, waitReason: 'waiting_for_account_lane' | 'waiting_for_reconciliation', reason: string): Promise<void> {
-    if (run.state.status !== 'running') return;
-    await this.options.runState.transitionRun(this.options.executionTarget, run.runId, run.version, 'running', {
+  private async waitRun(run: TaskRun, waitReason: WaitReasonCode, reason: string): Promise<boolean> {
+    if (run.state.status !== 'running') return false;
+    const changed = await this.options.runState.transitionRun(this.options.executionTarget, run.runId, run.version, 'running', {
       state: { status: 'waiting', waitReason, terminalOutcome: null, reasonCode: waitReason },
       progress: run.progress,
       currentNodeId: run.currentNodeId,
     });
-    this.logger.info(`[managed-task] run=${run.runId} waiting: ${reason}`);
+    if (changed) this.logger.info(`[managed-task] run=${run.runId} waiting: ${reason}`);
+    return changed;
+  }
+
+  private async waitAndRelease(
+    run: TaskRun,
+    active: ActiveRun,
+    waitReason: WaitReasonCode,
+    reason: string,
+  ): Promise<void> {
+    active.renewing = false;
+    await active.renewPromise;
+    const fresh = await this.freshRun(run);
+    active.runVersion = fresh.version;
+    if (!(await this.waitRun(fresh, waitReason, reason))) return;
+    const released = await this.options.lanes.releaseManaged(
+      run.accountId, run.runId, this.workerId, active.laneVersion,
+    );
+    if (released === 'released' || released === 'lost') {
+      active.laneReleased = true;
+      active.unsettledDispatch = false;
+      return;
+    }
+    this.logger.warn(`[managed-task] run=${run.runId} safe wait could not release retained lane`);
   }
 
   private async terminalRun(
@@ -668,6 +718,7 @@ export class TaskRunWorker {
     const release = await this.options.lanes.releaseManaged(
       run.accountId, run.runId, this.workerId, active.laneVersion,
     );
+    if (release === 'released' || release === 'lost') active.laneReleased = true;
     if (release === 'released') active.unsettledDispatch = false;
   }
 
@@ -700,6 +751,7 @@ export class TaskRunWorker {
     const release = await this.options.lanes.releaseManaged(
       run.accountId, run.runId, this.workerId, active.laneVersion,
     );
+    if (release === 'released' || release === 'lost') active.laneReleased = true;
     if (release === 'released') active.unsettledDispatch = false;
   }
 
@@ -721,6 +773,7 @@ export class TaskRunWorker {
       renewPromise: Promise.resolve(),
       retentionPromise: null,
       processPromise: null,
+      laneReleased: false,
     };
     await this.convergeCancellation(run, active);
   }
