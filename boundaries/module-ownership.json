@@ -760,6 +760,11 @@
     "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
   },
   {
+    "path": "src/managed-automation/engine/account-lane-arbiter.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
     "path": "src/managed-automation/engine/index.ts",
     "layer": "automation",
     "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."

@@ -144,7 +144,16 @@ export class AccountLaneStore extends ManagedTaskStoreBase {
              in_flight_evidence=EXCLUDED.in_flight_evidence,
              version=managed_account_work_lanes.version+1,
              updated_at=$8
-       WHERE managed_account_work_lanes.lease_expires_at <= $8
+       WHERE (managed_account_work_lanes.lease_expires_at <= $8
+              AND NOT (
+                managed_account_work_lanes.owner_kind='managed'
+                AND EXISTS (
+                  SELECT 1 FROM execution_attempts AS attempt
+                   WHERE attempt.execution_target=managed_account_work_lanes.execution_target
+                     AND attempt.run_id=managed_account_work_lanes.managed_run_id
+                     AND attempt.status IN ('dispatching','submitted_unknown')
+                )
+              ))
           OR (managed_account_work_lanes.owner_kind=EXCLUDED.owner_kind
               AND managed_account_work_lanes.lease_owner=EXCLUDED.lease_owner
               AND managed_account_work_lanes.managed_run_id IS NOT DISTINCT FROM EXCLUDED.managed_run_id)

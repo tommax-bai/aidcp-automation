@@ -242,6 +242,32 @@ test('account lane needs legacy evidence and never releases an unknown dispatche
   assert.match(pool.calls[0]!.text, /attempt.execution_target=lane.execution_target/);
 });
 
+test('expired managed lane takeover is denied while dispatch reconciliation is unresolved', async () => {
+  const pool = new FakePool();
+  const store = new AccountLaneStore(options(pool));
+  const busyLane = {
+    execution_target: 'dev',
+    account_id: 'account-1',
+    owner_kind: 'managed',
+    managed_run_id: 'run-1',
+    lease_owner: 'worker-old',
+    lease_expires_at: new Date(500),
+    in_flight_evidence: ['attempt:submitted_unknown'],
+    version: 3,
+    updated_at: new Date(100),
+  };
+  pool.enqueue([], 0);
+  pool.enqueue([busyLane]);
+
+  const result = await store.acquireManaged(
+    'dev', 'account-1', 'run-new', 'worker-new', 30_000, 1_000,
+  );
+  assert.equal(result.outcome, 'busy');
+  assert.match(pool.calls[0]!.text, /lease_expires_at <= \$8/);
+  assert.match(pool.calls[0]!.text, /status IN \('dispatching','submitted_unknown'\)/);
+  assert.match(pool.calls[0]!.text, /attempt.execution_target=managed_account_work_lanes.execution_target/);
+});
+
 test('decision traces are append-only, target-checked, and query-bounded', async () => {
   const pool = new FakePool();
   const store = new DecisionTraceStore(options(pool));
