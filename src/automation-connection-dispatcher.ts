@@ -276,6 +276,12 @@ export interface AutomationDispatcherDeps {
     sublineMs?: number;
   };
   logger?: Pick<Console, 'log' | 'warn'>;
+  /**
+   * 调度器构造缝。**这个缝存在的唯一理由是让「选项面到底铺成了什么」可断言** ——
+   * 调度器 200 余个字段几乎全可选，装配错了不报错，只有把组装好的选项对象抓出来看才验得了。
+   * 生产路径恒用默认实现。**别当多余删掉。**
+   */
+  createDispatcher?: (options: RoleDispatcherOptions) => RoleDispatcher;
 }
 
 /**
@@ -534,7 +540,7 @@ export function createAutomationDispatcherFactory(
       setNickname: deps.setNickname,
     } as unknown as RoleDispatcherOptions;
 
-    return new RoleDispatcher(options);
+    return (deps.createDispatcher ?? ((o) => new RoleDispatcher(o)))(options);
   };
 }
 

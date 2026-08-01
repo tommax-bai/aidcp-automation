@@ -10,8 +10,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  createAutomationDispatcherFactory,
   mapRuleBatchTerminalStates,
   ruleBatchContactCommentOptions,
+  type AutomationDispatcherDeps,
 } from '../../src/automation-connection-dispatcher.js';
 
 /* ─────────────────── 规则批次终态口径 ─────────────────── */
@@ -183,4 +185,210 @@ test('规则批次的动作闸只调那一个决策闭包，不另算一遍', as
     1,
     '决策闭包 MUST 只有一处定义',
   );
+});
+
+/* ═══════════════ 工厂本体：选项面到底铺成了什么 ═══════════════ */
+
+/**
+ * 上面那些用例测的都是**析出来的纯函数**；工厂本体那 46 项映射此前一条覆盖都没有。
+ *
+ * 今晚已经为此栽过三次（自举名单少一条 / 载荷多两个键 / 约束漏一项），
+ * 三次的共同点都是「映射类代码没人真跑过」。故这里把组装好的选项对象抓出来逐项断言。
+ */
+function stubDeps(over: Partial<AutomationDispatcherDeps> = {}): {
+  deps: AutomationDispatcherDeps;
+  captured: Record<string, unknown>[];
+} {
+  const captured: Record<string, unknown>[] = [];
+  const noop = (() => undefined) as never;
+  const twoStateOff = { state: 'unavailable' as const, reason: 'batch_g_not_wired' };
+  const deps = {
+    configMirrorGate: {
+      isStale: () => false,
+      noteStaleRefusal: () => undefined,
+    } as never,
+    llm: {} as never,
+    getSoul: (() => ({})) as never,
+    pacingFloors: {} as never,
+    edgeTaskLeases: {} as never,
+    sessionLimitProvider: {} as never,
+    resumeConfigProvider: {} as never,
+    conceptStore: undefined as never,
+    curatedStore: undefined as never,
+    textCardTranscriber: undefined as never,
+    roleFactories: {} as never,
+    personaBinding: (() => 'bound') as never,
+    getNickname: (() => null) as never,
+    setNickname: noop,
+    isDispatchActive: () => true,
+    onSessionRejected: noop,
+    notifyComments: (async () => undefined) as never,
+    isHardPaused: () => false,
+    sendCommand: noop,
+    interactionGuardFor: () => ({}) as never,
+    cooldownGate: {} as never,
+    hasCommentedForLead: (async () => false) as never,
+    businessConfig: {
+      effectiveScheduleFor: () => schedule(),
+      effectiveActiveWeekMaskFor: () => null,
+      hotLeadGateConfig: () => ({
+        maxAgeHours: 48,
+        velocityMin: 300,
+        minLikeFloor: 500,
+        floorHours: 1,
+      }),
+      facebookCommentBodyScheme: () => 'template' as const,
+      facebookOperationBaseFor: () => ({ ok: false as const, blocker: 'test' }),
+    },
+    comment: {
+      scheduler: twoStateOff,
+      approval: twoStateOff,
+      notifyAutoApproved: noop,
+      resolveApprovalMode: noop,
+      notifyMandatoryOutcome: noop,
+      fireAutoContactComment: noop,
+      valuableCorpus: twoStateOff,
+    },
+    facebookRuntime: {
+      rule: twoStateOff,
+      consumption: twoStateOff,
+      coordinator: twoStateOff,
+    },
+    createDispatcher: (options) => {
+      captured.push(options as unknown as Record<string, unknown>);
+      return {} as never;
+    },
+    ...over,
+  } as AutomationDispatcherDeps;
+  return { deps, captured };
+}
+
+const buildCtx = (over: Record<string, unknown> = {}) =>
+  ({
+    bus: { on: () => undefined },
+    controller: {
+      getState: () => ({ status: 'normal', quotaLevel: 'normal' }),
+      canDo: () => true,
+      explain: () => ({ allowed: true }),
+      dailyRemaining: () => 5,
+      slowStartView: () => ({ state: 'off' }),
+    },
+    accountId: 'acc-1',
+    edgeId: 'edge-1',
+    platform: 'facebook',
+    capabilities: ['inline_targeting'],
+    ...over,
+  }) as never;
+
+test('批 G 的口未接时 MUST NOT 把字段塞成 undefined —— 那与「接了但今天不可用」同形', () => {
+  const { deps, captured } = stubDeps();
+  createAutomationDispatcherFactory(deps)(buildCtx());
+  const options = captured[0]!;
+  // 二态为 unavailable 时，对应选项**整组缺席**（而不是 key 在、值是 undefined）。
+  for (const key of [
+    'commentApproval',
+    'archiveValuableComment',
+    'getCorpusReferences',
+    'applyFacebookRuleView',
+    'triggerFacebookRuleJoinContact',
+    'applyFacebookConsumptionView',
+    'triggerFacebookConsumptionAction',
+  ]) {
+    assert.equal(key in options, false, `${key} MUST 整组缺席，不能塞 undefined`);
+  }
+});
+
+test('批 G 的口接上后逐项接线，且规则批次触发口真的用上了调度器', async () => {
+  const calls: string[] = [];
+  const { deps, captured } = stubDeps({
+    comment: {
+      ...stubDeps().deps.comment,
+      scheduler: {
+        state: 'wired',
+        port: {
+          triggerManual: async () => {
+            calls.push('triggerManual');
+            return { ok: true };
+          },
+          triggerTargeted: async () => ({}),
+        },
+      },
+      valuableCorpus: {
+        state: 'wired',
+        port: { archive: async () => undefined, retrieveByTopics: async () => [] },
+      },
+    },
+    facebookRuntime: {
+      rule: {
+        state: 'wired',
+        port: { applyConfirmedView: () => undefined, updateBatch: () => undefined },
+      },
+      consumption: stubDeps().deps.facebookRuntime.consumption,
+      coordinator: stubDeps().deps.facebookRuntime.coordinator,
+    },
+  });
+  createAutomationDispatcherFactory(deps)(buildCtx());
+  const options = captured[0]!;
+  for (const key of [
+    'applyFacebookRuleView',
+    'triggerFacebookRuleJoinContact',
+    'archiveValuableComment',
+    'getCorpusReferences',
+  ]) {
+    assert.equal(typeof options[key], 'function', `${key} MUST 已接线`);
+  }
+  const trigger = options.triggerFacebookRuleJoinContact as (
+    accountId: string,
+  ) => Promise<{ started: boolean }>;
+  const receipt = await trigger('acc-1');
+  assert.equal(receipt.started, true);
+  assert.deepEqual(calls, ['triggerManual']);
+});
+
+test('调度器没接时规则批次触发 MUST 具名不启动，绝不报「已触发」', async () => {
+  const { deps, captured } = stubDeps({
+    facebookRuntime: {
+      rule: {
+        state: 'wired',
+        port: { applyConfirmedView: () => undefined, updateBatch: () => undefined },
+      },
+      consumption: stubDeps().deps.facebookRuntime.consumption,
+      coordinator: stubDeps().deps.facebookRuntime.coordinator,
+    },
+  });
+  createAutomationDispatcherFactory(deps)(buildCtx());
+  const trigger = captured[0]!.triggerFacebookRuleJoinContact as (
+    a: string,
+  ) => Promise<{ started: boolean; reason?: string }>;
+  const receipt = await trigger('acc-1');
+  assert.equal(receipt.started, false);
+  assert.equal(receipt.reason, 'batch_g_not_wired', '不启动的原因 MUST 具名');
+});
+
+test('下行指令按本连接 edgeId 定向，不广播', () => {
+  const sent: Array<{ edgeId?: string; accountId: string }> = [];
+  const { deps, captured } = stubDeps({
+    sendCommand: ((_command: unknown, edgeId: string | undefined, accountId: string) => {
+      sent.push({ edgeId, accountId });
+    }) as never,
+  });
+  createAutomationDispatcherFactory(deps)(buildCtx({ edgeId: 'edge-9' }));
+  (captured[0]!.sendCommand as (c: unknown) => void)({ action: 'x' });
+  assert.deepEqual(sent, [{ edgeId: 'edge-9', accountId: 'acc-1' }]);
+});
+
+test('联系人名册每连接只订阅一次，且没有名册时不订阅', () => {
+  const subscriptions: string[] = [];
+  const ctx = buildCtx({
+    bus: { on: (event: string) => subscriptions.push(event) },
+  });
+  const withRegistry = stubDeps({
+    notificationContacts: { appendEvents: async () => undefined },
+  });
+  createAutomationDispatcherFactory(withRegistry.deps)(ctx);
+  assert.deepEqual(subscriptions, ['notification.items.arrived']);
+
+  subscriptions.length = 0;
+  createAutomationDispatcherFactory(stubDeps().deps)(ctx);
+  assert.deepEqual(subscriptions, [], '没有名册时 MUST 不订阅（单体同形）');
 });
