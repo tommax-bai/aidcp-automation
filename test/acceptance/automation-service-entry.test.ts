@@ -108,6 +108,8 @@ const SYNC_READ_PAYLOADS = {
   hot_lead_config: { maxAgeHours: 24, velocityMin: 3, minLikeFloor: 5, floorHours: 2 },
   facebook_comment_config: { accounts: [] },
   facebook_group_join_automation_config: { accounts: [] },
+  // 批 E-2 步骤 2 新增流（空表 = 无已配浏览面的 Facebook 环境）。
+  facebook_operation_policy: { environments: [] },
 } as const satisfies { [S in SyncReadStream]: SyncReadPayloadByStream[S] };
 
 function envelope<S extends SyncReadStream>(

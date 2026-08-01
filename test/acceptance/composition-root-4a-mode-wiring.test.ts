@@ -146,6 +146,9 @@ const SYNC_READ_PAYLOADS = {
   },
   facebook_comment_config: { accounts: [] },
   facebook_group_join_automation_config: { accounts: [] },
+  // 批 E-2 步骤 2 新增流。空表 = 这台机器没有已配浏览面的 Facebook 环境，
+  // 消费方据此报具名 blocker（而不是给个默认面）。
+  facebook_operation_policy: { environments: [] },
 } as const satisfies {
   [S in SyncReadStream]: SyncReadPayloadByStream[S];
 };
@@ -377,7 +380,13 @@ test('4b automation start listens before bidirectional bootstrap and reaches rea
   );
   assert.equal(projectionApplies.length, 1);
   assert.equal(projectionApplies[0]?.stream, 'automation_account_projection');
-  assert.equal(savedCheckpoints.length, 6);
+  // 由消费流清单**算出来**、不写死：上面那条 deepEqual 已经把真实集合钉住了，
+  // 这里再写一个手打数字只会在每次新增流时红一次、且红在一个看不出所以然的地方。
+  // （projection 那条自持事务、不走这个存盘口，故减一。）
+  assert.equal(
+    savedCheckpoints.length,
+    AUTOMATION_SYNC_READ_CONSUMER_STREAMS.length - 1,
+  );
   assert.ok(
     savedCheckpoints.every(
       (checkpoint) => checkpoint.stream !== 'automation_account_projection',

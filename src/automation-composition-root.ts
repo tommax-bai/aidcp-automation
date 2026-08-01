@@ -346,6 +346,9 @@ export const AUTOMATION_SYNC_READ_CONSUMER_STREAMS = [
   'hot_lead_config',
   'facebook_comment_config',
   'facebook_group_join_automation_config',
+  // 批 E-2 步骤 2：Facebook 运营基线。**不补这一条，本进程就永远拿不到基线** ——
+  // 而拿不到基线在下游就是 FB 账号永远不开始浏览。
+  'facebook_operation_policy',
 ] as const;
 
 export type AutomationSyncReadConsumerStream =
@@ -374,7 +377,8 @@ type AutomationConsumerMirror =
   | AutomationSyncReadMirrors['contentSchedule']
   | AutomationSyncReadMirrors['hotLead']
   | AutomationSyncReadMirrors['facebookComment']
-  | AutomationSyncReadMirrors['facebookGroupJoin'];
+  | AutomationSyncReadMirrors['facebookGroupJoin']
+  | AutomationSyncReadMirrors['facebookOperationPolicy'];
 
 interface AutomationCheckpointStorePort {
   load(stream: SyncReadStream): Promise<
@@ -1036,6 +1040,8 @@ function consumerMirror(
       return mirrors.facebookComment;
     case 'facebook_group_join_automation_config':
       return mirrors.facebookGroupJoin;
+    case 'facebook_operation_policy':
+      return mirrors.facebookOperationPolicy;
   }
 }
 
