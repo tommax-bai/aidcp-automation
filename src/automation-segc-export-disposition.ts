@@ -103,15 +103,18 @@ export interface AutomationSegCExportDisposition {
 export const AUTOMATION_SEGC_EXPORT_DISPOSITION = [
   {
     handle: 'accountPersonaService',
-    verdict: 'construct',
-    automationConsumers: ['automation-runtime'],
+    verdict: 'skip',
+    automationConsumers: [],
     foreignReaders: ['api-foundation', 'api-serving'],
     servesOtherProcess: false,
     batch: 'D',
     reason:
-      '自动化段构造后立刻喂进本段的人设端口表（apiDirectPorts.accountPersona），本进程内即有去处。'
-      + '基础段那一处不是读、是**赋自己的那份**（api 模式下由接口侧的人设授权顶上），'
-      + '所以接口进程不靠自动化进程给它。',
+      '**2026-08-01 批 D 实读改判（原判 construct，错了）。** 与 personaAutoFill 同形：'
+      + '它的构造条件在单体里就写着「非自动化模式」——生成器只在 monolith / core 两种模式下建，'
+      + '自动化模式下它恒为 undefined，人设端口取的是**接口进程那个 HTTP 客户端**。'
+      + '所以本进程里有去处的是那个客户端，不是这个本地服务实例；构造它等于多一个没人读的对象。'
+      + '原判的依据（「构造后立刻喂进本段的人设端口表」）描述的是单体那一支，'
+      + '而那一支在自动化进程里根本不执行。**这不是能力消失**：人设读写照常，只是走跨进程通道。',
   },
   {
     handle: 'alertStore',
