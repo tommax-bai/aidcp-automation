@@ -770,6 +770,41 @@
     "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
   },
   {
+    "path": "src/managed-automation/stores/account-lane-store.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
+    "path": "src/managed-automation/stores/decision-trace-store.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
+    "path": "src/managed-automation/stores/execution-ledger-store.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
+    "path": "src/managed-automation/stores/index.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
+    "path": "src/managed-automation/stores/run-state-store.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
+    "path": "src/managed-automation/stores/store-base.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
+    "path": "src/managed-automation/stores/task-authority-store.ts",
+    "layer": "automation",
+    "note": "Change add-managed-automation-task-channel-phase-1: task, plan, run, ledger, trace, registry, compiler, stores, and executor modules are Automation-owned business runtime; shared DTOs remain in kernel or transport."
+  },
+  {
     "path": "src/orchestrator/connection-runtime.ts",
     "layer": "automation",
     "note": "§4.7：content-scheduler.ts 归 api，其余归 automation"
