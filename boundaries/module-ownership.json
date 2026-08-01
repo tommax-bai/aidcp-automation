@@ -265,6 +265,11 @@
     "note": "change split-cloud-automation-production-runtime A-1：本仓的文本模型出口构造。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂（组装根调它）。它是本仓**唯一**允许从 aidcp-transport 取东西的地方，且只取 llm/*（非传输原语、本仓不对它做 instanceof）；src/llm/* 在归属表里是 content、派生器不会拷进本仓 src，所以这条只能走包。本地依赖只有 src/transport/ 的两个属主内客户端与 kernel 端口，零跨层边"
   },
   {
+    "path": "src/automation-risk-foundation.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 B：风控单写者与告警底座的装配（写者锁 → 风控存储 → 注册表 → 三个互动存储 + 告警存储）。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂；且它装配的全部是 automation 属主的东西（risk_* / alerts / liked_notes / valuable_comments / interaction_feed 五族表），跨属主的只有一个注入进来的 kernel 归属端口"
+  },
+  {
     "path": "src/automation-segc-export-disposition.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 A：cloud 自动化段 41 个导出面的「本进程有没有去处」判据清单。**刻意不判 composition、不进 compositionWhitelist**——它不是组合根，是一份零 import 的纯数据裁定表（把非根文件塞进那份白名单会稀释它「这些才是组合根」的含义）。零 import ⇒ 任何层都不产生跨层边；落 automation 是因为它描述的是本仓自己的装配工作"

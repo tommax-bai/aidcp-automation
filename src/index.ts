@@ -1,5 +1,6 @@
 export * from './automation-composition-root.js';
 export * from './automation-model-exit.js';
+export * from './automation-risk-foundation.js';
 export * from './automation-segc-export-disposition.js';
 export * from './automation-service-entry.js';
 export * from './transport/api-direct-http.js';
