@@ -1,22 +1,36 @@
 # generated from boundaries/table-ownership.json — DO NOT EDIT BY HAND
 # regenerate: npx tsx scripts/db-split/generate-owner-table-lists.ts
-# owner=automation count=44
+# owner=automation count=66
 alerts
 anchor_staging
 anchors
 automation_account_projection
 automation_account_projection_state
+automation_sync_read_consumer_checkpoint
+automation_sync_read_owner_generation
+decision_traces
 delegated_task_attempts
 delegated_task_events
 delegated_tasks
 event_outbox
 event_outbox_cursor
 event_outbox_topic_cursor
+execution_attempts
+execution_intents
+execution_plans
 facebook_comment_audit
+facebook_consumption_action
+facebook_consumption_action_result_fact
+facebook_consumption_progress
+facebook_consumption_view_fact
 facebook_group_join_audit
 facebook_group_membership
 facebook_group_target
 facebook_group_target_scope
+facebook_region_comment_template_config
+facebook_rule_batch
+facebook_rule_progress
+facebook_rule_view_fact
 group_route
 hot_lead_queue
 interaction_api_requests
@@ -33,10 +47,14 @@ interaction_sync_cursors
 interaction_target_meta
 interaction_threads
 liked_notes
+managed_account_work_lanes
+managed_task_command_receipts
+operator_command_receipt
 pacing_floor_config
 quota_config
 resume_config
 resume_config_global
+risk_command_outcome
 risk_counter_outbox
 risk_counters
 risk_interactions
@@ -44,4 +62,8 @@ risk_state
 schema_migrations
 session_config
 session_config_global
+step_runs
+task_revisions
+task_runs
+tasks
 valuable_comments

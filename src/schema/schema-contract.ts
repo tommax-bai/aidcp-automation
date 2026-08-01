@@ -33,8 +33,9 @@ import { compareVersions } from './migration-plan.js';
  * 只是复合序的结果。部署时两条一起跑即可，warn 模式下缺任一条也只是响亮提示、不拒绝启动。
  */
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
-// start-up contract is narrowed to its own scope. Machine-derived on every sync by
-// scripts/sync-split-repos:derived_schema_version — do not hand-edit.
+// start-up contract is narrowed to its own scope. The managed-task migrations remain a
+// capability-level dependency while all feature flags default to disabled, so they do not
+// raise the process-wide REQUIRED version.
 export const REQUIRED_SCHEMA_VERSION = '0102_facebook_consumption_runtime';
 
 /**
@@ -189,7 +190,13 @@ export const REQUIRED_SCHEMA_VERSION = '0102_facebook_consumption_runtime';
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
 // start-up contract is narrowed to its own scope. Machine-derived on every sync by
 // scripts/sync-split-repos:derived_schema_version — do not hand-edit.
-export const KNOWN_MAX_SCHEMA_VERSION = '0102_facebook_consumption_runtime';
+/**
+ * `0106`-`0109` add the phase-one managed-task authority, run, ledger, lane, and trace
+ * tables. They are known to this build but are not a global start-up dependency: the
+ * managed-task capability probes its own schema and remains disabled when any table is
+ * absent. This keeps unrelated Automation workloads available during a staged rollout.
+ */
+export const KNOWN_MAX_SCHEMA_VERSION = '0109_managed_task_decision_traces';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 
