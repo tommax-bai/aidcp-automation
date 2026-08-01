@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type pg from 'pg';
 import type { SchemaShape } from 'aidcp-kernel/kernel/schema-capability-contract.js';
-import type { CreateTaskBundle } from '../../src/managed-automation/stores/command-store.js';
+import type {
+  CancelTaskCommand,
+  CreateTaskBundle,
+} from '../../src/managed-automation/stores/command-store.js';
 import { ManagedTaskCommandStore } from '../../src/managed-automation/stores/command-store.js';
 
 interface QueryResult {
@@ -14,12 +17,16 @@ class FakeTransactionClient {
   readonly calls: string[] = [];
   existingReceipt: unknown | null = null;
   failPattern: RegExp | null = null;
+  unknownAttemptPresent = false;
 
   async query(text: string): Promise<QueryResult> {
     this.calls.push(text);
     if (this.failPattern?.test(text)) throw new Error('injected transaction failure');
     if (/SELECT command_kind, payload_hash, receipt/.test(text)) {
       return { rows: this.existingReceipt ? [this.existingReceipt] : [], rowCount: this.existingReceipt ? 1 : 0 };
+    }
+    if (/SELECT EXISTS[\s\S]*FROM execution_attempts/.test(text)) {
+      return { rows: [{ present: this.unknownAttemptPresent }], rowCount: 1 };
     }
     return { rows: [], rowCount: /^UPDATE tasks/.test(text) ? 1 : 1 };
   }
@@ -144,6 +151,33 @@ function store(pool: FakeTransactionPool): ManagedTaskCommandStore {
   });
 }
 
+function cancelCommand(): CancelTaskCommand {
+  const created = bundle();
+  return {
+    commandId: 'command-cancel-1',
+    payloadHash: 'c'.repeat(64),
+    task: created.task,
+    cancelRevision: {
+      ...created.revision,
+      revisionId: '00000000-0000-0000-0000-000000000006',
+      ordinal: 2,
+      cause: 'cancel',
+      supersedesRevisionId: created.task.currentRevisionId,
+      createdAt: 2000,
+    },
+    trace: {
+      ...created.trace,
+      traceId: '00000000-0000-0000-0000-000000000007',
+      runId: null,
+      decisionType: 'cancellation',
+      outcome: 'selected',
+      reasonCode: 'cancelled_by_actor',
+      createdAt: 2000,
+    },
+    expectedAggregateVersion: created.task.aggregateVersion,
+  };
+}
+
 test('create authority bundle and command receipt commit in one transaction', async () => {
   const pool = new FakeTransactionPool();
   const result = await store(pool).createBundle('dev', bundle());
@@ -175,4 +209,24 @@ test('same command and hash return the durable receipt without duplicating autho
   assert.equal(result.outcome, 'duplicate');
   assert.equal(pool.client.calls.some((sql) => /INSERT INTO tasks/.test(sql)), false);
   assert.equal(pool.client.calls.at(-1), 'COMMIT');
+});
+
+test('cancel stops undispatched runs and preserves dispatched reconciliation truth', async () => {
+  for (const unknownAttemptPresent of [false, true]) {
+    const pool = new FakeTransactionPool();
+    pool.client.unknownAttemptPresent = unknownAttemptPresent;
+    const result = await store(pool).cancelTask('dev', cancelCommand());
+
+    assert.equal(result.outcome, 'applied');
+    if (result.outcome === 'applied') {
+      assert.equal(
+        result.dispatchedAttemptReconciliationContinues,
+        unknownAttemptPresent,
+      );
+    }
+    const runUpdate = pool.client.calls.find((sql) => /^UPDATE task_runs/.test(sql));
+    assert.match(runUpdate ?? '', /status IN \('queued','waiting'\) THEN 'terminal'/);
+    assert.match(runUpdate ?? '', /ELSE 'cancel_requested'/);
+    assert.equal(pool.client.calls.at(-1), 'COMMIT');
+  }
 });
