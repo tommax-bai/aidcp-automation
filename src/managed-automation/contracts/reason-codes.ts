@@ -30,7 +30,11 @@ export type TerminalReasonCode =
   | 'result_unknown'
   | 'succeeded';
 
-export type ReasonCode = RejectionReasonCode | WaitReasonCode | TerminalReasonCode;
+export type EvidenceReasonCode =
+  | 'duplicate_evidence'
+  | 'evidence_invalid';
+
+export type ReasonCode = RejectionReasonCode | WaitReasonCode | TerminalReasonCode | EvidenceReasonCode;
 
 export const REJECTION_REASON_CODES = [
   'account_not_authorized',
@@ -66,3 +70,8 @@ export const TERMINAL_REASON_CODES = [
   'result_unknown',
   'succeeded',
 ] as const satisfies readonly TerminalReasonCode[];
+
+export const EVIDENCE_REASON_CODES = [
+  'duplicate_evidence',
+  'evidence_invalid',
+] as const satisfies readonly EvidenceReasonCode[];

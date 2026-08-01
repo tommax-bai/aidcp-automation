@@ -502,6 +502,10 @@ export class TaskRunWorker {
 
       active.dispatchAttemptId = attemptId;
       active.unsettledDispatch = true;
+      const knownStableContentRefs = [...new Set(
+        (await this.options.ledger.listAttemptsByRun(target, run.runId)).flatMap((attempt) =>
+          attempt.status === 'completed' ? (attempt.evidence?.stableContentRefs ?? []) : []),
+      )];
       let result: StepExecutionResult;
       try {
         result = await executor.execute({
@@ -516,6 +520,7 @@ export class TaskRunWorker {
           inputRef,
           deadlineAt: run.createdAt + plan.bounds.maxWallClockMs,
           correlationId: intent.correlationId,
+          knownStableContentRefs,
           signal: active.abort.signal,
         });
       } catch (error) {

@@ -15,6 +15,7 @@ export interface StepExecutionRequest {
   inputRef: string;
   deadlineAt: number;
   correlationId: string;
+  knownStableContentRefs: readonly string[];
   signal: AbortSignal;
 }
 
