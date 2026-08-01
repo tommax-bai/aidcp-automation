@@ -182,6 +182,9 @@ export const REQUIRED_SCHEMA_VERSION = '0102_facebook_consumption_runtime';
  * 注：`0104_facebook_reel_mode_cadence` 为现有 Facebook target-global policy 增加普通人设 Reel
  * 点赞/关注与慢启动、规则、消费 Reel 关注的完整数字权威。运行时 schema probe 明确要求这些列；
  * 缺失时不能用编译期常量冒充管理后台配置，故 REQUIRED 与 KNOWN_MAX 一并抬到 0104。
+ *
+ * 注：`0105_facebook_primary_browse_surface` 增加环境级 Feed/Reels 主入口权威及审计。
+ * Facebook 浏览会话启动必须读到该权威，故 REQUIRED 与 KNOWN_MAX 抬到 0105。
  */
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
 // start-up contract is narrowed to its own scope. Machine-derived on every sync by

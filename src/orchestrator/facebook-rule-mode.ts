@@ -11,6 +11,9 @@ export type { FacebookBrowseMode } from 'aidcp-kernel/kernel/facebook-rule-mode-
 export interface FacebookRuleModeDecision {
   mode: FacebookBrowseMode;
   blocker: string | null;
+  /** Environment authority pinned by the dispatcher when the browse session starts. */
+  primarySurface?: 'feed' | 'reels';
+  surfaceRevision?: number;
   /** Present only when the environment operation-policy projection is authoritative. */
   policyRevision?: number;
   rulePolicy?: FacebookRulePolicySnapshot;
