@@ -260,6 +260,16 @@
     "note": "change split-cloud-api-composition-root-4a 派生仓手写 automation-only 组合根；只装配 automation owner pool、4a HTTP clients/receivers 与本地 offboard primitives，不持有 API/content owner 实现"
   },
   {
+    "path": "src/automation-segc-export-disposition.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 A：cloud 自动化段 41 个导出面的「本进程有没有去处」判据清单。**刻意不判 composition、不进 compositionWhitelist**——它不是组合根，是一份零 import 的纯数据裁定表（把非根文件塞进那份白名单会稀释它「这些才是组合根」的含义）。零 import ⇒ 任何层都不产生跨层边；落 automation 是因为它描述的是本仓自己的装配工作"
+  },
+  {
+    "path": "src/automation-service-entry.ts",
+    "layer": "composition",
+    "note": "change split-cloud-automation-production-runtime 批 A：派生仓手写进程启动外壳（读配置 → 建根 → 先监听 → 就绪闸 → 放行业务 → 优雅关停 → 信号）。它坐在 automation-composition-root 之上、只做装配与生命周期，故与那份同判 composition 并进 compositionWhitelist；运行时依赖与业务入口都是必填参数，本文件不持有任何属主实现"
+  },
+  {
     "path": "src/cache/group-route-store.ts",
     "layer": "automation",
     "note": "§4.7 src/cache/ 逐文件表的多数落点"
