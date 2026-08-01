@@ -265,6 +265,11 @@
     "note": "change split-cloud-automation-production-runtime 批 C：本进程的配置副本停手闸。判定逻辑在 kernel 工厂（定稿 §4.7 2026-08-01 裁决），本文件只负责两件属于本进程的事——哪些键在本进程算闸门档、以及因陈旧而拒绝这笔账记到哪去。事实源是本仓自己的同步读镜像，零跨属主依赖"
   },
   {
+    "path": "src/automation-connection-dispatcher.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 E 后半（批 E-2 步骤 3）：每连接角色调度器工厂，交付批 E 前半留下的那个必填口。与批 B/C/D/E-1/F 同形，是可单测的工厂、由组装根调它。调度器选项面 200 余字段几乎全可选（漏传不报错），故保护线画在本文件的依赖面：批 G 才有的供给方（评论域 / FB 规则与消费两套运行时）一律必填字段或能力二态；四个业务配置经 kernel 判定的取值口注入，本文件不持有任何 api 属主实现"
+  },
+  {
     "path": "src/automation-connection-runtime.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 E 前半：每连接运行时的装配（连接运行时注册表 + 互动去重守卫注册表 + 动作冷却兜底闸）。与批 B/C/D/F 同形，是可单测的工厂、由组装根调它。每连接角色调度器的构造工厂是必填注入口、由批 E 后半供；跨属主的两样（账号主数据窄口 / 结构化通知）都是注入进来的端口，本文件不持有任何 api 属主实现"
