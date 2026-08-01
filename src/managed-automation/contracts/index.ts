@@ -7,3 +7,5 @@ export * from './execution-plan.js';
 export * from './task-run.js';
 export * from './execution-attempt.js';
 export * from './decision-trace.js';
+export * from './validation.js';
+export * from './projection.js';
