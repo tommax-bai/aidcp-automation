@@ -373,9 +373,14 @@ export async function runAutomationMain(
   const llmUsageRecording = new LlmUsageRecordingAuthorityHttpClient(...contentArgs);
   const textCardTranscriber = new TextCardTranscriptionAuthorityHttpClient(
     ...contentArgs,
-    // 本进程没有本地旗标，能力在不在由**属主侧**答；这里恒报「本地认为开着」，
-    // 让客户端按属主的回答走，而不是在两侧各留一个会漂的开关。
-    () => true,
+    // 第四个参数是「旗标开没开」的**本地**取值闭包，两个进程读的是同一份部署配置，
+    // 所以不为一个布尔多走一次网络往返；客户端拿到应答后会比对属主回显的取值，不一致告警一次。
+    //
+    // ⚠️ **MUST NOT 写成恒 `true`**（本片第一版就是这么写的，是个不诚实）：
+    // `enabled()` 是角色用来决定「要不要发起转写」的那一问。恒答 true ⇒ 每篇笔记都会去调一条
+    // 今天对面还没服务的路由，把「这台机器没开这个能力」变成一串失败；而且两侧旗标对账
+    // 从此永远比不出差异 —— 那条告警的全部价值就在于比。
+    () => env.AIDCP_TEXTCARD_OCR === 'true',
     logger,
   );
 

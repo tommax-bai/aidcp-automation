@@ -146,6 +146,24 @@ test('结构断言：装配不许整体类型逃逸（那会把属主契约漂�
   assert.equal(/\bas unknown as\b/.test(code), false, '双跳强转绕开的正是同一个机制');
 });
 
+test('结构断言：能力旗标 MUST 读部署配置，不许恒 true', () => {
+  // 本片第一版把文字卡转写客户端的「本地旗标」写成恒 `true`，理由写的是「能力在不在由属主答」——
+  // 那句话本身是错的：`enabled()` 是角色用来决定**要不要发起转写**的那一问。
+  // 恒 true 有两个后果，都不报错：① 每篇笔记都去调一条对面今天还没服务的路由；
+  // ② 两侧旗标对账永远比不出差异，而那条告警的全部价值就在于比。
+  const code = codeOf(MAIN);
+  assert.match(
+    code,
+    /AIDCP_TEXTCARD_OCR/,
+    '本地旗标 MUST 读与属主进程同一份部署配置（两侧读同一个变量才比得出不一致）',
+  );
+  assert.equal(
+    /TextCardTranscriptionAuthorityHttpClient\([\s\S]{0,400}?\(\)\s*=>\s*true/.test(code),
+    false,
+    '恒 true 会把「这台机器没开这个能力」变成一串失败调用',
+  );
+});
+
 test('结构断言：关停 MUST NOT 调那一族「关的是共享属主池」的存储', () => {
   const code = codeOf(MAIN);
   // 判据是「它关的是谁的池」：这一族的 close() 内部是裸 pool.end()，而池是注入进来的
