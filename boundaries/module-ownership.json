@@ -310,6 +310,11 @@
     "note": "change split-cloud-automation-production-runtime 批 G 第一片：Facebook 规则 / 消费两套运行时存储的装配，填每连接调度器工厂的 rule / consumption 两个口。与批 B/C/D/E/F 同形，是可单测的工厂、由组装根调它。两张表都是 automation 属主且 target-scoped，故缺部署目标即整片不构造并具名 unavailable（task 3.4）；init 失败同样具名，绝不吞成「本来就没这个能力」。第三个口 coordinator 不在本片：它缠着加群/评论调度器与群成员账本，且要的运营策略决策是 api 属主的异步口（含慢启动解析），与步骤 2 给自动化侧的同步基线口不是同一个东西"
   },
   {
+    "path": "src/automation-interaction.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 H 第 4 片：互动能力的装配，交付批 D 留在 AutomationEdgeAccessOptions 上的第三个必填口（二态 wired/unavailable）。判 automation 而非 composition：与其余各批同形，是可单测的工厂、由组装根调它。三个子件＝收件箱 / 运行时开关 / 握手后恢复编排，表全在本域属主。四条红线：整体缺席不得半截可用（单体回落处是把八个变量一起置空的，半截会让下游能力位发得不一致）；半迁移 MUST NOT 判成 unavailable（单体里读是恢复的、只关写，判缺席等于连读一起停掉，是行为回归——这是本片相对计划注释的一处偏离）；撤权 hold 的跨域读失败 MUST 原样抛，吞成 false 等于给正在被撤权的环境重新放开互动写；握手后先清待办离场、其次才是可恢复回复，顺序是单体口径。另含破真环用的晚绑定推送薄壳（本能力要边缘推送出口、边缘接入又要本能力），未绑定即具名抛错，绝不返回 0——那会让「出口没接上」与「边缘不在线」同形"
+  },
+  {
     "path": "src/automation-model-exit.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime A-1：本仓的文本模型出口构造。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂（组装根调它）。它是本仓**唯一**允许从 aidcp-transport 取东西的地方，且只取 llm/*（非传输原语、本仓不对它做 instanceof）；src/llm/* 在归属表里是 content、派生器不会拷进本仓 src，所以这条只能走包。本地依赖只有 src/transport/ 的两个属主内客户端与 kernel 端口，零跨层边"

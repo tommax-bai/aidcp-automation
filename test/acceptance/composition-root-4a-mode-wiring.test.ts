@@ -529,7 +529,7 @@ test('4b first-load failure stays named and a later full snapshot heals readines
   await root.close();
 });
 
-test('derived census separates the 21/57 transport package from the 20/56 automation root', async () => {
+test('derived census separates the 21/58 transport package from the 20/57 automation root', async () => {
   const census = deriveAutomationRootCensus();
   assert.deepEqual(census, {
     ...AUTOMATION_ROOT_SURFACE,

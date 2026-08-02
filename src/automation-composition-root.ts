@@ -123,11 +123,11 @@ export const AUTOMATION_COMMAND_RECEIVER_GROUPS = [
 
 export const AUTOMATION_ROOT_SURFACE = {
   apiClientGroups: 17,
-  apiClientMethodSlots: 52,
+  apiClientMethodSlots: 53,
   commandReceiverGroups: 3,
   commandReceiverMethodSlots: 4,
   totalGroups: 20,
-  totalMethodSlots: 56,
+  totalMethodSlots: 57,
 } as const;
 
 export type AutomationRootBlockerCategory =
