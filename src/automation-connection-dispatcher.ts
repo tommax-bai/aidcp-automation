@@ -264,8 +264,18 @@ export interface AutomationDispatcherDeps {
   isDispatchActive: NonNullable<RoleDispatcherOptions['isDispatchActive']>;
   /** 会话被拒时的人设引导出口。 */
   onSessionRejected: NonNullable<RoleDispatcherOptions['onSessionRejected']>;
-  /** 通知巡视投递（结构化通知，按账号路由到团队群）。 */
-  notifyComments: NonNullable<RoleDispatcherOptions['notifyComments']>;
+  /**
+   * 通知巡视投递（结构化通知，**按账号路由到团队群**）。
+   *
+   * **签名刻意比调度器那一侧多一个 `accountId`**：单体里这个闭包是在每连接的
+   * `buildDispatcher` 里现造的，路由目标闭包捕获的就是那条连接的账号。
+   * 把它当成进程级端口直接透传，账号就丢了 —— 后果不是报错，是**所有账号的入站消息
+   * 全部落到默认群**，运营再也分不出哪条是谁的（与免审通知来源那次是同一种丢法）。
+   */
+  notifyComments(
+    items: Parameters<NonNullable<RoleDispatcherOptions['notifyComments']>>[0],
+    accountId: string,
+  ): Promise<void>;
   /** 硬暂停闸（验证码 / 人工接管期连帧都不发）。 */
   isHardPaused: NonNullable<RoleDispatcherOptions['isHardPaused']>;
   /** 定向下发（按 edgeId，**不广播**）。 */
@@ -553,7 +563,10 @@ export function createAutomationDispatcherFactory(
       hasCommentedForLead: deps.hasCommentedForLead,
       fireAutoContactComment: deps.comment.fireAutoContactComment,
       isHardPaused: deps.isHardPaused,
-      notifyComments: deps.notifyComments,
+      // 路由账号在这里现推（与单体逐字同源）：供给方拿不到「是哪条连接」，写死就等于全投默认群。
+      notifyComments: (
+        items: Parameters<NonNullable<RoleDispatcherOptions['notifyComments']>>[0],
+      ) => deps.notifyComments(items, ctx.accountId),
       // 下行指令只发回**发起该决策的连接**（按 edgeId 定向，不广播 → 不串号）。
       sendCommand: (command: unknown) =>
         deps.sendCommand(command as never, ctx.edgeId, ctx.accountId),

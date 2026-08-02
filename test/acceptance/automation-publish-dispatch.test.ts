@@ -31,6 +31,7 @@ import type {
 import { SYNC_READ_CONTRACT_VERSION } from 'aidcp-kernel/kernel/sync-read-snapshot.js';
 
 import { AutomationSyncReadMirrors } from '../../src/transport/automation-sync-read-mirrors.js';
+import { SessionConfigStore } from '../../src/config/session-config-store.js';
 
 const DEAD_POOL = {
   query: async () => {
@@ -89,6 +90,9 @@ function optionsFor(
   return {
     ownerPool: DEAD_POOL,
     executionTarget: 'dev',
+    // 单场会话配置改成由调用方注入（本模块不再自建，防同进程两份实例）。
+    // 这里给的实例池是死的，`init()` 会失败并逐项回落内置默认 —— 与改动前那个自建实例逐位同形。
+    sessionConfig: new SessionConfigStore({ pool: DEAD_POOL }),
     edge: {
       pushToEdges: () => 1,
       resolveEdgeIdForAccount: () => 'ads-1',

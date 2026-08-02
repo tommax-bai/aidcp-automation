@@ -15,7 +15,7 @@
   },
   "adjudicatedFilesRoster": "boundaries/adjudicated-files.json —— 「逐文件切分目录里哪些文件已经被人判过」的人工名册，是 expandOwnership 的准入依据。MUST NOT 改用生成物 module-ownership.json 顶替：那会让判据退化成「是否已经在生成物里」，手工往生成物塞一条新文件 + 目录默认层就能全绿、refresh 随后永久洗白（2026-07-23 审计坐实）。",
   "newFileRule": "每条目录规则的 newFile 字段决定该目录**新增文件**的处置：inherit = §4.7 里该目录整行只有一个归属层，新文件的归属已被 §4.7 判定，目录规则可以接住；adjudicate = §4.7 把该目录逐文件切开，§4.7 并没有判定「该目录下任意新文件属于哪一层」，故新增文件 MUST 先在 fileOverrides 里逐个裁定，生成器在裁定前报错并列出清单（绝不塞默认层）。字段缺省按 adjudicate 处理。",
-  "compositionWhitelist": ["src/server.ts", "src/index.ts", "src/automation-composition-root.ts", "src/automation-service-entry.ts"],
+  "compositionWhitelist": ["src/server.ts", "src/index.ts", "src/automation-composition-root.ts", "src/automation-service-entry.ts", "src/automation-main.ts"],
   "directoryRules": [
     { "dir": "src/agents/", "layer": "automation", "newFile": "adjudicate", "basis": "§4.7 src/agents/ 50 文件：43 automation 为 content 5 + api 2 的补集" },
     { "dir": "src/alerts/", "layer": "automation", "newFile": "inherit", "basis": "§4.7：alerts 表 owner（2/2 automation）" },
@@ -87,6 +87,8 @@
     { "path": "src/automation-publish-dispatch.ts", "layer": "automation", "basis": "change split-cloud-automation-production-runtime 批 F：发布下发与陪伴界面的装配（界面快照层 → 当日用量 → 浏览器待机提示 → 发布下发器 → 定时发布对账器 → 下发触发受理口）。与批 B/C/D 同形，是可单测的工厂、由组装根调它。装配的全是 automation 属主的东西（session_config_global、src/comm/ 界面快照、src/publish-agent/ 下发段），跨属主的五样（发布日志 / 发布授权 / 首作进度 / 结构化通知 / FB 发帖素材）一律是注入进来的端口" },
     { "path": "src/automation-model-exit.ts", "layer": "automation", "basis": "change split-cloud-automation-production-runtime A-1：本仓的文本模型出口构造。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂（组装根调它）。它是本仓**唯一**允许从 aidcp-transport 取东西的地方，且只取 llm/*（非传输原语、本仓不对它做 instanceof）；src/llm/* 在归属表里是 content、派生器不会拷进本仓 src，所以这条只能走包。本地依赖只有 src/transport/ 的两个属主内客户端与 kernel 端口，零跨层边" },
     { "path": "src/automation-service-entry.ts", "layer": "composition", "basis": "change split-cloud-automation-production-runtime 批 A：派生仓手写进程启动外壳（读配置 → 建根 → 先监听 → 就绪闸 → 放行业务 → 优雅关停 → 信号）。它坐在 automation-composition-root 之上、只做装配与生命周期，故与那份同判 composition 并进 compositionWhitelist；运行时依赖与业务入口都是必填参数，本文件不持有任何属主实现" },
+    { "path": "src/automation-main.ts", "layer": "composition", "basis": "change split-cloud-automation-production-runtime 批 H 第 5 片：派生仓手写的真装配（schema 契约门 → 属主池 → 同步读镜像 → 组装根 → 十二个工厂 → 业务入口 → 启动外壳）。与 automation-composition-root / automation-service-entry 同判 composition 并进 compositionWhitelist：它只做装配与生命周期，不持有任何属主实现，跨属主的东西一律取组装根已建好的客户端。三处真环用晚绑定薄壳破，薄壳未回填即具名抛（绝不返回 0 或空值，那会让「装配顺序错了」与「东西本来就不在」同形）。关停按「它关的是谁的池」逐条判：裸 pool.end() 那一族 MUST NOT 调，属主池由本文件最后自己关" },
+    { "path": "src/automation-persona-view.ts", "layer": "automation", "basis": "change split-cloud-automation-production-runtime 批 H 第 5 片：人设在本进程的唯一取用口（绑定三态 + 人设本体），事实源在接口域、本进程只有同步读副本。**刻意不判 composition**：它是一段纯派生逻辑、零装配，被至少三个取用点（陪伴界面快照 / 每连接角色调度器 / 评论调度器）共用。收成一份的理由是「同一份判断被两处用，行为测试原理上看不见第二份」；回落方向按「哪边更严」定：副本陈旧 ⇒ 绑定态 unknown（绝不答 unbound）、取人设具名抛（绝不回落默认人设）" },
     { "path": "src/automation-segc-export-disposition.ts", "layer": "automation", "basis": "change split-cloud-automation-production-runtime 批 A：cloud 自动化段 41 个导出面的「本进程有没有去处」判据清单。**刻意不判 composition、不进 compositionWhitelist**——它不是组合根，是一份零 import 的纯数据裁定表（把非根文件塞进那份白名单会稀释它「这些才是组合根」的含义）。零 import ⇒ 任何层都不产生跨层边；落 automation 是因为它描述的是本仓自己的装配工作" },
     { "path": "src/index.ts", "layer": "composition", "basis": "§4.7 src/ 根文件：组合根，无继承者" },
     { "path": "src/server.ts", "layer": "composition", "basis": "§4.7 src/ 根文件：组合根，无继承者" },

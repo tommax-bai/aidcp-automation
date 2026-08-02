@@ -315,9 +315,19 @@
     "note": "change split-cloud-automation-production-runtime 批 H 第 4 片：互动能力的装配，交付批 D 留在 AutomationEdgeAccessOptions 上的第三个必填口（二态 wired/unavailable）。判 automation 而非 composition：与其余各批同形，是可单测的工厂、由组装根调它。三个子件＝收件箱 / 运行时开关 / 握手后恢复编排，表全在本域属主。四条红线：整体缺席不得半截可用（单体回落处是把八个变量一起置空的，半截会让下游能力位发得不一致）；半迁移 MUST NOT 判成 unavailable（单体里读是恢复的、只关写，判缺席等于连读一起停掉，是行为回归——这是本片相对计划注释的一处偏离）；撤权 hold 的跨域读失败 MUST 原样抛，吞成 false 等于给正在被撤权的环境重新放开互动写；握手后先清待办离场、其次才是可恢复回复，顺序是单体口径。另含破真环用的晚绑定推送薄壳（本能力要边缘推送出口、边缘接入又要本能力），未绑定即具名抛错，绝不返回 0——那会让「出口没接上」与「边缘不在线」同形"
   },
   {
+    "path": "src/automation-main.ts",
+    "layer": "composition",
+    "note": "change split-cloud-automation-production-runtime 批 H 第 5 片：派生仓手写的真装配（schema 契约门 → 属主池 → 同步读镜像 → 组装根 → 十二个工厂 → 业务入口 → 启动外壳）。与 automation-composition-root / automation-service-entry 同判 composition 并进 compositionWhitelist：它只做装配与生命周期，不持有任何属主实现，跨属主的东西一律取组装根已建好的客户端。三处真环用晚绑定薄壳破，薄壳未回填即具名抛（绝不返回 0 或空值，那会让「装配顺序错了」与「东西本来就不在」同形）。关停按「它关的是谁的池」逐条判：裸 pool.end() 那一族 MUST NOT 调，属主池由本文件最后自己关"
+  },
+  {
     "path": "src/automation-model-exit.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime A-1：本仓的文本模型出口构造。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂（组装根调它）。它是本仓**唯一**允许从 aidcp-transport 取东西的地方，且只取 llm/*（非传输原语、本仓不对它做 instanceof）；src/llm/* 在归属表里是 content、派生器不会拷进本仓 src，所以这条只能走包。本地依赖只有 src/transport/ 的两个属主内客户端与 kernel 端口，零跨层边"
+  },
+  {
+    "path": "src/automation-persona-view.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 H 第 5 片：人设在本进程的唯一取用口（绑定三态 + 人设本体），事实源在接口域、本进程只有同步读副本。**刻意不判 composition**：它是一段纯派生逻辑、零装配，被至少三个取用点（陪伴界面快照 / 每连接角色调度器 / 评论调度器）共用。收成一份的理由是「同一份判断被两处用，行为测试原理上看不见第二份」；回落方向按「哪边更严」定：副本陈旧 ⇒ 绑定态 unknown（绝不答 unbound）、取人设具名抛（绝不回落默认人设）"
   },
   {
     "path": "src/automation-publish-dispatch.ts",

@@ -70,8 +70,9 @@ import type {
 } from './comm/protocol.js';
 import { PublishUiUpdateCommandReceiver } from './comm/publish-ui-update-command-receiver.js';
 import { UiSnapshotService } from './comm/ui-snapshot.js';
-import { SessionConfigStore } from './config/session-config-store.js';
+import type { SessionConfigStore } from './config/session-config-store.js';
 import type { AutomationEdgeRuntimePort } from './automation-edge-access.js';
+import { personaBindingFor } from './automation-persona-view.js';
 import { omitUnsupportedUsageMetrics } from './platform/surface.js';
 import type { CommandSequencer } from './publish-agent/command-sequencer.js';
 import { PublishDispatcher } from './publish-agent/publish-dispatcher.js';
@@ -183,9 +184,19 @@ export type AutomationPublishApprovalAuthorityPort = Pick<
 >;
 
 export interface AutomationPublishDispatchOptions {
-  /** automation 属主池。单场会话配置落在它上面。 */
+  /** automation 属主池。 */
   ownerPool: pg.Pool;
   executionTarget: DeploymentTarget;
+  /**
+   * 单场会话配置存储。**必填、由调用方注入**——本模块**刻意不自建**。
+   *
+   * 它在本进程里同时是三样东西的事实源：本模块的续场护栏、每连接角色调度器的
+   * `sessionLimitProvider`、业务配置那条全局活跃周历，还有 `session_config_global`
+   * 那条属主同步读流的观测口。**自建一个不会报错**，只会让进程里存在两份、各持一套缓存，
+   * 于是「后台改了单场时长」在一处生效、另一处不生效，而两边都不说话。
+   * 做成必填无默认，是为了让「到底是不是同一个实例」在编译期可见。
+   */
+  sessionConfig: SessionConfigStore;
   /** 批 D 的对边出口。 */
   edge: AutomationPublishEdgePort;
   /** 批 D 的指令定序器与租约客户端。 */
@@ -361,8 +372,9 @@ export async function createAutomationPublishDispatch(
     );
   }
 
-  // 单场会话配置（automation 属主表）。init 失败 → 逐项回落内置默认，不阻塞装配。
-  const sessionConfigStore = new SessionConfigStore({ pool: options.ownerPool });
+  // 单场会话配置（automation 属主表）：**注入的那一个实例**，本模块只 init、不新建。
+  // init 失败 → 逐项回落内置默认，不阻塞装配（与单体逐位一致）。
+  const sessionConfigStore = options.sessionConfig;
   try {
     await sessionConfigStore.init();
   } catch (error) {
@@ -600,12 +612,11 @@ export async function createAutomationPublishDispatch(
   };
 
   // ── 陪伴界面快照层 ──────────────────────────────────────────────────────
-  const personaBindingOf = (accountId: string): PersonaBinding => {
+  const personaBindingOf = (accountId: string): PersonaBinding =>
     // **三态**：副本陈旧 → `unknown`，快照层据此不下发「已绑人设」字段。未知 ≠ 未绑。
-    const lookup = options.mirrors.personaFor(accountId);
-    if (lookup.state !== 'fresh' || !lookup.value) return 'unknown' as PersonaBinding;
-    return lookup.value.binding as PersonaBinding;
-  };
+    // 判定取共享的那一份（`automation-persona-view.ts`）：本进程至少三处要问同一个问题，
+    // 各写一份的现形方式不是报错，是某天只改了其中一份、且恰好在该拦住的那一刻。
+    personaBindingFor(options.mirrors, accountId);
   const uiSnapshot = new UiSnapshotService({
     pusher: { pushToEdges: (envelope, edgeId) => options.edge.pushToEdges(envelope, edgeId) },
     resolveEdgeIdForAccount: (accountId) => options.edge.resolveEdgeIdForAccount(accountId),

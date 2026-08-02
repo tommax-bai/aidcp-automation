@@ -91,6 +91,32 @@ export interface AutomationRiskAccounting {
   blocked(accountId: string): boolean;
   /** 写入前判定 + 记账，**全系统唯一入口**。漏斗未启用时回落改动前的路径，行为逐位一致。 */
   recordRiskFact(accountId: string, action: RiskAction, dedupeKey: string): Promise<boolean>;
+  /**
+   * 边缘回执处理器要的那一口（「**先落 outbox 再 emit**」）。
+   *
+   * **漏斗没起来时如实答 `undefined`**，而不是给一个会静默吞掉的空壳 —— 那正是消费方
+   * （处理器的 `riskAccounting` 参数）**写明了回落语义**的缺席条件：字段省略 ⇒ 处理器保持
+   * 改动前行为（直接 emit，记账由订阅者承担）。给空壳会把「漏斗没起来」伪装成「记了」，
+   * 而那时「崩在回执与记账之间不丢账」这条保证已经不成立了。
+   *
+   * 与 {@link recordRiskFact} **共用同一个漏斗实例**，不是第二条记账路径。
+   */
+  edgeHandlerPort():
+    | {
+        enqueue(input: {
+          accountId: string;
+          action: RiskAction;
+          occurredAt?: number;
+          dedupeKey: string;
+        }): Promise<void>;
+        record(input: {
+          accountId: string;
+          action: RiskAction;
+          occurredAt?: number;
+          dedupeKey: string;
+        }): Promise<{ allowed: boolean }>;
+      }
+    | undefined;
   stop(): void;
 }
 
@@ -219,6 +245,15 @@ export async function createAutomationRiskAccounting(
       }
       return (await options.registry.getControllerForAccounting(accountId)).record(action);
     },
+    // **就是上面那个漏斗实例本身**（`RiskAccounting` 的两个方法逐字同形）；
+    // 没起来时如实缺席，见接口处那段注释。
+    edgeHandlerPort: () =>
+      accounting
+        ? {
+            enqueue: (input) => accounting!.enqueue(input),
+            record: (input) => accounting!.record(input),
+          }
+        : undefined,
     stop: () => {
       reconciler?.stop();
       accounting?.stop();
