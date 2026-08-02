@@ -9,9 +9,12 @@
  *
  * 它们自洽：只要一个**自动化属主池** + 部署目标 + schema 探针，不依赖评论域的任何东西。
  * 而消费协调器缠着加群调度器、评论调度器、历史群选择、风控控制器物化和群成员账本，
- * 且它要的运营策略决策是 **api 属主的异步口**（`resolveForAccount`，含慢启动解析），
- * 与步骤 2 给自动化侧的同步基线口 **不是同一个东西** —— 那需要再补一条跨进程口，
- * 属批 G 后续片，别在这里顺手糊一个。
+ * 所以它单独成片（批 G 第四片，落点 `automation-comment-scheduler` 之后）。
+ *
+ * **一处已作废的判断留在这里备查**：本片原先写着「协调器要的运营策略决策是 api 属主的异步口，
+ * 需要再补一条跨进程口」。2026-08-02 实读推翻——它要的两样输入本进程都已具备
+ * （基线走同步读镜像，慢启动走本进程自己的风控投影），缺的只是把两样拼起来的那一小段纯判断，
+ * 已析出到公共契约层。**别再照那句话去补跨进程口。**
  *
  * ## 两条红线
  *
@@ -41,8 +44,17 @@ export interface AutomationFacebookRuntimeOptions {
 }
 
 export interface AutomationFacebookRuntimeAssembly {
-  /** 喂给每连接调度器工厂的两个口（第三个 `coordinator` 由批 G 后续片供）。 */
+  /** 喂给每连接调度器工厂的两个口（第三个 `coordinator` 由批 G 第四片供）。 */
   ports: Pick<AutomationFacebookRuntimePorts, 'rule' | 'consumption'>;
+  /**
+   * 消费运行时存储本体（批 G 第四片的协调器要它的**全取用面**，比上面那个窄口宽）。
+   *
+   * **刻意不让第四片自己再建一个**：另建会让认领 / 下发 / 结算落在两个实例上，
+   * 而两边都不会报错 —— 只是同一个动作被两套租约各管一半。
+   */
+  consumptionStore:
+    | { state: 'wired'; store: FacebookConsumptionModeRuntimeStore }
+    | { state: 'unavailable'; reason: string };
   /** 关停：只关自己建的东西。**注入进来的共享池不在这里关**（会连带打死本进程其余存储）。 */
   close(): Promise<void>;
 }
@@ -69,6 +81,7 @@ export async function createAutomationFacebookRuntime(
         rule: { state: 'unavailable', reason },
         consumption: { state: 'unavailable', reason },
       },
+      consumptionStore: { state: 'unavailable', reason },
       close: async () => undefined,
     };
   }
@@ -131,6 +144,10 @@ export async function createAutomationFacebookRuntime(
             }
           : { state: 'unavailable', reason: consumption.reason },
     },
+    consumptionStore:
+      consumption.state === 'wired'
+        ? { state: 'wired', store: consumption.store }
+        : { state: 'unavailable', reason: consumption.reason },
     // 只关自己建的；注入的共享属主池由组装根统一关（批 D 那条坑：
     // 存储的 close() 内部是 pool.end()，在共享池上调它会连带打死本进程其余十几个存储）。
     close: async () => {
