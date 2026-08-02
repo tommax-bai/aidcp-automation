@@ -582,8 +582,14 @@ test('derived census separates the 21/58 transport package from the 20/57 automa
   // 内容生成链（本根至今没构造 `PublishGenerationHttpClient`，另有断言禁止伪装）。
   // **后者本轮差点被误撤**，是编译器按 id 字面量点名才拦住的 —— 撤条前先 grep id 的全部引用。
   //
+  // 2026-08-04：6 -> 5，operator-command 3 -> 2。撤的是**调度启停**，第六条真靠接线消掉的：
+  // 本包 `main()` 自己注册那条路由（`2f5f6a9`），接口进程本轮建了客户端并把读写一起接上
+  // （api `3159e10`，此前那里一律 `throw automation_operator_command_unavailable:dispatch`）。
+  // 两端都去对面 `main()` 里读过。**接口进程按设计不起面板监听**，所以运营还点不到那个按钮，
+  // 但那是「面板整体还没搬」，对每个面板面都成立，不是这条通道特有的欠账。
+  //
   // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
-  assert.equal(blockers.length, 6);
+  assert.equal(blockers.length, 5);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -593,7 +599,7 @@ test('derived census separates the 21/58 transport package from the 20/57 automa
     ),
     {
       '4b-mirror': 0,
-      'operator-command': 3,
+      'operator-command': 2,
       'content-owner': 2,
       'composition-root': 1,
     },

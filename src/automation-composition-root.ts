@@ -187,12 +187,24 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
       owner: 'automation',
       closingChange: 'future',
     },
-    {
-      id: 'feishu-operator-dispatch-start-stop',
-      category: 'operator-command',
-      owner: 'automation',
-      closingChange: 'future',
-    },
+    // ═══ 2026-08-04：`feishu-operator-dispatch-start-stop` 撤条（第六条真靠接线消掉的） ═══
+    //
+    // 判据仍是本常量文件头那一句（只列「阻止本包交付完整生产进程」的依赖），且**两端都查过**：
+    //   · 本包这一半：`main()` 自己注册那条路由，真翻转时真启停各连接、`changed` 是观测值、
+    //     在线数取实测（automation `2f5f6a9`，结构断言在 `test/acceptance/automation-main.test.ts`）；
+    //   · 对面那一半：`aidcp-api` 的手写入口本轮建了那个客户端并把读写两条一起接上
+    //     （api `3159e10`），此前它对这条通道一律 `throw automation_operator_command_unavailable:dispatch`。
+    //     **是去对面 `main()` 里读出来的，不是「客户端建得出来就算」**——客户端只吃基址与令牌，
+    //     路由不在对面照样编译得过、两仓测试各自全绿，只有真跑两个进程才 404。
+    //
+    // **一件必须一起知道的事**：接口进程**按设计不起面板监听**
+    // （`aidcp-api/src/server.ts` 的 `API_SYNC_READ_PUBLIC_SURFACE_LEDGER`：那些 DTO 面仍归
+    // cloud-panel），所以三进程形态下运营还点不到那个按钮。但那是**面板整体还没搬**，
+    // 对每一个面板面都成立，不是调度启停这条通道特有的欠账，也不阻止本包交付完整生产进程。
+    // 飞书那一侧本来就没有 dispatch 动作（task 1.4），故无第二个缺口。
+    //
+    // 本文件是 Cloud 普查的**永久手写分叉、拿不到任何机械信号**，所以理由写在原地；
+    // 对面把那个客户端撤了，本仓这边没有任何东西会告诉你。
     // 0.3f：`content-draft-refinement-authority` 在此**刻意缺席**。cloud 单体里草稿精修的
     // 工作器坐在 segC 的 `seamMode !== 'automation' && …` 守卫内 —— automation 进程按守卫跳过，
     // api / content 进程根本不跑 segC，因此没有任何独立起根会执行它，本包也不需要它才能交付

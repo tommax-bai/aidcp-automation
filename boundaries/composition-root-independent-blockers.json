@@ -4,10 +4,10 @@
   "claimBlocked": true,
   "claim": "api, automation, and content are independently bootable without foreign owner pools, stores, or synchronous in-process dependencies",
   "summary": {
-    "total": 6,
+    "total": 5,
     "byCategory": {
       "4b-mirror": 0,
-      "operator-command": 3,
+      "operator-command": 2,
       "content-owner": 2,
       "composition-root": 1
     }
@@ -31,16 +31,6 @@
       "consumer": "automation independent root",
       "evidence": [
         "src/automation-composition-root.ts#readiness:feishu-operator-delegated-card-actions"
-      ]
-    },
-    {
-      "id": "feishu-operator-dispatch-start-stop",
-      "category": "operator-command",
-      "owner": "automation",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:feishu-operator-dispatch-start-stop"
       ]
     },
     {
