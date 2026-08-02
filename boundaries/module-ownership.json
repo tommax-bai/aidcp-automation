@@ -265,6 +265,11 @@
     "note": "change split-cloud-api-composition-root-4a 派生仓手写 automation-only 组合根；只装配 automation owner pool、4a HTTP clients/receivers 与本地 offboard primitives，不持有 API/content owner 实现"
   },
   {
+    "path": "src/automation-config-audit-relay.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 C 最后一件：互动配置面审计中继，把本进程 outbox 里的审计行经已有跨进程通道排空到接口属主表。与其余各批同形，是可单测的工厂、由组装根调它；定时器不在构造期起（留给进程入口在就绪闸之后调）。三条红线：载荷结构不符抛错让游标停住（MUST NOT 静默跳过，丢一条审计就是一段无人知晓的空洞）；跨进程通道缺席同样抛错（吞掉的话中继会一直「成功」地把审计丢进真空）；承重主题 MUST NOT 设 unconsumedRetentionMs 兜底强删（未落地就删 = 静默吞审计）。本文件不出现接口属主表名，落地只经注入的写入口"
+  },
+  {
     "path": "src/automation-config-mirror-gate.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 C：本进程的配置副本停手闸。判定逻辑在 kernel 工厂（定稿 §4.7 2026-08-01 裁决），本文件只负责两件属于本进程的事——哪些键在本进程算闸门档、以及因陈旧而拒绝这笔账记到哪去。事实源是本仓自己的同步读镜像，零跨属主依赖"
