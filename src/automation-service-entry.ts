@@ -28,6 +28,8 @@
  *    否则外部分不出「还没就绪」与「进程没起来」。探活响应里**必须**带上业务入口有没有放行，
  *    「监听着但没放行业务」这个中间态必须是可观测的，否则运维只看到端口通、以为一切正常。
  */
+import type pg from 'pg';
+
 import {
   createAutomationCompositionRoot,
   readAutomationRootConfig,
@@ -56,6 +58,28 @@ export interface AutomationBusinessIngress {
   start(): Promise<void>;
   /** 停业务。只在 start 真的成功过之后才会被调用。 */
   stop(): Promise<void>;
+  /**
+   * 释放**构造期就已经占住的**资源。**无论业务入口有没有放行过，关停时一定会被调用一次。**
+   *
+   * ## 为什么必须与 `stop()` 分开，而且是必填
+   *
+   * `stop()` 只在 `start()` 真的成功过之后才调（见 {@link stopService}）。但本进程里有三样东西
+   * **在工厂构造期就产生了副作用**，那时业务入口离放行还差一整个就绪闸：
+   *
+   * - 风控单写者锁：构造期就抢，**抢到之后靠会话保活**；
+   * - 记账漏斗的三张周期表：构造期就起转；
+   * - 模型出口的角色模型轮询：构造期就起转。
+   *
+   * 于是有一条真空路径——**同步读一直不就绪、然后收到终止信号**：此路径上 `start()` 从未成功，
+   * `stop()` 因此一次都不会被调，上面三样全部泄漏。其中写者锁最重：它靠会话保活，
+   * 进程只要没真正退出就一直握着，**下一个自动化进程等锁到超时后会直接拒绝启动**——
+   * 现象是「新进程起不来」，而根因在上一个进程的关停路径，排查方向完全错开。
+   *
+   * 做成**必填、无缺省**是为了让这件事在编译期可见：批 H 写业务入口时，编译器会当场
+   * 逼调用方回答「构造期占了什么、谁来还」。给它一个可选的空实现，就等于让这条真空
+   * 重新变得不可见。**确实没有构造期资源要还时，写一个空实现并注明理由**，别把方法删掉。
+   */
+  dispose(): Promise<void>;
 }
 
 /** 信号源。抽出来是为了让测试驱动它，生产上就是 `process`。 */
@@ -72,10 +96,22 @@ export interface AutomationServiceOptions {
   /** 直接给配置；不给就按环境变量读（缺项一律具名抛错，不给默认值）。 */
   config?: AutomationRootConfig;
   env?: NodeJS.ProcessEnv;
+  /**
+   * 属主库连接池。**调用方自己建了池就必须从这里传进来。**
+   *
+   * 不传的话组装根会自建一个（见 `createAutomationCompositionRoot` 的 `ownsPool`）——
+   * 而业务入口那十几个工厂要的是**同一个** automation 属主池。两条各自建池的路径
+   * 都能跑起来、都不报错，结果是同一个库上开着两套连接，且本仓没有任何断言会说话。
+   *
+   * **关停责任随之转移**：传了池就意味着 `ownsPool === false`，`root.close()` 便**不会**
+   * 关它——调用方 MUST 在 `service.close()` 落地之后自己关。
+   */
+  ownerPool?: pg.Pool;
   /** 建根的替身，测试用。 */
   createRoot?: (options: {
     config: AutomationRootConfig;
     runtime: AutomationRuntimeHandles;
+    ownerPool?: pg.Pool;
     syncRead?: AutomationRootSyncReadOverrides;
   }) => AutomationCompositionRoot;
   syncRead?: AutomationRootSyncReadOverrides;
@@ -118,6 +154,7 @@ export async function startAutomationService(
   const root = createRoot({
     config,
     runtime: options.runtime,
+    ownerPool: options.ownerPool,
     syncRead: options.syncRead,
   });
 
@@ -201,6 +238,10 @@ export async function startAutomationService(
         await options.businessIngress.stop();
         businessIngressStarted = false;
       }
+      // 构造期占住的资源**无条件**归还：`stop()` 只在放行过之后才跑，而写者锁 / 周期表 /
+      // 模型轮询在就绪闸之前就已经占着了。「一直没就绪就收到终止信号」正是它们唯一的泄漏路径。
+      // 放在 root.close() 之前：它们用的是本进程的属主池与连接，晚于根关停就没得还了。
+      await options.businessIngress.dispose();
       await root.close();
     })();
     return closePromise;

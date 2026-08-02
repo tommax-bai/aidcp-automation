@@ -184,15 +184,20 @@ function rootFactory(blocked: () => boolean) {
 function recordingIngress(): AutomationBusinessIngress & {
   starts: number;
   stops: number;
+  disposes: number;
 } {
   const state = {
     starts: 0,
     stops: 0,
+    disposes: 0,
     start: async () => {
       state.starts += 1;
     },
     stop: async () => {
       state.stops += 1;
+    },
+    dispose: async () => {
+      state.disposes += 1;
     },
   };
   return state;
@@ -286,6 +291,7 @@ test('重复的就绪信号不重复放行业务（靠在途 promise 去重，�
       });
     },
     stop: async () => undefined,
+    dispose: async () => undefined,
   };
   const ticks: (() => void)[] = [];
   const roots: AutomationCompositionRoot[] = [];
@@ -333,6 +339,7 @@ test('首轮放行失败不算启动失败：监听保住、探活如实报未�
       throw new Error('business_ingress_boom');
     },
     stop: async () => undefined,
+    dispose: async () => undefined,
   };
   const service = await startAutomationService({
     config: CONFIG,
@@ -404,6 +411,9 @@ test('关停等在途放行落地后再停业务，绝不把它丢在半途', as
     stop: async () => {
       events.push('stop');
     },
+    dispose: async () => {
+      events.push('dispose');
+    },
   };
   const ticks: (() => void)[] = [];
   const roots: AutomationCompositionRoot[] = [];
@@ -436,8 +446,9 @@ test('关停等在途放行落地后再停业务，绝不把它丢在半途', as
   await closing;
   assert.deepEqual(
     events,
-    ['start:begin', 'start:end', 'stop'],
-    '关停 MUST 等在途放行落地再停它；否则业务入口被丢在半途，且它的 stop 永远不会被调用',
+    ['start:begin', 'start:end', 'stop', 'dispose'],
+    '关停 MUST 等在途放行落地再停它；否则业务入口被丢在半途，且它的 stop 永远不会被调用。'
+      + '归还构造期资源排在 stop 之后：正在跑的业务可能还握着那些资源，反过来就是边用边还',
   );
 });
 
@@ -453,4 +464,58 @@ test('关停可重复调用，业务入口只停一次', async () => {
   });
   await Promise.all([service.close(), service.close(), service.close()]);
   assert.equal(ingress.stops, 1);
+  assert.equal(ingress.disposes, 1, '构造期资源也只归还一次');
+});
+
+test('一直不就绪就收到关停：业务从未放行，构造期占住的资源仍然归还', async () => {
+  const ingress = recordingIngress();
+  const service = await startAutomationService({
+    config: CONFIG,
+    runtime: runtimeHandles(),
+    businessIngress: ingress,
+    createRoot: rootFactory(() => true),
+    signals: null,
+    logger: SILENT,
+    setTimer: () => ({} as ReturnType<typeof setInterval>),
+    clearTimer: () => undefined,
+  });
+  assert.equal(service.businessIngressStarted(), false, '前提：这条路径上业务从未放行');
+
+  await service.close();
+
+  // 这一条是本用例的承重点：`stop()` 按约定只在放行过之后才跑，所以真空只能由 `dispose()` 兜。
+  // 少了它，写者锁会被一直握着，**下一个自动化进程等锁超时后直接拒绝启动**——
+  // 现象出在新进程，根因却在上一个进程的关停路径上。
+  assert.equal(ingress.starts, 0);
+  assert.equal(ingress.stops, 0, '没放行过就不该调 stop');
+  assert.equal(ingress.disposes, 1, '没放行过也必须归还构造期资源');
+});
+
+test('调用方自建的属主池会透传给组装根（不透传＝同一个库上悄悄开两套连接）', async () => {
+  const ingress = recordingIngress();
+  const mine = {} as pg.Pool;
+  const seen: (pg.Pool | undefined)[] = [];
+  const service = await startAutomationService({
+    config: CONFIG,
+    runtime: runtimeHandles(),
+    businessIngress: ingress,
+    ownerPool: mine,
+    createRoot: (options) => {
+      seen.push(options.ownerPool);
+      // 这里刻意不走 rootFactory：它自己写死了一个池，会把待验的透传盖掉。
+      return rootFactory(() => false)(options);
+    },
+    signals: null,
+    logger: SILENT,
+  });
+  try {
+    assert.equal(seen.length, 1);
+    assert.equal(
+      seen[0],
+      mine,
+      '必须是同一个池实例：组装根自建第二个池不会报任何错，只有连库真跑才看得出来',
+    );
+  } finally {
+    await service.close();
+  }
 });
