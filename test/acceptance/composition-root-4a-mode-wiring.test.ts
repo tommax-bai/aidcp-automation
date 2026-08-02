@@ -7,6 +7,12 @@ import {
   makeSyncReadFactEnvelope,
   type SyncReadPayloadByStream,
 } from 'aidcp-kernel/kernel/sync-read-facts.js';
+import { RISK_ACTIONS, type ActionQuota } from 'aidcp-kernel/kernel/risk-contract.js';
+
+/** 逐日上限夹具按动作名单派生，不手写十个键 —— 手写那种漏一项时自己不会说话。 */
+const SLOW_START_DAILY_CAP = Object.fromEntries(
+  RISK_ACTIONS.map((action) => [action, 1]),
+) as ActionQuota;
 import {
   SYNC_READ_CHANGED_TOPIC,
   syncReadPayloadDigest,
@@ -155,7 +161,15 @@ const SYNC_READ_PAYLOADS = {
   facebook_group_join_automation_config: { accounts: [] },
   // 批 E-2 步骤 2 新增流。空表 = 这台机器没有已配浏览面的 Facebook 环境，
   // 消费方据此报具名 blocker（而不是给个默认面）。
-  facebook_operation_policy: { environments: [] },
+  // 批 H 第 3 片：慢启动曲线是这条流上的**全局兄弟字段、必填**（逐执行目标一份），
+  // 与「这台机器有没有已配浏览面的 FB 环境」无关 —— 空表合法，缺曲线不合法。
+  facebook_operation_policy: {
+    environments: [],
+    slowStart: {
+      totalDays: 1,
+      dailyCaps: [SLOW_START_DAILY_CAP],
+    },
+  },
 } as const satisfies {
   [S in SyncReadStream]: SyncReadPayloadByStream[S];
 };
