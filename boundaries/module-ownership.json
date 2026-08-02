@@ -255,6 +255,11 @@
     "note": "§4.7：alerts 表 owner（2/2 automation）"
   },
   {
+    "path": "src/automation-comment-approval.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 G 第二片：评论域的审批与通知四个口 + 优质评论语料口，填每连接调度器工厂的 approval / notifyAutoApproved / resolveApprovalMode / notifyMandatoryOutcome / valuableCorpus。与批 B/C/D/E/F/G-1 同形，是可单测的工厂、由组装根调它。跨属主的三样（结构化通知出口 / 评论审批策略权威 / 发布审批账本）都是注入进来的 api 客户端端口，本文件不持有任何 api 属主实现；语料库复用批 B 底座已建实例、不另建。四条红线：审批口径读不到一律 fail-closed 为 review（绝不沿用来源模式扩权）；人审端口按 env 整体二态且 unavailable 必须具名；已批准的状态迁移是 best-effort、失败绝不影响放行判定；语料库缺失是写明的降级但同样具名"
+  },
+  {
     "path": "src/automation-composition-root.ts",
     "layer": "composition",
     "note": "change split-cloud-api-composition-root-4a 派生仓手写 automation-only 组合根；只装配 automation owner pool、4a HTTP clients/receivers 与本地 offboard primitives，不持有 API/content owner 实现"

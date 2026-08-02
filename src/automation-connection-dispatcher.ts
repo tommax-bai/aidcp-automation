@@ -174,8 +174,17 @@ export interface AutomationCommentPorts {
    * 故这里是二态而非可选：`unavailable` 与「接了但今天关着」必须分得开。
    */
   approval: CapabilityState<RoleDispatcherOptions['commentApproval']>;
-  /** 免审评论的旁路通知（不参与授权，但发出去没人知道等于没有可观测性）。 */
-  notifyAutoApproved: NonNullable<RoleDispatcherOptions['commentAutoApproveNotify']>;
+  /**
+   * 免审评论的旁路通知（不参与授权，但发出去没人知道等于没有可观测性）。
+   *
+   * **签名刻意收两个参数**：来源由调用点按 `approvalSource` 现推，
+   * 供给方 MUST NOT 把来源写死 —— 写死会让 mandatory 人设免审与账号级免审
+   * 发出同一种卡，运营再也分不出这条评论是被哪条授权放行的。
+   */
+  notifyAutoApproved(
+    input: Parameters<NonNullable<RoleDispatcherOptions['commentAutoApproveNotify']>>[0],
+    source: 'mandatory_persona' | 'account_global' | 'comment_scheduler',
+  ): Promise<void>;
   /** 有效审批模式解析（账号级 + 人设 mandatory 两条来源）。 */
   resolveApprovalMode: NonNullable<RoleDispatcherOptions['resolveCommentApprovalMode']>;
   /** 强制评论结果通知。 */
@@ -483,7 +492,17 @@ export function createAutomationDispatcherFactory(
         : {}),
       // 人审端口：env 闸未开时单体整体不注入（评论一律诚实跳过、不发）。
       ...(approval.state === 'wired' ? { commentApproval: approval.port } : {}),
-      commentAutoApproveNotify: deps.comment.notifyAutoApproved,
+      // **来源在这里现推**（与单体逐字同源）：mandatory 人设免审与账号级免审是两种卡。
+      // 把来源写死会让运营再也分不出这条评论是被哪条授权放行的。
+      commentAutoApproveNotify: (
+        input: Parameters<NonNullable<RoleDispatcherOptions['commentAutoApproveNotify']>>[0],
+      ) =>
+        deps.comment.notifyAutoApproved(
+          input,
+          (input as { approvalSource?: string }).approvalSource === 'mandatory_persona'
+            ? 'mandatory_persona'
+            : 'account_global',
+        ),
       resolveCommentApprovalMode: deps.comment.resolveApprovalMode,
       notifyMandatoryCommentOutcome: deps.comment.notifyMandatoryOutcome,
       ...(timeouts.corpusLookupMs !== undefined
