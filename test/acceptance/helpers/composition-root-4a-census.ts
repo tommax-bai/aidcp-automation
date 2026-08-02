@@ -1602,6 +1602,7 @@ export function deriveAutomationRootCensus(): DerivedAutomationRootCensus {
     accountPersona: 'accountPersona',
     environmentHandshake: 'environmentHandshake',
     commentApprovalPolicy: 'commentApprovalPolicy',
+    scheduleFeedback: 'scheduleFeedback',
     notificationContacts: 'notificationContacts',
     firstPostProgress: 'firstPostProgress',
     automationConfigCommands: 'automationConfigCommands',

@@ -165,11 +165,11 @@ export interface AutomationCommentSchedulerOptions {
     get(): FacebookConsumptionGroupCommentPolicyView | null;
   }>;
   /**
-   * 账号暂停（加群连续失败到顶时的自我保护）。事实源在**接口域**的账号状态管理器，
-   * 本进程今天没有这条写通道。
+   * 账号暂停（加群连续失败到顶时的自我保护）。事实源在**接口域**的账号状态管理器；
+   * 通道已于 2026-08-02 补上（用户拍板「先修两件小的」）。
    *
-   * **缺席后果不是报错**：加群调度器照常记账本、照常停止重试，但**不会把账号真的暂停**，
-   * 于是同一个账号明天还会再撞一次同样的墙。
+   * **仍然是二态而不是必填**：接口客户端整体没配时它就该缺席，而缺席后果不是报错 ——
+   * 加群照常记账本、照常停重试，但**不会把账号真的暂停**，同一个账号明天还会再撞一次。
    */
   accountPause: CapabilityState<{
     pause(accountId: string, reason: string): Promise<void>;

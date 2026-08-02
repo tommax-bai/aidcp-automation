@@ -226,7 +226,7 @@ test('entry checks service mode before dependent configuration and never fakes i
   );
 });
 
-test('minimal root constructs exactly 16 API clients and three automation receivers', () => {
+test('minimal root constructs exactly 17 API clients and three automation receivers', () => {
   const ownerPool = {} as pg.Pool;
   const root = createAutomationCompositionRoot({
     config: CONFIG,
@@ -515,7 +515,7 @@ test('4b first-load failure stays named and a later full snapshot heals readines
   await root.close();
 });
 
-test('derived census separates the 20/55 transport package from the 19/54 automation root', async () => {
+test('derived census separates the 21/57 transport package from the 20/56 automation root', async () => {
   const census = deriveAutomationRootCensus();
   assert.deepEqual(census, {
     ...AUTOMATION_ROOT_SURFACE,

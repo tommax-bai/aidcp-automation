@@ -38,6 +38,7 @@ import {
   AccountPersonaHttpClient,
   AutomationConfigCommandsHttpClient,
   CommentApprovalPolicyHttpClient,
+  ScheduleFeedbackHttpClient,
   EnvironmentHandshakeHttpClient,
   FirstPostProgressHttpClient,
   NotificationContactsHttpClient,
@@ -95,6 +96,7 @@ export const AUTOMATION_API_CLIENT_GROUPS = [
   'accountPersona',
   'environmentHandshake',
   'commentApprovalPolicy',
+  'scheduleFeedback',
   'notificationContacts',
   'firstPostProgress',
   'automationConfigCommands',
@@ -120,12 +122,12 @@ export const AUTOMATION_COMMAND_RECEIVER_GROUPS = [
 ] as const;
 
 export const AUTOMATION_ROOT_SURFACE = {
-  apiClientGroups: 16,
-  apiClientMethodSlots: 50,
+  apiClientGroups: 17,
+  apiClientMethodSlots: 52,
   commandReceiverGroups: 3,
   commandReceiverMethodSlots: 4,
-  totalGroups: 19,
-  totalMethodSlots: 54,
+  totalGroups: 20,
+  totalMethodSlots: 56,
 } as const;
 
 export type AutomationRootBlockerCategory =
@@ -326,6 +328,7 @@ export interface AutomationApiClients {
   accountPersona: AccountPersonaHttpClient;
   environmentHandshake: EnvironmentHandshakeHttpClient;
   commentApprovalPolicy: CommentApprovalPolicyHttpClient;
+  scheduleFeedback: ScheduleFeedbackHttpClient;
   notificationContacts: NotificationContactsHttpClient;
   firstPostProgress: FirstPostProgressHttpClient;
   automationConfigCommands: AutomationConfigCommandsHttpClient;
@@ -590,6 +593,8 @@ export function createAutomationApiClients(
     accountPersona: new AccountPersonaHttpClient(...args),
     environmentHandshake: new EnvironmentHandshakeHttpClient(...args),
     commentApprovalPolicy: new CommentApprovalPolicyHttpClient(...args),
+    // 批 H：排期名额回程（自动化侧只报告事实，小时格账本归排期器自己）。
+    scheduleFeedback: new ScheduleFeedbackHttpClient(...args),
     notificationContacts: new NotificationContactsHttpClient(...args),
     firstPostProgress: new FirstPostProgressHttpClient(...args),
     automationConfigCommands: new AutomationConfigCommandsHttpClient(...args),
