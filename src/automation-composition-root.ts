@@ -241,9 +241,7 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
     //      （`aidcp-content/test/acceptance/content-authority-routes.test.ts`）——
     //      本仓这边没有任何东西会告诉你对面把路由撤了。要复核就去读那份清单。
     //
-    // **没跟着撤的那一条在下面**：文字卡转写。它与上面五条的区别是**对面没有在服务它**
-    // （content 进程至今没有构造转写器实例，那条清单闸里它是 pending）。
-    // 客户端在、路由不在 ≠ 已接通 —— 这正是本轮查出来的那类假绿，绝不能算撤。
+    // **当时没跟着撤的那一条（文字卡转写）已于同日撤掉**，理由见下面那段。
 
     // `content-role-factories` retired 2026-07-31 as RESOLVED — **not** mis-attributed, and not
     // double-counted. It was the first entry here removed because wiring actually closed it:
@@ -266,17 +264,21 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
       closingChange: 'future',
     },
 
-    // 0.3d 那三条此前漏记的欠账里，**只剩这一条**（另两条随 2026-08-04 那批撤了，见上）。
-    // 文字卡 OCR 子链的转写器要交给本包的 RoleDispatcher 工厂，而 content 进程至今没有构造
-    // 转写器实例（它还缺视觉客户端与形态判别器两样料）⇒ 本包拿得到客户端、拿不到能力。
-    // **本包的旗标默认关**（与属主进程读同一个部署变量），所以今天不会变成一串失败调用；
-    // 但旗标一旦打开，能力就是空的 —— 所以它仍然阻止本包交付**完整**生产进程。
-    {
-      id: 'content-textcard-transcription-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
+    // ═══ 2026-08-04：`content-textcard-transcription-authority` 撤条（第七条真靠接线消掉的）═══
+    //
+    // 它是 08-04 那批**唯一没跟着撤的一条**，理由是「对面没有在服务它」——
+    // 本包这一半早就齐了（`main()` 建 `TextCardTranscriptionAuthorityHttpClient`，
+    // 连「旗标开没开」的本地取值闭包都配了，并按 `{state:'wired'}` 喂给角色工厂），
+    // 缺的是 content 进程从没构造转写器实例。**那一半今天补上了**（content `e924e2a`）：
+    // 属主实例已建（判形档另起一个 sensor、视觉模型另起一档，逐条照单体），路由**无条件注册**，
+    // content 那条只许下降的清单闸里它已从 pending 移出。
+    //
+    // **为什么「无条件注册」这一点对撤条是必要的**：旗标关时属主答「未启用」并回显自己那侧的
+    // 取值供客户端对账 —— 那是答案。若把注册挂在旗标上，关旗标时客户端拿到的是跨进程 404、
+    // 被译成「对面不支持这个方法」，那仍然是「拿得到客户端、拿不到能力」。
+    // content 侧已为此配了顶层语句断言（清单闸只数调用次数，塞进 `if` 它照过 —— 实测过）。
+    //
+    // 复核方式同上面那六条：**本仓没有任何机械信号**，要复核就去读 content 那份清单闸。
     // `content-publish-rejection-evidence-authority` retired as MIS-ATTRIBUTED, not resolved
     // (change split-cloud-automation-production-runtime, task 2.9). Every link of its premise was
     // checked and each one is wrong: the predicate `hasUserRejectionEvidence` lives in
