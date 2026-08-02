@@ -330,6 +330,11 @@
     "note": "change split-cloud-automation-production-runtime 批 B：风控单写者与告警底座的装配（写者锁 → 风控存储 → 注册表 → 三个互动存储 + 告警存储）。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂；且它装配的全部是 automation 属主的东西（risk_* / alerts / liked_notes / valuable_comments / interaction_feed 五族表），跨属主的只有一个注入进来的 kernel 归属端口"
   },
   {
+    "path": "src/automation-schema-gate-startup.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 H 第二片：启动期 schema 契约门在本进程的调用点。门的实现（src/schema/schema-gate.ts）是从单体同步来的，本仓此前一个调用点都没有——也就是说自动化进程即使真启动，也是在完全没有校验过 schema 的前提下去连库、建存储、放行业务。判 automation 而非 composition：它不是组装根，是组装根之前那一句，本身不构造任何东西。三条红线：只判 automation 一个属主（判据是「本进程真正开了哪些属主池」，本仓两处建池都是 resolveOwnerPgConfig('automation')——判多了是替本进程不连的库背书，判少了是真在用的库没被校验，后者正是这道门原来那次假绿的形状）；MUST NOT 包 try/catch（吞掉即恢复「schema 落后照样启动」的静默假成功）；返回的回执由启动外壳必填持有，因为「没人调门」在行为上什么都不表现、行为用例原理上看不见它"
+  },
+  {
     "path": "src/automation-segc-export-disposition.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 A：cloud 自动化段 41 个导出面的「本进程有没有去处」判据清单。**刻意不判 composition、不进 compositionWhitelist**——它不是组合根，是一份零 import 的纯数据裁定表（把非根文件塞进那份白名单会稀释它「这些才是组合根」的含义）。零 import ⇒ 任何层都不产生跨层边；落 automation 是因为它描述的是本仓自己的装配工作"

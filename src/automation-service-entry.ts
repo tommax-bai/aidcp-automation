@@ -4,6 +4,8 @@
  * ## 它是什么、不是什么
  *
  * 这里只有**进程生命周期**：读配置 → 建组装根 → 先监听 → 就绪闸 → 放行业务入口 → 优雅关停 → 信号处理。
+ * 更早的两步（schema 契约门 → 建属主池 → 造那十几个工厂）发生在 `main()` 里、调本外壳之前；
+ * 门那一步靠 {@link AutomationServiceOptions.schemaGate} 这张必填回执在编译期钉住顺序。
  * 它**不构造任何业务运行时**。运行时依赖（{@link AutomationRuntimeHandles}）与业务入口
  * （{@link AutomationBusinessIngress}）都是**必填参数、没有缺省**——批 B…G 把真实供给方逐批搬进来时，
  * 编译器会当场逼调用方面对「这两样从哪来」，而不是让一个空壳悄悄跑起来。
@@ -30,6 +32,10 @@
  */
 import type pg from 'pg';
 
+import {
+  AUTOMATION_PG_OWNERS,
+  type AutomationSchemaGateReceipt,
+} from './automation-schema-gate-startup.js';
 import {
   createAutomationCompositionRoot,
   readAutomationRootConfig,
@@ -93,6 +99,25 @@ export interface AutomationServiceOptions {
   runtime: AutomationRuntimeHandles;
   /** 业务入口。**必填、无缺省**，理由同上。 */
   businessIngress: AutomationBusinessIngress;
+  /**
+   * schema 契约门跑过了的回执。**必填、无缺省，且外部造不出来**
+   * （只能由 {@link runAutomationStartupSchemaGate} 返回）。
+   *
+   * ## 它在这里，是为了把「门必须先跑」变成编译期可见的顺序约束
+   *
+   * 门 MUST 跑在**任何存储 init 之前**，而调本外壳时属主池与那十几个工厂**都已经造好了**
+   * （工厂在构造期就抢写者锁、起周期表，见 {@link AutomationBusinessIngress.dispose}）。
+   * ⇒ 门的正确位置只有一个：`main()` 的第一句，建池之前。
+   *
+   * 而「没调门」这件事在行为上**什么都不表现**——进程照起、日志照打、用例照绿，
+   * 只有 schema 真落后的那一次才爆，且那时门已经不在场了。既然行为测试原理上看不见它，
+   * 就让**类型**担保：想调本外壳，就必须先拿到一张只能由 `runAutomationStartupSchemaGate()`
+   * 发出的回执。
+   *
+   * 本外壳不重跑门（那会变成一次进程内的重复判定），只做两件事：核回执判过的属主集合
+   * 与本进程真正建池的属主集合一致，以及把结论打进启动日志。
+   */
+  schemaGate: AutomationSchemaGateReceipt;
   /** 直接给配置；不给就按环境变量读（缺项一律具名抛错，不给默认值）。 */
   config?: AutomationRootConfig;
   env?: NodeJS.ProcessEnv;
@@ -150,6 +175,19 @@ export async function startAutomationService(
     options.setTimer ?? ((fn: () => void, ms: number) => setInterval(fn, ms));
   const clearTimer =
     options.clearTimer ?? ((handle: ReturnType<typeof setInterval>) => clearInterval(handle));
+
+  // 门判过的属主集合 MUST 与本进程真正建池的属主集合逐个吻合 —— 对不上即拒绝启动，不是告警。
+  // 判少了：真在用的库没被校验过（门看着绿、其实什么都没校验到）；
+  // 判多了：本进程根本不连那个库，却在替它的 schema 背书。单体侧同一条不变量写在
+  // `assertOwnerPoolsMatchProcessOwners`，这里是它在本进程的形态（本仓恒只连 automation）。
+  const judged = [...options.schemaGate.owners].sort().join(',');
+  const opened = [...AUTOMATION_PG_OWNERS].sort().join(',');
+  if (judged !== opened) {
+    throw new Error(
+      `schema_gate_owner_scope_mismatch: 门判了 [${judged}]，本进程建池 [${opened}]。`
+        + '两者必须一致——否则要么真在用的库没被校验，要么在替本进程不连的库背书。',
+    );
+  }
 
   const root = createRoot({
     config,
@@ -286,7 +324,8 @@ export async function startAutomationService(
   const readiness = root.syncRead.readiness();
   logger.log(
     `[aidcp-automation] 内部 API 已监听 127.0.0.1:${port}`
-      + `（target=${config.executionTarget}；同步读就绪度=${readiness.state}`
+      + `（target=${config.executionTarget}；schema 门=${options.schemaGate.mode}/`
+      + `${options.schemaGate.pass ? '通过' : '未通过'}；同步读就绪度=${readiness.state}`
       + `；业务入口=${businessIngressStarted ? '已放行' : '未放行'}`
       + `${readiness.state === 'ready' ? '' : `；阻塞流=${readiness.blockers.map((blocker) => blocker.stream).join(',')}`}）`,
   );

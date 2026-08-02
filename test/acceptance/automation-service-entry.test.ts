@@ -41,7 +41,24 @@ import {
   type AutomationBusinessIngress,
   type AutomationSignalSource,
 } from '../../src/automation-service-entry.js';
+import { runAutomationStartupSchemaGate } from '../../src/automation-schema-gate-startup.js';
+import { loadMigrationFiles } from '../../src/schema/migration-files.js';
+import { versionOf } from '../../src/schema/migration-plan.js';
 import { InternalHttpClient } from '../../src/transport/internal-http.js';
+
+/**
+ * 门回执**只能由门自己发**（品牌位不导出）—— 所以这里也得真跑一次门，注入一个「账本与本仓
+ * 迁移目录逐条对齐」的桩即可，不碰库。这正是那个必填字段想要的效果：**连测试都绕不过它**。
+ */
+const SCHEMA_GATE = await runAutomationStartupSchemaGate({
+  mode: 'warn',
+  client: {
+    async query() {
+      const files = await loadMigrationFiles();
+      return { rows: files.map((file) => ({ version: versionOf(file.name) })) };
+    },
+  },
+});
 
 const CONFIG: AutomationRootConfig = {
   executionTarget: 'dev',
@@ -208,6 +225,7 @@ const SILENT = { log: () => undefined, warn: () => undefined, error: () => undef
 test('就绪时先监听、再放行业务，探活如实报出两者', async () => {
   const ingress = recordingIngress();
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -240,6 +258,7 @@ test('未就绪时监听照起、业务不放行，探活把这个中间态报�
   const ingress = recordingIngress();
   let blocked = true;
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -296,6 +315,7 @@ test('重复的就绪信号不重复放行业务（靠在途 promise 去重，�
   const ticks: (() => void)[] = [];
   const roots: AutomationCompositionRoot[] = [];
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -342,6 +362,7 @@ test('首轮放行失败不算启动失败：监听保住、探活如实报未�
     dispose: async () => undefined,
   };
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -374,6 +395,7 @@ test('终止信号触发优雅关停，且处理器摘掉自己（第二个信�
     },
   };
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -418,6 +440,7 @@ test('关停等在途放行落地后再停业务，绝不把它丢在半途', as
   const ticks: (() => void)[] = [];
   const roots: AutomationCompositionRoot[] = [];
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -455,6 +478,7 @@ test('关停等在途放行落地后再停业务，绝不把它丢在半途', as
 test('关停可重复调用，业务入口只停一次', async () => {
   const ingress = recordingIngress();
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -470,6 +494,7 @@ test('关停可重复调用，业务入口只停一次', async () => {
 test('一直不就绪就收到关停：业务从未放行，构造期占住的资源仍然归还', async () => {
   const ingress = recordingIngress();
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
@@ -496,6 +521,7 @@ test('调用方自建的属主池会透传给组装根（不透传＝同一个�
   const mine = {} as pg.Pool;
   const seen: (pg.Pool | undefined)[] = [];
   const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
     config: CONFIG,
     runtime: runtimeHandles(),
     businessIngress: ingress,
