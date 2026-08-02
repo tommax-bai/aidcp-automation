@@ -238,6 +238,13 @@ function stubDeps(over: Partial<AutomationDispatcherDeps> = {}): {
         floorHours: 1,
       }),
       facebookCommentBodyScheme: () => 'template' as const,
+      facebookCommentConfigFor: () => ({
+        enabled: true,
+        keywords: [],
+        containers: [],
+        commentMode: 'template' as const,
+        commentTemplates: [],
+      }),
       facebookOperationBaseFor: () => ({ ok: false as const, blocker: 'test' }),
     },
     comment: {
@@ -308,9 +315,14 @@ test('批 G 的口接上后逐项接线，且规则批次触发口真的用上�
         port: {
           triggerManual: async () => {
             calls.push('triggerManual');
-            return { ok: true };
+            return { ok: true, level: 'success' as const, title: 't', message: 'm' };
           },
-          triggerTargeted: async () => ({}),
+          triggerTargeted: async () => ({
+            ok: true,
+            level: 'success' as const,
+            title: 't',
+            message: 'm',
+          }),
         },
       },
       valuableCorpus: {

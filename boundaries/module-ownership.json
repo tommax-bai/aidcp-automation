@@ -260,6 +260,11 @@
     "note": "change split-cloud-automation-production-runtime 批 G 第二片：评论域的审批与通知四个口 + 优质评论语料口，填每连接调度器工厂的 approval / notifyAutoApproved / resolveApprovalMode / notifyMandatoryOutcome / valuableCorpus。与批 B/C/D/E/F/G-1 同形，是可单测的工厂、由组装根调它。跨属主的三样（结构化通知出口 / 评论审批策略权威 / 发布审批账本）都是注入进来的 api 客户端端口，本文件不持有任何 api 属主实现；语料库复用批 B 底座已建实例、不另建。四条红线：审批口径读不到一律 fail-closed 为 review（绝不沿用来源模式扩权）；人审端口按 env 整体二态且 unavailable 必须具名；已批准的状态迁移是 best-effort、失败绝不影响放行判定；语料库缺失是写明的降级但同样具名"
   },
   {
+    "path": "src/automation-comment-scheduler.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 G 第三片：评论调度器 + 加群调度器 + 联系评论统一安全闸的装配，填每连接调度器工厂的 scheduler / fireAutoContactComment 两个口。与批 B/C/D/E/F/G-1/G-2 同形，是可单测的工厂、由组装根调它；两个调度器各留一条构造缝，因为它们加起来 40 余个选项且绝大多数可选、漏传不报错。三个调度器与四个 Facebook 群存储都是 automation 属主，跨属主的四样（账号平台与联系方式 / 自动化配置命令 / 结构化通知 / 精选样本召回）一律是注入进来的端口，本文件不持有任何 api 或 content 属主实现。三个今天没有通道的 api 属主事实（群评论时序策略 / 账号暂停 / 排期名额回程）做成必填能力二态并各自具名，缺席后果逐条写在字段注释里。五条红线：注入的是共享属主池故关停路径 MUST NOT 调群存储的 close()；精选召回缺席抛具名 not_configured 绝不回空数组；时序策略拿不到即回本轮无可评群、绝不用默认时长顶替；免审通知来源由本片现推恒为 comment_scheduler；写作语言连试两次不匹配即拒发"
+  },
+  {
     "path": "src/automation-composition-root.ts",
     "layer": "composition",
     "note": "change split-cloud-api-composition-root-4a 派生仓手写 automation-only 组合根；只装配 automation owner pool、4a HTTP clients/receivers 与本地 offboard primitives，不持有 API/content owner 实现"

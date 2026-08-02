@@ -35,6 +35,8 @@
 import type { EffectiveContentSchedule } from 'aidcp-kernel/kernel/content-schedule-resolution.js';
 import { actionModeEnabled } from 'aidcp-kernel/kernel/content-schedule-mode.js';
 import type { HotLeadGateConfig } from 'aidcp-kernel/kernel/hot-lead-gate-config.js';
+import type { EffectiveFacebookCommentConfig } from 'aidcp-kernel/kernel/facebook-comment-config-types.js';
+import type { CommentCommandReceipt } from 'aidcp-kernel/kernel/feishu-card-contract.js';
 import type {
   FacebookOperationPolicyBaseResolution,
   FacebookRuleOperationParameters,
@@ -149,6 +151,14 @@ export interface AutomationBusinessConfigPorts {
   facebookCommentBodyScheme(
     accountId: string,
   ): 'template' | 'generated' | 'unavailable';
+  /**
+   * 账号 Facebook 评论配置的**生效值**（关键词 / 容器 / 正文模式 / 模板）。
+   *
+   * 与上面那条正文方案**MUST 出自同一次解析**：两者都在回答「这个账号今天按什么正文发」，
+   * 各算一遍的现形方式不是报错，而是规则批次与覆盖评论对同一个账号给出不同正文模式。
+   * 供给方（批 H）拿同步读镜像的账号行喂 kernel 那个纯判定，两条口取同一份结果。
+   */
+  facebookCommentConfigFor(accountId: string): EffectiveFacebookCommentConfig;
   /** Facebook 运营基线取用（拿不到时带具名 blocker，绝不回落默认基线）。 */
   facebookOperationBaseFor(
     accountId: string,
@@ -157,17 +167,23 @@ export interface AutomationBusinessConfigPorts {
 
 /** 评论域：整块属批 G，**必填**。缺它规则批次与热帖引流评论都不会发。 */
 export interface AutomationCommentPorts {
-  /** 评论调度器（手动 / 定向两条触发口）。 */
+  /**
+   * 评论调度器（手动 / 定向两条触发口）。
+   *
+   * 回执类型**取契约那一份**（`CommentCommandReceipt`），不在这里手抄一个窄形状：
+   * 抄窄了不会报错，只会让调用点读不到本该有的字段（本口原先抄成三字段，
+   * 漏掉的 `level` 恰是「不染绿」那条判据要用的）。
+   */
   scheduler: CapabilityState<{
     triggerManual(
       accountId: string,
       options: Record<string, unknown>,
-    ): Promise<{ ok: boolean; code?: string; message?: string }>;
+    ): Promise<CommentCommandReceipt>;
     triggerTargeted(
       accountId: string,
       target: { noteId: string; title: string },
       options: Record<string, unknown>,
-    ): Promise<Record<string, unknown>>;
+    ): Promise<CommentCommandReceipt & { reason?: string }>;
   }>;
   /**
    * 逐条人审端口。单体里由 env 闸控制**整体是否注入**，未开启时评论一律诚实跳过、不发。
