@@ -93,6 +93,7 @@ import {
   type AutomationPublishDispatch,
 } from './automation-publish-dispatch.js';
 import { personaBindingFor, requirePersonaSoul } from './automation-persona-view.js';
+import { createAutomationLlmUsageBuffer } from './automation-llm-usage-buffer.js';
 
 import { EventBus } from './event-bus/index.js';
 import { edgeCommandToEnvelope } from './comm/command-bridge.js';
@@ -113,7 +114,10 @@ import {
   ReplyAiAuthorityHttpClient,
   TextCardTranscriptionAuthorityHttpClient,
 } from './transport/content-authority-http.js';
-import { FacebookPublishMediaAuthorityHttpClient } from './transport/content-media-usage-http.js';
+import {
+  FacebookPublishMediaAuthorityHttpClient,
+  LlmUsageRecordingAuthorityHttpClient,
+} from './transport/content-media-usage-http.js';
 import { PublishApprovalAuthorityHttpClient } from './transport/publish-approval-authority-http.js';
 import { SessionConfigStore } from './config/session-config-store.js';
 import { ResumeConfigStore } from './config/resume-config-store.js';
@@ -366,6 +370,7 @@ export async function runAutomationMain(
   const curatedWrite = new CuratedWriteAuthorityHttpClient(...contentArgs);
   const facebookPublishMedia = new FacebookPublishMediaAuthorityHttpClient(...contentArgs);
   const replyAi = new ReplyAiAuthorityHttpClient(...contentArgs);
+  const llmUsageRecording = new LlmUsageRecordingAuthorityHttpClient(...contentArgs);
   const textCardTranscriber = new TextCardTranscriptionAuthorityHttpClient(
     ...contentArgs,
     // 本进程没有本地旗标，能力在不在由**属主侧**答；这里恒报「本地认为开着」，
@@ -414,8 +419,20 @@ export async function runAutomationMain(
   // ── 2. 配置副本停手闸 ────────────────────────────────────────────────────
   const configMirrorGate = createAutomationConfigMirrorGate({ mirrors, logger });
 
+  // ── 2b. 模型用量的合并缓冲 ───────────────────────────────────────────────
+  // 家在这里、不在模型出口工厂里：工厂只留缝（`onCall`），缓冲的生命周期归进程。
+  // **周期表在业务入口放行之后才起**，与本仓其余各片一致。
+  const llmUsageBuffer = createAutomationLlmUsageBuffer({ sink: llmUsageRecording, logger });
+
   // ── 3. 模型出口（⚠️ 构造期起角色模型轮询，归还在 dispose） ──────────────────
-  const modelExit = await createAutomationModelExit({ apiHttp, env, logger });
+  const modelExit = await createAutomationModelExit({
+    apiHttp,
+    env,
+    logger,
+    // 用量记账挂在这里。**这个回调跑在模型调用的完成路径上**，所以缓冲那一侧的 `record`
+    // 是同步且绝不抛的 —— 往这条路径上抛异常就是让记账把正事拖垮。
+    onCall: (info) => llmUsageBuffer.record(info),
+  });
 
   // ── 4. 风控底座（⚠️ 构造期抢写者锁，归还在 dispose） ───────────────────────
   const riskFoundation = await createAutomationRiskFoundation({
@@ -865,6 +882,7 @@ export async function runAutomationMain(
       publishDispatch.start();
       auditRelay.start();
       interaction.start();
+      llmUsageBuffer.start();
       // 在途动作恢复扫描：**就绪闸放行之后**才跑（构造期跑等于让一个未放行的进程动数据）。
       await facebookCoordinator.recoverActiveActions();
     },
@@ -879,6 +897,8 @@ export async function runAutomationMain(
       // 构造期就占住的三样，**无论业务有没有放行都要还**。
       riskAccounting.stop();
       modelExit.stop();
+      // 停表 + 最后一次提交。**失败即丢、不重投**（属主侧是累加计数器，重投即翻倍）。
+      await llmUsageBuffer.stop();
       await interaction.dispose();
       await facebookRuntime.close();
       // 风控底座：只放写者锁，**绝不碰注入池**。
