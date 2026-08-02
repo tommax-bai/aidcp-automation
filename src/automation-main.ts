@@ -97,6 +97,8 @@ import { createAutomationLlmUsageBuffer } from './automation-llm-usage-buffer.js
 
 import { EventBus } from './event-bus/index.js';
 import { edgeCommandToEnvelope } from './comm/command-bridge.js';
+import { AutomationDispatchCommandReceiver } from './delegated-task/operator-command-receiver.js';
+import { registerAutomationDispatchCommandRoutes } from './transport/operator-command-http.js';
 import type { Envelope } from './comm/protocol.js';
 import type {
   ConceptExtractorFactoryOptions,
@@ -413,13 +415,48 @@ export async function runAutomationMain(
   // ── 进程内的两样状态 ─────────────────────────────────────────────────────
   // 调度总开关：**刻意是进程内布尔、刻意没有持久台账**（重启后运营再点一次启动 MUST 重新执行，
   // 台账会把它判成 duplicate 并回放一条陈旧的「是否真翻转」＝编造事实）。
-  // ⚠️ 运营那条启停通道**本片不接**：它卡在接口侧签名上，登记在台账条目
-  //    `feishu-operator-dispatch-start-stop`。本进程今天恒为「在跑」，这是**已登记的缺口**，
-  //    不是遗漏 —— 别在这里塞一个没人能调的接收方去凑「接好了」的样子。
   let dispatchActive = true;
   // 昵称的进程内已知值。**权威在接口域**（属主侧是「比较后写」，这里只是省掉重复写），
   // 重启后为空 ⇒ 首次采集会多写一次幂等写。MUST NOT 把它当权威读口。
   const knownNicknames = new Map<string, string>();
+
+  // ── 1h. 运营指令：调度启停 ─────────────────────────────────────────────
+  // **这条路由本进程必须自己注册。** 组装根只注册了三个成对指令接收方，
+  // 而运营指令那一族（委托自由文本 / 手动发布 / 手动评论 / 调度启停）在单体里是**进程内直调**，
+  // 拆开之后就成了 api → automation 的一跳；不注册的话对面拿到的是 404，
+  // 而 404 会被读成「对面版本落后、不支持这个方法」—— 一个纯接线遗漏冒名顶替了具名原因。
+  //
+  // **先注册、后有调用方是对的顺序**（判例是内容侧用量记账那条：属主先接得住，
+  // 免得写调用方时才发现对面根本没有这条路由）。今天 api 的手写入口还没构造对应客户端，
+  // 那是接口侧的账，见 tasks 4.1b。
+  registerAutomationDispatchCommandRoutes(
+    root.internalServer,
+    new AutomationDispatchCommandReceiver({
+      // 语义逐条照单体：**`changed` 是观测值**（本次是否真翻转），不是「我请求了所以变了」；
+      // 真翻转时要**真的**启停各连接，否则开关只是个显示用的布尔；
+      // `edgesOnline` 取实测在线数，绝不乐观。
+      setDispatch: async (accountId, action) => {
+        const want = action === 'start';
+        const changed = dispatchActive !== want;
+        if (changed) {
+          dispatchActive = want;
+          if (want) connectionRuntime.runtimes.startAll();
+          else connectionRuntime.runtimes.endAll('panel_dispatch_stop');
+        }
+        return {
+          accountId,
+          dispatch: want ? 'started' : 'stopped',
+          changed,
+          // 边缘接入此刻可能还没建成（这条闭包只在请求期才跑，届时必已回填）。
+          edgesOnline: edgeAccessRef.get().server.onlineEdgeCount(),
+        };
+      },
+      isActive: () => dispatchActive,
+    }),
+    config.automationInternalToken,
+    executionTarget,
+  );
+
 
   // ── 2. 配置副本停手闸 ────────────────────────────────────────────────────
   const configMirrorGate = createAutomationConfigMirrorGate({ mirrors, logger });

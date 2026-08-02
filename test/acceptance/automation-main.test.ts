@@ -222,6 +222,25 @@ test('结构断言：人设判定按引用取共享那一份，不许各处再�
   }
 });
 
+test('结构断言：调度启停真翻转时 MUST 真启停各连接，且在线数取实测', () => {
+  // 这条守的是「开关变成一个只用于显示的布尔」。三个判据都不报错、只是行为悄悄没了：
+  // ① 不调启停 ⇒ 面板说停了、各连接照跑；
+  // ② `changed` 现算成 true ⇒ 「我请求了所以变了」，而它是**观测值**；
+  // ③ 在线数写死或乐观 ⇒ 运营据此判断有没有生效，写死等于给一个假答案。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const i = body.indexOf('registerAutomationDispatchCommandRoutes');
+  assert.ok(i > 0, '本进程 MUST 自己注册这条路由 —— 组装根只注册三个成对指令接收方');
+  const block = body.slice(i, i + 1_600);
+  assert.match(block, /runtimes\.startAll\(\)/, '真翻转到 start 时 MUST 真的把各连接起起来');
+  assert.match(block, /runtimes\.endAll\(/, '真翻转到 stop 时 MUST 真的把各连接停掉');
+  assert.match(
+    block,
+    /changed\s*=\s*dispatchActive\s*!==\s*want/,
+    '`changed` MUST 是观测值（翻转前后比出来的），不是「我请求了所以变了」',
+  );
+  assert.match(block, /onlineEdgeCount\(\)/, '在线边缘数 MUST 取实测，绝不乐观');
+});
+
 test('结构断言：可执行入口在本片仍然 fail-closed（切成真启动属第 4 段）', () => {
   const code = codeOf('../../src/automation-composition-root.ts');
   assert.match(
