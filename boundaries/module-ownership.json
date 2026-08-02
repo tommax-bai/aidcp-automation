@@ -255,6 +255,11 @@
     "note": "§4.7：alerts 表 owner（2/2 automation）"
   },
   {
+    "path": "src/automation-business-config.ts",
+    "layer": "automation",
+    "note": "change split-cloud-automation-production-runtime 批 H 第一片：四个业务配置取值口的实现（排期 / 活跃周历 / 热帖阈值 / Facebook 评论配置与正文方案 / Facebook 运营基线），填每连接调度器工厂的 AutomationBusinessConfigPorts。判 automation 而非 api：它不持有任何 api 属主实现，只从本仓同步读镜像取快照、喂给已析出到 kernel 的那一份判定（批 E-2 步骤 1/2）。本文件 MUST NOT 出现任何解析逻辑——「账号覆盖 ?? 全局回落」「未配模式一律按模板」「无行即完全不自动」各只有一份，两个进程调同一个函数，各写一份的现形方式不是报错而是同一个账号在两侧算出不同生效值。四条红线：排期快照没到位按「没有这个账号的行」处置（全 off = 完全不自动，绝不按上一次的印象继续跑）；Facebook 正文方案陈旧一律 unavailable（既不猜模板也不猜生成式）；运营基线的环境解析器按引用取镜像自己那一份；热帖阈值是参数档，陈旧时保留上一份而非退回写死默认（默认很可能更松，一陈旧就悄悄放宽方向正好反了）"
+  },
+  {
     "path": "src/automation-comment-approval.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 G 第二片：评论域的审批与通知四个口 + 优质评论语料口，填每连接调度器工厂的 approval / notifyAutoApproved / resolveApprovalMode / notifyMandatoryOutcome / valuableCorpus。与批 B/C/D/E/F/G-1 同形，是可单测的工厂、由组装根调它。跨属主的三样（结构化通知出口 / 评论审批策略权威 / 发布审批账本）都是注入进来的 api 客户端端口，本文件不持有任何 api 属主实现；语料库复用批 B 底座已建实例、不另建。四条红线：审批口径读不到一律 fail-closed 为 review（绝不沿用来源模式扩权）；人审端口按 env 整体二态且 unavailable 必须具名；已批准的状态迁移是 best-effort、失败绝不影响放行判定；语料库缺失是写明的降级但同样具名"

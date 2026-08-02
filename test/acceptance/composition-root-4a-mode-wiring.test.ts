@@ -120,10 +120,17 @@ const SYNC_READ_PAYLOADS = {
   client_environment_automation: {
     blockedEnvironmentKeys: [],
     slowStartAnchors: [
-      // `slowStartCompletedAt` 由上游 kernel 契约新增（另一路 change 的慢启动改动）。
+      // `slowStartCompletedAt` 由上游 kernel 契约新增（另一路 change 的慢启动改动）；
+      // `envKey` 由批 H 新增（自动化进程解析 Facebook 运营基线要「账号 → 环境键」这一跳）。
       // 本文件是 `aidcp:test-owner=derived` 的**永久手写分叉**，中控侧改了什么都到不了它——
-      // 这次是类型碰巧接住了，**不是**有什么机制提醒过（§4.7）。
-      { accountId: 'acct-a', slowStartSince: null, slowStartCompletedAt: null, ambiguous: false },
+      // 两次都是类型碰巧接住了，**不是**有什么机制提醒过（§4.7）。
+      {
+        accountId: 'acct-a',
+        envKey: 'env-a',
+        slowStartSince: null,
+        slowStartCompletedAt: null,
+        ambiguous: false,
+      },
     ],
   },
   automation_account_projection: {
