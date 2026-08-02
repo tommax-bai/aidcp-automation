@@ -571,8 +571,19 @@ test('derived census separates the 21/58 transport package from the 20/57 automa
   // 没跟着撤的：那些角色仍然写 content 属主的精选库（`content-curated-write-authority`），
   // 正文评估角色仍接一个 content 属主的转写器句柄（`content-textcard-transcription-authority`），
   // 两条都还在下面。这条撤的是**第三次数**同样那两个依赖。
+  // 2026-08-04：11 -> 6，content-owner 7 -> 2。**一次撤五条，全属「真靠接线消掉」**
+  // （概念池写 / 精选写 / FB 发帖素材 / 用量记账 / 回复生成）。逐条的证据是**两端都查过**，
+  // 不是「接了个客户端就算」：main() 真把客户端喂进了消费点，**且 content 进程的手写入口
+  // 真的注册了那条路由**。后半句是本轮才查的——此前 content 入口只服务七组里的两组，
+  // 而那种「客户端在、路由不在」编译得过、两仓测试各自全绿，只有真跑两个进程才 404。
+  // 服务端那一半今天由 content 仓那条只许下降的清单闸看着，**本仓这边没有任何机械信号**。
+  //
+  // 没跟着撤的两条 content：文字卡转写（对面至今没构造转写器实例，清单闸里是 pending）、
+  // 内容生成链（本根至今没构造 `PublishGenerationHttpClient`，另有断言禁止伪装）。
+  // **后者本轮差点被误撤**，是编译器按 id 字面量点名才拦住的 —— 撤条前先 grep id 的全部引用。
+  //
   // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
-  assert.equal(blockers.length, 11);
+  assert.equal(blockers.length, 6);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -583,7 +594,7 @@ test('derived census separates the 21/58 transport package from the 20/57 automa
     {
       '4b-mirror': 0,
       'operator-command': 3,
-      'content-owner': 7,
+      'content-owner': 2,
       'composition-root': 1,
     },
   );

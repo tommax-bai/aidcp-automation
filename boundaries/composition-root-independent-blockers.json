@@ -4,11 +4,11 @@
   "claimBlocked": true,
   "claim": "api, automation, and content are independently bootable without foreign owner pools, stores, or synchronous in-process dependencies",
   "summary": {
-    "total": 11,
+    "total": 6,
     "byCategory": {
       "4b-mirror": 0,
       "operator-command": 3,
-      "content-owner": 7,
+      "content-owner": 2,
       "composition-root": 1
     }
   },
@@ -44,36 +44,6 @@
       ]
     },
     {
-      "id": "content-facebook-publish-media-authority",
-      "category": "content-owner",
-      "owner": "content",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:content-facebook-publish-media-authority"
-      ]
-    },
-    {
-      "id": "content-concept-write-authority",
-      "category": "content-owner",
-      "owner": "content",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:content-concept-write-authority"
-      ]
-    },
-    {
-      "id": "content-curated-write-authority",
-      "category": "content-owner",
-      "owner": "content",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:content-curated-write-authority"
-      ]
-    },
-    {
       "id": "content-generic-llm-authority",
       "category": "content-owner",
       "owner": "content",
@@ -84,16 +54,6 @@
       ]
     },
     {
-      "id": "content-token-usage-authority",
-      "category": "content-owner",
-      "owner": "content",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:content-token-usage-authority"
-      ]
-    },
-    {
       "id": "content-textcard-transcription-authority",
       "category": "content-owner",
       "owner": "content",
@@ -101,16 +61,6 @@
       "consumer": "automation independent root",
       "evidence": [
         "src/automation-composition-root.ts#readiness:content-textcard-transcription-authority"
-      ]
-    },
-    {
-      "id": "content-reply-generation-authority",
-      "category": "content-owner",
-      "owner": "content",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:content-reply-generation-authority"
       ]
     },
     {

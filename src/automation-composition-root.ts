@@ -198,72 +198,69 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
     // api / content 进程根本不跑 segC，因此没有任何独立起根会执行它，本包也不需要它才能交付
     // 完整生产进程。它在 cloud 单体台账里仍然在（segA 的 store 构造与 segD 的读取都还在），
     // 只是那条 segC 证据行消失了；两份台账的差就是这个「谁的欠账」之差，不是漏记。
-    {
-      id: 'content-facebook-publish-media-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
-    {
-      id: 'content-concept-write-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
-    {
-      id: 'content-curated-write-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
-    // `content-role-factories` retired 2026-07-31 as RESOLVED — **not** mis-attributed, and not
-    // double-counted. The other two retirements in this ledger are of those kinds, so the
-    // distinction is stated up front: this is the first entry here removed because wiring actually
-    // closed it.
+    // ═══ 2026-08-04：一次撤五条（change split-cloud-automation-production-runtime 第 4 段起手） ═══
     //
-    // It was accurate when written. The four content role classes could not be imported by this
-    // package, so the composition root had to hand the dispatcher a table of factory functions, and
-    // that table was content-owned territory. Two changes removed the content side of it:
-    //   - task 0.7 re-adjudicated the four role classes, their shared base and the curated gate to
-    //     automation — all six files now live in this package's `src/`;
-    //   - task 2.4b moved the two-hop narrowing anchor from the content-owned store class to the
-    //     kernel curated write port, which was that table's last content-owned symbol.
-    // What remains is composition-root work, and every composition root is hand-written per repo.
-    // This root needs nothing content-owned to build its own table.
+    // 判据就是本常量文件头那一句：**只列「阻止本包交付完整生产进程」的依赖**。判例是 4b 那组
+    // ——它们「served here by the sync-read mirrors, so they no longer block this root」。
+    // 下面六条现在同样 served，逐条的证据是**两端都查过**，不是「接了个客户端就算」：
+    //
+    //   · `content-concept-write-authority`      —— main() 喂 `conceptStore`，content 进程注册 concept-pool 路由；
+    //   · `content-curated-write-authority`      —— main() 喂 `curatedStore`，content 注册 curated-write 路由；
+    //   · `content-facebook-publish-media-authority` —— main() 以 `media: {state:'wired'}` 喂下发器，content 注册该组路由；
+    //   · `content-token-usage-authority`        —— 属主早已有 `recordUsage`，content 注册路由，
+    //                                               automation 侧本轮补了合并缓冲并挂上模型出口的 onCall；
+    //   · `content-reply-generation-authority`   —— content 本轮把属主实例也建了并注册路由，互动能力喂的是它的客户端；
+    // 五条全属「真靠接线消掉」，不是记错属主、也不是重复计数。
+    //
+    // ⚠️ **本轮差点多撤一条，记下来免得下次再判错**：起初把 `content-generic-llm-authority`
+    //    也算进来了，理由是「本包的文本模型客户端取自共享包 `aidcp-transport/llm/qwen.js`、
+    //    不再碰 content」。**那是判错了**：这条锚的不是模型客户端，是**内容生成链**
+    //    （`PublishGenerationHttpClient`），而本根至今没有构造它、也有一条断言明令禁止伪装
+    //    （`test/transport/publish-generation-http.test.ts`）。
+    //    是**编译器**当场点名的（那条断言按字面量比 id，撤条后联合类型里没有它了）——
+    //    也就是说，这条判错**并不是靠读文档发现的**。⇒ 撤条前先 grep 一遍 id 的**全部引用**，
+    //    别只看名字像什么。
+    //
+    // ⚠️ **两件必须一起知道的事**：
+    //   ① **cloud 那把尺不会跟着降**（它是 AST 派生、问的是「自动化段还碰不碰 content 符号」，
+    //      单体里那些调用点仍在）。两把尺**合法分叉**，MUST NOT 为了「凑齐」去手改 cloud 那份。
+    //   ② **本文件是 Cloud 普查的永久手写分叉、拿不到任何机械信号**，所以理由写在原地。
+    //      这六条的「服务端真的注册了」这一半，**只有 content 仓那条只许下降的清单闸看着**
+    //      （`aidcp-content/test/acceptance/content-authority-routes.test.ts`）——
+    //      本仓这边没有任何东西会告诉你对面把路由撤了。要复核就去读那份清单。
+    //
+    // **没跟着撤的那一条在下面**：文字卡转写。它与上面五条的区别是**对面没有在服务它**
+    // （content 进程至今没有构造转写器实例，那条清单闸里它是 pending）。
+    // 客户端在、路由不在 ≠ 已接通 —— 这正是本轮查出来的那类假绿，绝不能算撤。
+
+    // `content-role-factories` retired 2026-07-31 as RESOLVED — **not** mis-attributed, and not
+    // double-counted. It was the first entry here removed because wiring actually closed it:
+    // task 0.7 re-adjudicated the four content role classes (plus their base and the curated gate)
+    // to automation — all six files now live in this package's `src/` — and task 2.4b moved the
+    // two-hop narrowing anchor from the content-owned store class to the kernel curated write port,
+    // which was that table's last content-owned symbol. What remains is composition-root work, and
+    // every composition root is hand-written per repo.
     //
     // **This file is a permanent hand-written fork of the Cloud census and gets no mechanical signal
     // from it, so the reason is restated here on purpose.** On the Cloud side the retirement is
-    // anchored by a runnable check (`contentOwnedSymbolsInRoleFactoryTable`, pinned by a dedicated
-    // case): if a content-owned symbol ever reappears in that table it goes red and the entry comes
-    // back. **Nothing here will tell you that happened** — this ledger has no source anchor at all.
-    //
-    // Not retired with it, deliberately: those roles still write to the content-owned curated store
-    // (`content-curated-write-authority`) and the note evaluator still takes a content-owned
-    // transcriber handle (`content-textcard-transcription-authority`). Both are still below.
+    // anchored by a runnable check (`contentOwnedSymbolsInRoleFactoryTable`); **nothing here will
+    // tell you if that goes red** — this ledger has no source anchor at all.
+
+    // 内容生成链（`PublishGenerationHttpClient`）本根至今未构造，见上面那段「差点多撤一条」。
     {
       id: 'content-generic-llm-authority',
       category: 'content-owner',
       owner: 'content',
       closingChange: 'future',
     },
-    {
-      id: 'content-token-usage-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
-    // 0.3d：以下三条是本台账此前漏记的真实欠账（cloud 侧 segCAutomation 内构造、属主 content、
-    // 本包内无对应模块）。文字卡 OCR 子链的转写器要交给本包的 RoleDispatcher 工厂；互动回复生成
-    // 由本包的 ReplyWorkflow 直接消费；草稿否决证据判定在委托执行器的候选装载路径上——三者缺席都
-    // 会让本包交付不出完整生产进程，所以本来就该在。
+
+    // 0.3d 那三条此前漏记的欠账里，**只剩这一条**（另两条随 2026-08-04 那批撤了，见上）。
+    // 文字卡 OCR 子链的转写器要交给本包的 RoleDispatcher 工厂，而 content 进程至今没有构造
+    // 转写器实例（它还缺视觉客户端与形态判别器两样料）⇒ 本包拿得到客户端、拿不到能力。
+    // **本包的旗标默认关**（与属主进程读同一个部署变量），所以今天不会变成一串失败调用；
+    // 但旗标一旦打开，能力就是空的 —— 所以它仍然阻止本包交付**完整**生产进程。
     {
       id: 'content-textcard-transcription-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
-    {
-      id: 'content-reply-generation-authority',
       category: 'content-owner',
       owner: 'content',
       closingChange: 'future',
