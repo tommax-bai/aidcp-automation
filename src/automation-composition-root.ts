@@ -123,11 +123,11 @@ export const AUTOMATION_COMMAND_RECEIVER_GROUPS = [
 
 export const AUTOMATION_ROOT_SURFACE = {
   apiClientGroups: 17,
-  apiClientMethodSlots: 53,
+  apiClientMethodSlots: 54,
   commandReceiverGroups: 3,
   commandReceiverMethodSlots: 4,
   totalGroups: 20,
-  totalMethodSlots: 57,
+  totalMethodSlots: 58,
 } as const;
 
 export type AutomationRootBlockerCategory =
@@ -163,12 +163,47 @@ export interface AutomationRootReadinessBlocker {
  */
 export const AUTOMATION_ROOT_READINESS_BLOCKERS =
   [
-    {
-      id: 'feishu-operator-natural-language-delegate',
-      category: 'operator-command',
-      owner: 'automation',
-      closingChange: 'future',
-    },
+    // ═══ 2026-08-03：委托任务那两条一起撤（第九、第十条真靠接线消掉的） ═══
+    //
+    // 撤的是 `feishu-operator-natural-language-delegate` 与
+    // `feishu-operator-delegated-card-actions`。**它们必须一起撤**：两条指向同一个 7+1 端口，
+    // 注入那一个端口就同时点亮自由文本入口与卡片上那几个按钮，分开撤只会留下一条假的欠账。
+    //
+    // 判据仍是本常量文件头那一句（只列「阻止本包交付完整生产进程」的依赖），**两端都查过**：
+    //
+    //   · 本包这一半（automation `main()` 的 1i 段）：自己建委托任务存储（属主池）、建服务、
+    //     建幂等台账、把接收方挂上 `registerDelegatedTaskRoutes`（7 方法）**与**
+    //     `registerDelegatedTaskTextCommandRoutes`（自由文本）两条路由。
+    //     结构断言在 `test/acceptance/automation-main.test.ts`，逐条变异实测都能红。
+    //   · 对面那一半（`aidcp-api` 的手写入口）：两个客户端合成 7+1、`delegate` 真调它、
+    //     `startIngress` 收到 `delegatedTasks`。**是去对面 `main()` 里读出来的**——
+    //     客户端只吃基址与令牌，路由不在对面照样编译得过、两仓测试各自全绿，
+    //     只有真跑两个进程才 404，而那个 404 会被读成「对面版本落后」。
+    //
+    // **两个目标校验钩子是这条撤条的实质内容，不是附赠品**：它们是「目标存不存在 /
+    // 是不是待审 / 是不是这个账号的」三问的唯一执行点。省掉它们也能让路由通、也能让卡片发出来，
+    // 但那是本 change 的红线形态（先假成功、等真去执行时才爆）。两个钩子都接了：
+    // 候选稿那半走 api 属主 publishLog 的 `loadForDispatch`（本根早已有客户端，零新增），
+    // 精选那半走**受鉴权**的 `CuratedTargetAuthorityHttpClient`——走裸那条会让跨进程后的
+    // 缺表错误只剩一个普通传输错误，于是「精选库暂时不可用」被如实报成「目标不存在」。
+    //
+    // **另一件同批补上的前置**：委托解析按昵称选号，而账号显示名与别名候选此前
+    // **没有任何跨进程读**（只活在 api 的账号存储里）。缺了不是「差一点」——每一条
+    // 「给<昵称>…」都会回「可用昵称：无可用昵称」，响亮，但这条能力对运营等于不可用。
+    // 本轮补了 4a 花名册组的第二个方法（账号目录），单体那份候选清单也同批改指它，
+    // 两处共用同一份翻译（`src/delegated-task/account-candidates.ts`）。
+    //
+    // **探针这次自熄**：api 手写入口里那句 `automation_operator_command_unavailable:delegate`
+    // 整句消失了（改成真调客户端），形态同调度启停那条 —— 不必先裁定「探针分不出
+    // 『没有通道』与『没配置通道』」。剩下的 `:publish` / `:comment` 两句属另一条已撤的条目
+    // （1.7b：api 模式下这两条能力真正的失败走委托通道），它们所在的闭包在 api 模式下不可达。
+    //
+    // **仍然诚实地记下没做到的**：飞书 `/delegate` 那条链**一次都没真跑过**（要真发一条飞书
+    // 消息才触发），已按 5.5 登记 backlog 簇 60。交付的是「两端都真接上且结构上钉住」，
+    // 不声称「运营发一条消息就能跑通」。
+    //
+    // 本文件是 Cloud 普查的**永久手写分叉、拿不到任何机械信号**，所以理由写在原地；
+    // 对面把那两个客户端撤了，本仓这边没有任何东西会告诉你。
     // `feishu-operator-publish-comment` retired by adjudication (user, 2026-07-30; change
     // split-cloud-automation-production-runtime task 1.7b). Its two probes on the Cloud side aimed
     // at the `mode === 'api'` arms of the command face's publish:/comment: closures, and those
@@ -181,12 +216,6 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
     // is gone. **This file is a permanent hand-written fork of the Cloud census and receives no
     // mechanical signal from it, so the reason is restated here on purpose — do not assume the Cloud
     // side's comment will reach you.** If those closures ever become reachable, re-adjudicate.
-    {
-      id: 'feishu-operator-delegated-card-actions',
-      category: 'operator-command',
-      owner: 'automation',
-      closingChange: 'future',
-    },
     // ═══ 2026-08-04：`feishu-operator-dispatch-start-stop` 撤条（第六条真靠接线消掉的） ═══
     //
     // 判据仍是本常量文件头那一句（只列「阻止本包交付完整生产进程」的依赖），且**两端都查过**：

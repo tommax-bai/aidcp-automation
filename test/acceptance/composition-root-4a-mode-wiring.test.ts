@@ -529,7 +529,7 @@ test('4b first-load failure stays named and a later full snapshot heals readines
   await root.close();
 });
 
-test('derived census separates the 21/58 transport package from the 20/57 automation root', async () => {
+test('derived census separates the 21/59 transport package from the 20/58 automation root', async () => {
   const census = deriveAutomationRootCensus();
   assert.deepEqual(census, {
     ...AUTOMATION_ROOT_SURFACE,
@@ -595,8 +595,18 @@ test('derived census separates the 21/58 transport package from the 20/57 automa
   // 两端都去对面 `main()` 里读过。**接口进程按设计不起面板监听**，所以运营还点不到那个按钮，
   // 但那是「面板整体还没搬」，对每个面板面都成立，不是这条通道特有的欠账。
   //
+  // 2026-08-03：4 -> 2，operator-command 2 -> 0。撤的是**委托任务那两条**
+  //（自由文本 `/delegate` 与卡片动作），第八、第九条真靠接线消掉的，**必须一起撤**：
+  // 两条指向同一个 7+1 端口，注入那一个端口就同时点亮两个入口，分开撤会留下一条假欠账。
+  // 本包 `main()` 的 1i 段自己建存储 / 服务 / 幂等台账并注册两条路由，两个目标校验钩子都在
+  //（候选稿走 api 属主 publishLog，精选走**受鉴权**那条读——走裸那条会让跨进程后的缺表错误
+  // 被如实报成「目标不存在」）；接口进程那一半把两个客户端合成 7+1、`delegate` 真调它、
+  // `startIngress` 收到 `delegatedTasks`，且那句 `:delegate` 探针串整句消失（自熄）。
+  // 同批补的前置：账号显示名此前没有任何跨进程读，4a 花名册组因此多了「账号目录」一条。
+  // **诚实地记下没做到的**：飞书那条链一次都没真跑过（要真发一条消息才触发），已登记 backlog。
+  //
   // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
-  assert.equal(blockers.length, 4);
+  assert.equal(blockers.length, 2);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -606,7 +616,7 @@ test('derived census separates the 21/58 transport package from the 20/57 automa
     ),
     {
       '4b-mirror': 0,
-      'operator-command': 2,
+      'operator-command': 0,
       'content-owner': 1,
       'composition-root': 1,
     },

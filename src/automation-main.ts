@@ -36,6 +36,10 @@ import type { PersonaBinding } from 'aidcp-kernel/kernel/persona-binding.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import type { StructuredNotificationDeliveryInput } from 'aidcp-kernel/kernel/api-direct-port.js';
 import type { CuratedWritePort } from 'aidcp-kernel/kernel/curated-write-port.js';
+import {
+  curatedContentFailureReason,
+  type CuratedPanelRow,
+} from 'aidcp-kernel/kernel/curated-content-types.js';
 import type { ApprovalVoidReason } from 'aidcp-kernel/kernel/publish-approval-contract.js';
 import type { TextCardTranscriber } from 'aidcp-kernel/kernel/text-card-transcriber-port.js';
 
@@ -97,8 +101,23 @@ import { createAutomationLlmUsageBuffer } from './automation-llm-usage-buffer.js
 
 import { EventBus } from './event-bus/index.js';
 import { edgeCommandToEnvelope } from './comm/command-bridge.js';
-import { AutomationDispatchCommandReceiver } from './delegated-task/operator-command-receiver.js';
-import { registerAutomationDispatchCommandRoutes } from './transport/operator-command-http.js';
+import {
+  AutomationDispatchCommandReceiver,
+  DelegatedTaskCommandReceiver,
+} from './delegated-task/operator-command-receiver.js';
+import {
+  PgOperatorCommandLedger,
+  unavailableOperatorCommandLedger,
+  type OperatorCommandLedger,
+} from './delegated-task/operator-command-ledger.js';
+import { PgDelegatedTaskStore } from './delegated-task/store.js';
+import { DelegatedTaskService } from './delegated-task/service.js';
+import { listDelegatedAccountCandidates } from './delegated-task/account-candidates.js';
+import {
+  registerAutomationDispatchCommandRoutes,
+  registerDelegatedTaskTextCommandRoutes,
+} from './transport/operator-command-http.js';
+import { registerDelegatedTaskRoutes } from './transport/delegated-task-http.js';
 import type { Envelope } from './comm/protocol.js';
 import type {
   ConceptExtractorFactoryOptions,
@@ -112,6 +131,7 @@ import { AutomationSyncReadMirrors } from './transport/automation-sync-read-mirr
 import { probeSchemaShape } from './schema/schema-capability.js';
 import type { AutomationSyncReadRuntimeSources } from './transport/automation-sync-read-source.js';
 import {
+  CuratedTargetAuthorityHttpClient,
   CuratedWriteAuthorityHttpClient,
   ReplyAiAuthorityHttpClient,
   TextCardTranscriptionAuthorityHttpClient,
@@ -457,6 +477,203 @@ export async function runAutomationMain(
     executionTarget,
   );
 
+  // ── 1i. 运营指令：委托任务控制面（自由文本 + 卡片动作） ────────────────────
+  //
+  // 与 1h 同一形态的第二条：单体里 `/delegate` 与委托卡片动作都是**进程内直调**，
+  // 拆开之后成了 api → automation 的一跳，而这两条路由本进程此前一条都没注册。
+  //
+  // **两个目标校验钩子 MUST NOT 省略。** 它们是「目标存不存在 / 是不是待审 /
+  // 是不是这个账号的」三问的唯一执行点：省掉之后确认卡照发、任务照建，等真去执行时
+  // 才发现目标不对 —— 那是本进程最不该有的形态（先假成功、后爆在最远处）。
+  const delegatedTaskStore = new PgDelegatedTaskStore({ executionTarget, pool: ownerPool });
+  await delegatedTaskStore.init();
+
+  /**
+   * 精选目标校验读。**走受鉴权那一族，不走裸形态那条同名读**（2026-08-04 裁决）。
+   *
+   * 判据是失败语义、不是风格：下面两个钩子必须分得出「精选库暂时不可用」与「这一行不存在」，
+   * 而裸那条的客户端不做按码还原 —— 跨进程后对面的缺表错误到这边只剩一个普通传输错误，
+   * 守卫恒 false，于是「库不可用」被如实报成「目标不存在或不属于该账号」。
+   * 那句话是谎，且编译期与测试都看不见它。
+   */
+  const curatedTarget = new CuratedTargetAuthorityHttpClient(...contentArgs);
+
+  /**
+   * 精选读的抛出物归类。**两类都要认**：跨端口来的是 `ContentPortError`，
+   * 单体属主存储抛的是它自己那个缺表错误 —— 只认前一类今天恒 false，只认后一类拆完恒 false。
+   * 认不出来的照原样抛（逐字照单体：不认识的错误 MUST NOT 被压成一句「稍后重试」）。
+   */
+  const curatedReadUnavailable = (err: unknown): boolean =>
+    curatedContentFailureReason(err) !== 'unclassified_error';
+
+  const delegatedTaskService = new DelegatedTaskService({
+    store: delegatedTaskStore,
+    // 账号候选：一次全量目录读 + 那一份共享翻译。**MUST NOT 在这里重写一遍**——
+    // 单体组装根用的是同一个函数，两份漂开的现形时刻是「按昵称选号」真被用到的那一刻。
+    listAccounts: () => listDelegatedAccountCandidates(apiClients.accountRoster),
+    prepareTarget: async (intent, account) => {
+      if (
+        intent.action === 'approve_candidate'
+        || intent.action === 'reject_candidate'
+        || intent.action === 'modify_candidate'
+      ) {
+        const recordId = Number(intent.targetConstraints?.candidateId);
+        if (!Number.isInteger(recordId) || recordId <= 0) {
+          return { ok: false, code: 'candidate_target_required', message: '请提供有效候选稿编号。' };
+        }
+        const draft = await apiClients.automationPublishLog.loadForDispatch(recordId);
+        if (!draft || draft.accountId !== account.accountId || draft.platform !== account.platform) {
+          return {
+            ok: false,
+            code: 'candidate_not_found_or_mismatch',
+            message: '候选稿不存在或不属于该账号/平台。',
+          };
+        }
+        if (draft.status !== 'pending_approval') {
+          return {
+            ok: false,
+            code: 'candidate_not_pending',
+            message: `候选稿当前状态为 ${draft.status}，不能创建该操作。`,
+          };
+        }
+        return {
+          ok: true,
+          targetConstraints: {
+            ...(intent.targetConstraints ?? {}),
+            candidateId: String(recordId),
+            candidateVersion: draft.contentVersion,
+            candidateTitle: draft.title ?? '',
+          },
+        };
+      }
+      if (intent.action === 'comment_curated') {
+        const curatedId = Number(intent.targetConstraints?.curatedId);
+        let row: CuratedPanelRow | null = null;
+        try {
+          row = Number.isInteger(curatedId)
+            ? await curatedTarget.getOneForAccount(curatedId, account.accountId)
+            : null;
+        } catch (err) {
+          // 库不可用（可重试）：MUST NOT 复用 curated_target_unavailable —— 那句是「这行不存在」= 谎。
+          if (curatedReadUnavailable(err)) {
+            return {
+              ok: false,
+              code: 'curated_content_unavailable',
+              message: '精选内容存储暂不可用，请稍后重试。',
+            };
+          }
+          throw err;
+        }
+        if (!row || (row.contentType !== 'image_text' && row.contentType !== 'video') || !row.title?.trim()) {
+          return {
+            ok: false,
+            code: 'curated_target_unavailable',
+            message: '指定精选内容不存在、归属不符或缺少可定位标题。',
+          };
+        }
+        return {
+          ok: true,
+          targetConstraints: {
+            ...(intent.targetConstraints ?? {}),
+            curatedId,
+            noteId: row.sourceId,
+            title: row.title,
+          },
+        };
+      }
+      return { ok: true };
+    },
+    validateTarget: async (task) => {
+      if (
+        task.action === 'approve_candidate'
+        || task.action === 'reject_candidate'
+        || task.action === 'modify_candidate'
+      ) {
+        const recordId = Number(task.targetConstraints.candidateId);
+        const expectedVersion = Number(task.targetConstraints.candidateVersion);
+        const draft = await apiClients.automationPublishLog.loadForDispatch(recordId);
+        if (!draft || draft.accountId !== task.accountId || draft.platform !== task.platform) {
+          return {
+            ok: false,
+            code: 'candidate_not_found_or_mismatch',
+            message: '候选稿已不存在或归属/平台已变化。',
+          };
+        }
+        if (draft.contentVersion !== expectedVersion) {
+          return {
+            ok: false,
+            code: 'candidate_version_conflict',
+            message: `候选稿已更新到 v${draft.contentVersion}，请重新确认。`,
+          };
+        }
+      }
+      const curatedId = Number(task.targetConstraints.curatedId ?? task.sourceConstraints.curatedId);
+      if (Number.isInteger(curatedId) && curatedId > 0) {
+        let row: CuratedPanelRow | null = null;
+        try {
+          row = await curatedTarget.getOneForAccount(curatedId, task.accountId);
+        } catch (err) {
+          // 同上：MUST NOT 复用 curated_target_changed —— 那句是「已删 / 已变」= 谎。
+          if (curatedReadUnavailable(err)) {
+            return {
+              ok: false,
+              code: 'curated_content_unavailable',
+              message: '精选内容存储暂不可用，请稍后重试。',
+            };
+          }
+          throw err;
+        }
+        if (
+          !row
+          || row.sourceId !== String(task.targetConstraints.noteId ?? task.sourceConstraints.sourceId ?? '')
+        ) {
+          return {
+            ok: false,
+            code: 'curated_target_changed',
+            message: '精选目标已删除或身份发生变化，不能改选相似内容。',
+          };
+        }
+      }
+      return { ok: true };
+    },
+  });
+
+  /**
+   * 运营指令的幂等台账。**单独 try、不并进上面那条链**（逐字照单体的裁定）：
+   * 它失败 MUST NOT 把整个委托控制面拖下水 —— 既有 7 方法压根不用台账（各自有版本号乐观锁），
+   * 让「台账表出问题」把委托任务管理一起掐掉，是把一个无关能力的故障放大成一片。
+   * 失败时换成具名 fail-closed 台账：自由文本那条带原因拒收，7 方法照常。
+   */
+  let operatorCommandLedger: OperatorCommandLedger;
+  try {
+    const pgLedger = new PgOperatorCommandLedger({ executionTarget, pool: ownerPool });
+    await pgLedger.init();
+    operatorCommandLedger = pgLedger;
+  } catch (err) {
+    const reason = (err as Error).message;
+    operatorCommandLedger = unavailableOperatorCommandLedger(reason);
+    logger.warn(
+      '[aidcp-automation] 运营指令幂等台账不可用 → 自由文本委托带具名原因拒收'
+      + `（既有 7 方法不受影响）：${reason}`,
+    );
+  }
+
+  const delegatedTaskCommandPort = new DelegatedTaskCommandReceiver({
+    service: delegatedTaskService,
+    ledger: operatorCommandLedger,
+  });
+  registerDelegatedTaskRoutes(
+    root.internalServer,
+    delegatedTaskCommandPort,
+    config.automationInternalToken,
+    executionTarget,
+  );
+  registerDelegatedTaskTextCommandRoutes(
+    root.internalServer,
+    delegatedTaskCommandPort,
+    config.automationInternalToken,
+    executionTarget,
+  );
 
   // ── 2. 配置副本停手闸 ────────────────────────────────────────────────────
   const configMirrorGate = createAutomationConfigMirrorGate({ mirrors, logger });

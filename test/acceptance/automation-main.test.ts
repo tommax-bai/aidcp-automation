@@ -255,3 +255,77 @@ test('结构断言：可执行入口在本片仍然 fail-closed（切成真启�
     '入口 MUST NOT 直接改调真装配：那等于绕过那道闸，而闸是中间态唯一的保护罩',
   );
 });
+
+test('结构断言：委托任务控制面两条路由都注册，且目标校验两个钩子都在', () => {
+  // 这条守的是本 change 的红线形态：**省掉钩子把服务先接上**。
+  // 少了钩子什么都不报错 —— 确认卡照发、任务照建，等真去执行时才发现目标不对，
+  // 而那时离下指令已经过去很久，运营看到的是一次莫名其妙的失败。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const i = body.indexOf('new PgDelegatedTaskStore');
+  assert.ok(i > 0, '委托任务存储 MUST 由本进程自己建（属主池）');
+  const block = body.slice(i);
+
+  assert.match(block, /registerDelegatedTaskRoutes\(/, '既有 7 方法那条路由 MUST 注册');
+  assert.match(
+    block,
+    /registerDelegatedTaskTextCommandRoutes\(/,
+    '自由文本委托那条路由 MUST 注册 —— 只注册 7 方法的话 `/delegate` 仍然到不了本进程',
+  );
+  assert.match(block, /prepareTarget:/, '建卡前的目标快照 MUST 在');
+  assert.match(block, /validateTarget:/, '确认时的目标复核 MUST 在');
+});
+
+test('结构断言：精选目标校验走受鉴权那条读，且分得出「库不可用」与「这行不存在」', () => {
+  // 走裸那条读会让跨进程后的缺表错误只剩一个普通传输错误：
+  // `isCuratedContentUnavailableError` 恒 false ⇒「库暂时不可用」被如实报成
+  //「目标不存在或不属于该账号」。那句是谎，且编译期与测试都看不见。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  assert.match(
+    body,
+    /new CuratedTargetAuthorityHttpClient\(/,
+    '精选目标校验 MUST 走受鉴权那一族（它按码还原成 ContentPortError）',
+  );
+  assert.equal(
+    /CuratedContentHttpClient\b/.test(body),
+    false,
+    '裸形态那条客户端不做错误还原，接上它等于把「库不可用」永久改写成「这行不存在」',
+  );
+  // 归类 MUST 用 kernel 那个**两类抛出物都认**的函数：只认本地错误类跨进程恒 false。
+  assert.match(body, /curatedContentFailureReason\(/);
+  assert.match(
+    body,
+    /code:\s*'curated_content_unavailable'/,
+    '库不可用要有自己的原因码，MUST NOT 复用「目标不存在 / 已变化」那两句',
+  );
+});
+
+test('结构断言：账号候选取共享那一份翻译，不许在装配里再拼一遍', () => {
+  // 复制一份出来的那一刻两份行为完全一致；漂开的现形时刻是「按昵称选号」真被用到那一次，
+  // 而那条路径平时几乎不跑。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  assert.match(
+    body,
+    /listAccounts:\s*\(\)\s*=>\s*listDelegatedAccountCandidates\(apiClients\.accountRoster\)/,
+    '候选清单 MUST 正向委托给共享翻译，并从 4a 花名册端口取目录',
+  );
+  assert.equal(
+    /displayName:\s*[^,\n]*\bnames:/.test(body.replace(/\n/g, ' ')),
+    false,
+    '装配里 MUST NOT 自己拼候选行',
+  );
+});
+
+test('结构断言：幂等台账单独 try，且失败时换成具名 fail-closed 台账', () => {
+  // 并进委托控制面那条链的后果：台账表出问题会把**既有 7 方法**（压根不用台账）一起掐掉，
+  // 把一个无关能力的故障放大成一片。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const i = body.indexOf('new PgOperatorCommandLedger');
+  assert.ok(i > 0, '台账 MUST 由本进程自己建');
+  const before = body.slice(Math.max(0, i - 200), i);
+  assert.match(before, /try\s*\{/, '台账 MUST 单独 try，不与委托存储共用一个');
+  assert.match(
+    body.slice(i, i + 800),
+    /unavailableOperatorCommandLedger\(/,
+    '台账不可用时 MUST 换成具名 fail-closed 台账，MUST NOT 让委托控制面整体缺席',
+  );
+});
