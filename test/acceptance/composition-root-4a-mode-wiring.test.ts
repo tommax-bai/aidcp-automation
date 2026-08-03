@@ -26,6 +26,7 @@ import {
   AUTOMATION_CONTENT_CLIENT_GROUPS,
   AUTOMATION_ROOT_READINESS_BLOCKERS,
   AUTOMATION_ROOT_SURFACE,
+  assertAutomationRootReady,
   AUTOMATION_SYNC_READ_CONSUMER_STREAMS,
   AutomationRootNotReadyError,
   createAutomationCompositionRoot,
@@ -219,6 +220,12 @@ test('entry checks service mode before dependent configuration and never fakes i
     () => readAutomationRootConfig({ AIDCP_SERVICE: 'api' }),
     /requires AIDCP_SERVICE=automation/,
   );
+  // 入口的**第一句**就是读配置，所以模式不对时它在碰到任何资源之前就 reject。
+  // 这条用例在入口切成真启动之后依然安全跑得动，正是因为那个顺序没变（见 automation-main 那条结构断言）。
+  await assert.rejects(
+    runAutomationEntry({ AIDCP_SERVICE: 'api' }),
+    /requires AIDCP_SERVICE=automation/,
+  );
   const env = {
     AIDCP_SERVICE: 'automation',
     AIDCP_DEPLOY_ENV: 'dev',
@@ -253,11 +260,25 @@ test('entry checks service mode before dependent configuration and never fakes i
   // "no material" at every call site instead of as a missing configuration.
   const { AIDCP_CONTENT_URL: _omitted, ...withoutContentUrl } = env;
   assert.throws(() => readAutomationRootConfig(withoutContentUrl), /AIDCP_CONTENT_URL is required/);
-  await assert.rejects(
-    runAutomationEntry(env),
+
+  // ── 就绪闸：台账清零之后仍然必须**能拦住启动** ──────────────────────────
+  //
+  // 台账已经空了，于是「非空即拒」在生产路径上恒真通过 —— **这条判断还在不在，
+  // 从此没有任何机械手段能证明**，除非单独喂一个非空台账给它。所以那个判断被析出成纯函数，
+  // 这里就按它验。**MUST NOT 因为「已经清零了」就把这条用例删掉**：
+  // 将来真发现一条新依赖时，它是唯一会拦住启动的东西。
+  assert.equal(AUTOMATION_ROOT_READINESS_BLOCKERS.length, 0, '台账已清零');
+  assert.doesNotThrow(() => assertAutomationRootReady(), '空台账 MUST 放行');
+  assert.throws(
+    () =>
+      assertAutomationRootReady([
+        { id: 'probe-blocker', category: 'composition-root', owner: 'automation', closingChange: 'future' },
+      ]),
     (error: unknown) =>
       error instanceof AutomationRootNotReadyError
-      && error.blockers.length === AUTOMATION_ROOT_READINESS_BLOCKERS.length,
+      && error.blockers.length === 1
+      && error.message.includes('probe-blocker'),
+    '台账非空 MUST 拒绝启动，且错误里点名是哪一条',
   );
 });
 
@@ -634,7 +655,11 @@ test('derived census separates the 21/59 transport package from the 20/58 automa
   // **只加客户端 + 建 scheduler 的那一版被 typecheck 以「声明了没人读」拦下**，是「建好零消费方」。
   //
   // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
-  assert.equal(blockers.length, 1);
+  // 2026-08-03：1 -> 0，**台账清零**。撤的是空壳入口那条本身：前十一条清完之后没有别的东西挡着，
+  // 于是撤条与「入口切成真启动」是同一件事、同批做。那道闸没删，只是不再恒真
+  //（`assertAutomationRootReady`，由上面那条用例喂非空台账独立验）。
+  // **交付口径别读大**：台账清零 + 入口能真调起装配，**不声称三进程真跑通**（属批次 5）。
+  assert.equal(blockers.length, 0);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -646,7 +671,7 @@ test('derived census separates the 21/59 transport package from the 20/58 automa
       '4b-mirror': 0,
       'operator-command': 0,
       'content-owner': 0,
-      'composition-root': 1,
+      'composition-root': 0,
     },
   );
   assert.ok(

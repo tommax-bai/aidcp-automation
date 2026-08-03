@@ -1,27 +1,16 @@
 {
   "schemaVersion": 2,
   "change": "split-cloud-api-composition-root-4a",
-  "claimBlocked": true,
+  "claimBlocked": false,
   "claim": "api, automation, and content are independently bootable without foreign owner pools, stores, or synchronous in-process dependencies",
   "summary": {
-    "total": 1,
+    "total": 0,
     "byCategory": {
       "4b-mirror": 0,
       "operator-command": 0,
       "content-owner": 0,
-      "composition-root": 1
+      "composition-root": 0
     }
   },
-  "blockers": [
-    {
-      "id": "automation-production-runtime-composition-unwired",
-      "category": "composition-root",
-      "owner": "automation",
-      "closingChange": "future",
-      "consumer": "automation independent root",
-      "evidence": [
-        "src/automation-composition-root.ts#readiness:automation-production-runtime-composition-unwired"
-      ]
-    }
-  ]
+  "blockers": []
 }

@@ -241,19 +241,24 @@ test('结构断言：调度启停真翻转时 MUST 真启停各连接，且在�
   assert.match(block, /onlineEdgeCount\(\)/, '在线边缘数 MUST 取实测，绝不乐观');
 });
 
-test('结构断言：可执行入口在本片仍然 fail-closed（切成真启动属第 4 段）', () => {
+test('结构断言：入口切成真启动之后，那道就绪闸仍在、且顺序没被换', () => {
+  // 台账清零那一批把入口从 fail-closed 切成真启动。**闸没有被删，只是不再恒真** ——
+  // 这条守的是三件事：
+  // ① 闸还在（`assertAutomationRootReady`），不是被注释掉换成一句「已经清零了」；
+  // ② 顺序没换：**先读配置、再过闸、最后才真装配**。反过来会让一个缺配置的进程先去抢
+  //    风控写者锁再失败退出，而那把锁是会话级的 —— 抢完就死等于让下一个真进程排队等它；
+  // ③ 装配是**动态 import** 进来的：入口模块被别处 import 时（用例、工具）不该顺带把
+  //    整张装配图拉起来。
   const code = codeOf('../../src/automation-composition-root.ts');
-  assert.match(
-    code,
-    /export async function runAutomationEntry[\s\S]{0,400}throw new AutomationRootNotReadyError/,
-    '台账清零之前，入口 MUST 照旧读完配置就抛「未就绪」——'
-      + '本片交付的是「这套装配可以被真的调起来并测试」，不是「进程能启动」',
-  );
-  assert.equal(
-    code.includes('runAutomationMain'),
-    false,
-    '入口 MUST NOT 直接改调真装配：那等于绕过那道闸，而闸是中间态唯一的保护罩',
-  );
+  const entry = code.slice(code.indexOf('export async function runAutomationEntry'));
+  const body = entry.slice(0, entry.indexOf('\n}'));
+  const readAt = body.indexOf('readAutomationRootConfig(env)');
+  const gateAt = body.indexOf('assertAutomationRootReady()');
+  const mainAt = body.indexOf('runAutomationMain(');
+  assert.ok(readAt >= 0, '入口 MUST 先读配置');
+  assert.ok(gateAt > readAt, '就绪闸 MUST 在读配置之后');
+  assert.ok(mainAt > gateAt, '真装配 MUST 在闸之后 —— 闸是最后一道拦得住启动的东西');
+  assert.match(body, /await import\('\.\/automation-main\.js'\)/, '装配 MUST 动态引入');
 });
 
 test('结构断言：委托任务控制面两条路由都注册，且目标校验两个钩子都在', () => {

@@ -156,14 +156,12 @@ test('派生组合根：生成链真接上（客户端 → 发帖触发器 → �
   //    而排期发帖的小时格幂等票在触发前就已认领 —— 失败一次就烧掉那一小时。
   assert.doesNotMatch(code, /publishOrchestrator/);
 
-  // ⑤ 那条台账条目 MUST 已经撤掉（撤条与接线同批，别留一条已经不成立的欠账）。
-  //    **id 先按注解宽化成 `string[]` 再比**，不写 `as`：撤条之后那个字面量已经不在联合里，
-  //    直接比会被 TS 判成「永远不相等」而报错 —— 而这条断言的价值恰恰在「有人把它加回来就红」。
-  const ledgerIds: readonly string[] = AUTOMATION_ROOT_READINESS_BLOCKERS.map(
-    (blocker) => blocker.id,
-  );
+  // ⑤ 那条台账条目 MUST 已经撤掉（撤条与接线同批，别留一条已经不成立的欠账）；
+  //    有人把它加回来这条就红。
   assert.equal(
-    ledgerIds.includes('content-generic-llm-authority'),
+    AUTOMATION_ROOT_READINESS_BLOCKERS.some(
+      (blocker) => blocker.id === 'content-generic-llm-authority',
+    ),
     false,
     '生成链已接线，那条台账条目 MUST 同批撤掉',
   );

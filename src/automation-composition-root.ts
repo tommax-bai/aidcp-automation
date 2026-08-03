@@ -8,6 +8,7 @@ import {
   isSyncReadFactPayload,
   type SyncReadPayloadByStream,
 } from 'aidcp-kernel/kernel/sync-read-facts.js';
+import type { AutomationService } from './automation-service-entry.js';
 import type {
   SyncReadApplyResult,
   SyncReadConsumerCheckpoint,
@@ -161,7 +162,12 @@ export interface AutomationRootReadinessBlocker {
  * account identity / the four B5 config streams) are deliberately absent: they
  * are served here by the sync-read mirrors, so they no longer block this root.
  */
-export const AUTOMATION_ROOT_READINESS_BLOCKERS =
+/**
+ * ⚠️ **类型标注从 `as const satisfies` 换成了显式注解**（2026-08-03 台账清零那一批）。
+ * 空数组的 `as const` 会把元素类型收成 `never`，于是每一个读 `blocker.id` 的地方当场编译不过。
+ * 显式注解既保住元素类型，也仍然逐条校验将来加回来的条目 —— `satisfies` 本来也只校验写下的那些。
+ */
+export const AUTOMATION_ROOT_READINESS_BLOCKERS: readonly AutomationRootReadinessBlocker[] =
   [
     // ═══ 2026-08-03：委托任务那两条一起撤（第九、第十条真靠接线消掉的） ═══
     //
@@ -349,13 +355,21 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
     // **What was NOT retired**: if anyone ever STUBS that predicate instead of importing it from
     // kernel, a rejected draft reads as "not rejected" and the delegated executor turns it into
     // `failed` instead of `cancelled`. That is a different failure needing its own entry.
-    {
-      id: 'automation-production-runtime-composition-unwired',
-      category: 'composition-root',
-      owner: 'automation',
-      closingChange: 'future',
-    },
-  ] as const satisfies readonly AutomationRootReadinessBlocker[];
+    // ═══ 2026-08-03：`automation-production-runtime-composition-unwired` 撤条，**台账清零** ═══
+    //
+    // 它锚的就是这个空壳入口本身：真装配写完了，但可执行入口照旧读完配置就抛「未就绪」。
+    // 前十一条清完之后没有别的东西挡着，于是撤条与「入口切成真启动」是**同一件事**，同批做。
+    //
+    // ⚠️ **那道闸没有被删掉，只是不再恒真**：`runAutomationEntry()` 仍然先判台账，
+    // 非空就照旧拒绝启动（`assertAutomationRootReady`）。**判据必须能被独立验证**——
+    // 台账清零之后「非空即拒」在生产路径上已经跑不到了，所以那个判断被析出成一个纯函数、
+    // 由用例喂一个非空台账去验。**MUST NOT 把闸整个删掉换成注释**：
+    // 那样一来「将来又发现一条依赖」时没有任何机械手段会拦住启动。
+    //
+    // **本次交付的口径（别读大）**：台账清零 + 入口能真调起装配。**不声称三进程真跑通** ——
+    // `runAutomationMain()` 要真属主库（风控写者锁在构造期就抢），本地桩验不了，
+    // 真机验收属批次 5、已按 5.5 登记 backlog 簇 60。
+  ];
 
 export interface AutomationRootConfig {
   executionTarget: DeploymentTarget;
@@ -1152,11 +1166,35 @@ function validateSnapshotEnvelope<S extends SyncReadStream>(
  * empty. The bounded 4a/4b composition factory above remains loadable and
  * directly testable without pretending the future production runtime is wired.
  */
+/**
+ * 就绪闸。**台账非空即拒绝启动**，不打折、不降级成告警。
+ *
+ * 析出成纯函数是刻意的：台账清零之后，这条判断在生产路径上**恒真通过**，
+ * 于是「它还在不在」再也没有任何机械手段能证明 —— 除非能单独喂一个非空台账给它。
+ * 用例正是这么验的（见 `test/acceptance/composition-root-4a-mode-wiring.test.ts`）。
+ */
+export function assertAutomationRootReady(
+  blockers: readonly AutomationRootReadinessBlocker[] = AUTOMATION_ROOT_READINESS_BLOCKERS,
+): void {
+  if (blockers.length > 0) {
+    throw new AutomationRootNotReadyError(blockers);
+  }
+}
+
+/**
+ * 可执行入口。
+ *
+ * **顺序是硬的**：先读配置（缺任何一个必填 env 当场停），再过就绪闸，最后才真装配。
+ * 反过来会让一个缺配置的进程先去抢风控写者锁、再失败退出 —— 那把锁是会话级的，
+ * 抢完再死等于让下一个真进程排队等它的会话结束。
+ */
 export async function runAutomationEntry(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<never> {
-  readAutomationRootConfig(env);
-  throw new AutomationRootNotReadyError(AUTOMATION_ROOT_READINESS_BLOCKERS);
+): Promise<AutomationService> {
+  const config = readAutomationRootConfig(env);
+  assertAutomationRootReady();
+  const { runAutomationMain } = await import('./automation-main.js');
+  return runAutomationMain({ env, config });
 }
 
 export function isDirectExecution(metaUrl: string, argv1 = process.argv[1]): boolean {
