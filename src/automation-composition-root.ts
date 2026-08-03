@@ -285,13 +285,33 @@ export const AUTOMATION_ROOT_READINESS_BLOCKERS =
     // anchored by a runnable check (`contentOwnedSymbolsInRoleFactoryTable`); **nothing here will
     // tell you if that goes red** — this ledger has no source anchor at all.
 
-    // 内容生成链（`PublishGenerationHttpClient`）本根至今未构造，见上面那段「差点多撤一条」。
-    {
-      id: 'content-generic-llm-authority',
-      category: 'content-owner',
-      owner: 'content',
-      closingChange: 'future',
-    },
+    // ═══ 2026-08-03：`content-generic-llm-authority` 撤条（第十一条真靠接线消掉的）═══
+    //
+    // **content-owner 这一类到此归零。** 它锚的不是模型客户端、是**内容生成链**
+    //（见上面 08-04 那段「差点多撤一条」的更正），判据因此是「本根真把它构造出来并喂进了消费点，
+    // 且对面真的在服务那条路由」。两端都查过：
+    //
+    //   · 对面那一半：内容进程的手写入口**无条件注册**
+    //     `registerPublishGenerationRoutes(httpServer, publishOrchestrator)` —— 去它的 `main()` 里读的。
+    //   · 本包这一半（`main()` 的 15b / 15c 两段）：建 `PublishGenerationHttpClient`
+    //     （超时取 180s 硬顶，**必须 > 分段 long-poll 的 150s 预算**，否则每段 poll 都被提前切断
+    //     ⇒ 每次跨进程生成在默认 15s 确定性失败），喂给 `PublishScheduler`；
+    //     scheduler 再喂给**委托任务执行器**，那是它在本进程里唯一可达的消费方。
+    //
+    // ⚠️ **「建好零消费方」在这条上差点发生，记下来**：只加客户端 + 建 scheduler 的那一版
+    //    被 typecheck 当场以「声明了没人读」拦下 —— 因为本进程当时没有任何东西能触发发帖。
+    //    另外两个候选都不可用：**排期 tick（`ContentScheduler`）属 api**、本仓没有这个类
+    //    （而 api 的手写入口也没建它 ⇒ 三进程下今天没有任何进程在跑排期发帖，那是另一笔账）；
+    //    手动发布那条运营指令路由**刻意不接**（1.7b 裁定）。⇒ 委托执行器是唯一的路，先建它。
+    //
+    // **同批补上的现网缺口**：此前委托任务在本进程里「能建、能确认、永远不跑」，
+    // 且**连单体那句具名警告都没有**。现在缺席具名（发帖触发器缺席 / 按配置禁用各一句），
+    // 泵起在业务入口放行之后（构造期起等于让未放行的进程去认领任务，而认领带租约）。
+    //
+    // **授权决定写经 api 属主那条口**（本进程没有、也不该有授权表连接），路由接口进程已注册，
+    // 令牌用授权专用那把 —— 本批前一手刚修过一处拿错令牌的接线错，别再退回去。
+    //
+    // 本文件是 Cloud 普查的**永久手写分叉、拿不到任何机械信号**，所以理由写在原地。
 
     // ═══ 2026-08-04：`content-textcard-transcription-authority` 撤条（第七条真靠接线消掉的）═══
     //

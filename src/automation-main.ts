@@ -36,6 +36,8 @@ import type { PersonaBinding } from 'aidcp-kernel/kernel/persona-binding.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import type { StructuredNotificationDeliveryInput } from 'aidcp-kernel/kernel/api-direct-port.js';
 import type { CuratedWritePort } from 'aidcp-kernel/kernel/curated-write-port.js';
+import { hasUserRejectionEvidence } from 'aidcp-kernel/kernel/publish-pipeline-types.js';
+import type { DispatchDraft } from 'aidcp-kernel/kernel/publish-draft-contract.js';
 import {
   curatedContentFailureReason,
   type CuratedPanelRow,
@@ -126,7 +128,22 @@ import type {
   RoleFactoryRegistry,
   ValuableCommentArchivistFactoryOptions,
 } from './orchestrator/role-dispatcher.js';
-import { InternalHttpClient } from './transport/internal-http.js';
+import {
+  InternalHttpClient,
+  INTERNAL_HTTP_TIMEOUT_CEILING_MS,
+} from './transport/internal-http.js';
+import { PublishGenerationHttpClient } from './transport/publish-generation-http.js';
+import { PublishApprovalDecisionWriterHttpClient } from './transport/publish-approval-decision-http.js';
+import { PublishScheduler } from './publish-agent/publish-scheduler.js';
+import { resolveCuratedGateConfig } from './publish-agent/curated-gate.js';
+import { createDelegatedExecutorRouter } from './delegated-task/executors.js';
+import { DelegatedTaskWorker } from './delegated-task/worker.js';
+import {
+  DelegatedTaskNotificationGate,
+  delegatedTaskFailureReceipt,
+} from './delegated-task/notification.js';
+import type { DelegatedTask } from './delegated-task/types.js';
+import { platformRegistryEntry } from './platform/registry.js';
 import { AutomationSyncReadMirrors } from './transport/automation-sync-read-mirrors.js';
 import { probeSchemaShape } from './schema/schema-capability.js';
 import type { AutomationSyncReadRuntimeSources } from './transport/automation-sync-read-source.js';
@@ -1137,6 +1154,236 @@ export async function runAutomationMain(
   });
   publishDispatchRef.set(publishDispatch);
 
+  // ── 15b. 发帖触发器（内容生成链的唯一消费方） ──────────────────────────────
+  //
+  // **内容生成在另一个进程里。** 本进程只管「什么时候该发、以谁的身份发、发不发得成」，
+  // 真正的创作管线住在内容进程；两边靠那条「同步 kick + 分段 long-poll」接。
+  // **接之前去 `aidcp-content` 的 `main()` 里确认过那条路由无条件注册**
+  //（`registerPublishGenerationRoutes(httpServer, publishOrchestrator)`），不是「客户端建得出来就算」。
+  //
+  // ⚠️ **单次调用超时必须 > 分段 long-poll 预算**（150s），否则每一段 poll 都会在服务端回
+  // `{done:false}` 之前先被客户端切断 ⇒ 每次跨进程生成都在默认 15s 确定性失败。取内部 HTTP 那个
+  // 180s 硬顶（与模型调用天花板同源的既有常量，不新写魔数）。
+  //
+  // **本进程刻意没有「本地编排器」回落**：单体那条 local 分支取的是内容段构造的编排器，而本进程
+  // 根本不跑内容段。给它回落只会得到「启动日志说已就绪、每次发帖在调用点炸」，而排期发帖的小时格
+  // 幂等票**在触发前就已认领** —— 失败一次就烧掉那一小时。
+  const publishGeneration = new PublishGenerationHttpClient(
+    new InternalHttpClient(config.contentBaseUrl, {
+      timeoutMs: INTERNAL_HTTP_TIMEOUT_CEILING_MS,
+    }),
+  );
+
+  /**
+   * 发帖触发器。**点赞素材库缺席时具名不建**（逐字照单体：概念池 / 点赞库任一不可用就不建），
+   * 而不是塞一个空桩 —— 空桩会让「素材库没起来」表现成「最近没有可用素材」，两者的处置完全相反。
+   */
+  const publishScheduler = riskFoundation.likedNoteStore
+    ? new PublishScheduler({
+        conceptStore: contentClients.conceptPool,
+        likedStore: riskFoundation.likedNoteStore,
+        publishLog: apiClients.automationPublishLog,
+        resolveRisk: (accountId) => riskFoundation.resolveController(accountId),
+        /**
+         * 「唯一真实账号」：恰好一个才返回它，0 或多个返回 null。
+         * **读失败照旧回 null、不抛**（逐字照单体）：调用方据此如实「无法解析唯一真实账号 — 跳过」；
+         * 抛出去会被上层归一成一次失败发帖。
+         */
+        resolveSingleAccountId: async () => {
+          try {
+            const rows = await apiClients.accountRoster.listAccountIdentities();
+            return rows.length === 1 ? rows[0].accountId : null;
+          } catch (err) {
+            logger.warn(
+              `[aidcp-automation] resolveSingleAccountId 失败：${(err as Error).message}`,
+            );
+            return null;
+          }
+        },
+        // 缺账号回落小红书**是属主那条读自己的既有口径**，这里逐字保持；
+        // MUST NOT 借这次搬运顺手改语义。
+        getPlatform: async (accountId) =>
+          (await apiClients.accountRuntime.getPlatformOrNull(accountId)) ?? 'xiaohongshu',
+        // 人设三态闸：`unknown`（副本陈旧，可重试）与 `unbound`（真没绑，终态）MUST 分开 ——
+        // 压成一个会把「等一下再试」变成「这个账号永远不能发」。判定取共享那一份。
+        personaBinding: (accountId) => personaBindingFor(mirrors, accountId),
+        orchestrator: publishGeneration,
+        curatedStore: contentClients.curatedSelection,
+        selectTopK: resolveCuratedGateConfig().selectTopK,
+        getSoul: (accountId) => requirePersonaSoul(mirrors, accountId),
+        conceptThreshold: Number(env.AIDCP_PUBLISH_CONCEPT_THRESHOLD ?? 20),
+        minHoursBetween: Number(env.AIDCP_PUBLISH_MIN_HOURS ?? 24),
+        countPendingForAccount: (accountId) =>
+          apiClients.automationPublishLog.countPendingForAccount(accountId),
+        pendingCapPerAccount: Number(env.AIDCP_PUBLISH_PENDING_CAP_PER_ACCOUNT ?? 20),
+        maxConcurrentRuns: Number(env.AIDCP_PUBLISH_MAX_CONCURRENT_RUNS ?? 3),
+        logger,
+      })
+    : undefined;
+
+  // ── 15c. 委托任务执行器（发帖触发器的真消费方） ────────────────────────────
+  //
+  // **没有它，委托任务就是「能建、能确认、永远不跑」**，而那个状态从外部看不出来：
+  // 确认卡照发、任务照进队列。所以缺席必须**具名**（见下面那条 else）。
+  //
+  // 授权决定写**必须经 api 属主那条口**：本进程没有、也不该有授权表的连接。
+  // 那条路由接口进程已经注册，用的是授权专用令牌（与上面那个授权权威同一把）。
+  const publishApprovalDecisionWriter = new PublishApprovalDecisionWriterHttpClient(
+    apiHttp,
+    config.publishApprovalInternalToken,
+  );
+  let delegatedTaskWorker: DelegatedTaskWorker | undefined;
+  if (publishScheduler) {
+    /** 候选稿快照：委托层判「还是不是那一稿」的唯一依据，字段逐条照单体。 */
+    const loadCandidate = async (recordId: number) => {
+      const draft = await apiClients.automationPublishLog.loadForDispatch(recordId);
+      if (!draft) return null;
+      const platform = draft.platform ?? 'xiaohongshu';
+      // 视频号在本会话里刻意只做收件箱，不进主动发布域。
+      if (platform === 'wechat_channels') return null;
+      return {
+        recordId: draft.recordId,
+        accountId: draft.accountId,
+        platform,
+        status: draft.status,
+        contentVersion: draft.contentVersion,
+        title: draft.title,
+        content: draft.content,
+        images: draft.imageUrls,
+        userRejected: hasUserRejectionEvidence(draft.metadata),
+      };
+    };
+    /** 授权决定：四个入参照单体拼；`decidedBy` MUST 是真实决策主体，不用常量占位。 */
+    const writeApprovalDecision = (
+      requestId: string,
+      approved: boolean,
+      draft: DispatchDraft,
+      decidedBy: string,
+    ) => {
+      const topics = draft.metadata?.topics;
+      const tags = Array.isArray(topics)
+        ? topics.filter((item): item is string => typeof item === 'string')
+        : [];
+      return publishApprovalDecisionWriter.writeDecision({
+        requestId,
+        approved,
+        payload: {
+          title: draft.title ?? '',
+          content: draft.content,
+          tags,
+          contentVersion: draft.contentVersion,
+        },
+        context: { decidedBy, decidedVia: 'delegated_task' },
+        executionTarget,
+      });
+    };
+    const delegatedExecutors = createDelegatedExecutorRouter({
+      comments: commentScheduler.executors.comment,
+      publishes: publishScheduler,
+      loadCandidate,
+      approveCandidate: async (candidate, decidedBy) => {
+        const draft = await apiClients.automationPublishLog.loadForDispatch(candidate.recordId);
+        // 版本对不上 = 这一稿已经变了；**照原样回读、不写决定**（写下去就是给旧稿盖章）。
+        if (!draft || draft.contentVersion !== candidate.contentVersion) {
+          return loadCandidate(candidate.recordId);
+        }
+        const requestId = `publish-${candidate.recordId}`;
+        const preflight = await publishDispatch.preflightApprovePublish(requestId);
+        if (!preflight.ok) throw new Error(`candidate_deferred:${preflight.reason}`);
+        const result = await writeApprovalDecision(requestId, true, draft, decidedBy);
+        if (!result.written && result.alreadyDecided !== true) {
+          throw new Error('candidate_already_rejected');
+        }
+        // 已经批过一次：**补触发一次下发**（那条决定可能落在下发之前）。
+        if (!result.written && result.alreadyDecided === true) {
+          await publishDispatch.triggerPublishDispatchOnApprove(
+            requestId,
+            result.revision,
+            'human_reconfirm',
+          );
+        }
+        return loadCandidate(candidate.recordId);
+      },
+      rejectCandidate: async (candidate, decidedBy) => {
+        const draft = await apiClients.automationPublishLog.loadForDispatch(candidate.recordId);
+        if (!draft || draft.contentVersion !== candidate.contentVersion) {
+          return loadCandidate(candidate.recordId);
+        }
+        const requestId = `publish-${candidate.recordId}`;
+        const result = await writeApprovalDecision(requestId, false, draft, decidedBy);
+        if (!result.written && result.alreadyDecided !== false) {
+          throw new Error('candidate_already_approved');
+        }
+        await apiClients.automationPublishLog.rejectPendingApproval(candidate.recordId);
+        publishDispatch.notifyPublishRejected(requestId);
+        return loadCandidate(candidate.recordId);
+      },
+      modifyCandidate: async (candidate, patch) => {
+        const result = await apiClients.automationPublishLog.editDraft(
+          candidate.recordId,
+          candidate.contentVersion,
+          patch,
+          'delegated-task',
+        );
+        if (!result.ok) throw new Error(`candidate_edit_${result.reason}`);
+        publishDispatch.refreshPublishPreview(candidate.recordId);
+        return loadCandidate(candidate.recordId);
+      },
+      terminalWaitMs: Number(env.AIDCP_DELEGATED_TASK_TERMINAL_WAIT_MS ?? 4 * 60_000),
+    });
+    const delegatedTaskNotificationGate = new DelegatedTaskNotificationGate();
+    delegatedTaskWorker = new DelegatedTaskWorker({
+      store: delegatedTaskStore,
+      executorFor: delegatedExecutors.executorFor,
+      externalBusy: delegatedExecutors.externalBusy,
+      platformStillMatches: async (task) =>
+        (await apiClients.accountRuntime.getPlatformOrNull(task.accountId)) === task.platform,
+      onTaskUpdated: async (task: DelegatedTask) => {
+        // 委托层不主动推进度卡：结果由每类任务自己的业务结果卡承担。
+        // 兜底 = **没有独立结果卡的终态失败**补一张，红线是「绝不静默失败」。
+        const receipt = delegatedTaskFailureReceipt(task);
+        if (!receipt) return;
+        if (!delegatedTaskNotificationGate.shouldSend(task)) return;
+        // 命令触发的终态卡回来源会话；无来源会话（自动 / 排期 / 旧行）补集式回落账号团队群。
+        const originChatId = task.originChatId?.trim();
+        const commandLabel = task.actionFamily === 'comment' ? '评论' : '发帖';
+        try {
+          await deliverStructuredNotification(
+            {
+              kind: 'command_result',
+              input: {
+                command: commandLabel,
+                ok: false,
+                level: receipt.level,
+                title: receipt.title,
+                message: receipt.message,
+                accountId: task.accountId,
+                originChatId,
+                // 多账号多平台并行时，光有昵称不够定位是哪条线出的事。
+                platformName: platformRegistryEntry(task.platform).displayName,
+              },
+            },
+            `delegated-task-result:${task.id}:${task.status}`,
+          );
+          delegatedTaskNotificationGate.markSent(task);
+        } catch (err) {
+          logger.warn(
+            `[delegated-task] ${commandLabel}失败结果卡发送失败 task=${task.id}: ${(err as Error).message}`,
+          );
+        }
+      },
+      maxConcurrent: Math.max(1, Math.trunc(Number(env.AIDCP_DELEGATED_TASK_MAX_CONCURRENT ?? 3))),
+      logger,
+    });
+  } else {
+    // **具名缺席，不是静默。** 少了这句，「任务确认了却永远不跑」在外部与
+    //「队列里暂时没任务」完全同形 —— 而这两件事的处置完全不同。
+    logger.warn(
+      '[aidcp-automation] DelegatedTaskWorker 未建（发帖触发器缺席）→ 委托任务可确认但不会执行',
+    );
+  }
+
+
   // ── 16. 启动外壳 ────────────────────────────────────────────────────────
   const businessIngress: AutomationBusinessIngress = {
     async start() {
@@ -1145,11 +1392,21 @@ export async function runAutomationMain(
       auditRelay.start();
       interaction.start();
       llmUsageBuffer.start();
+      // 委托任务的执行泵：**就绪闸放行之后**才起。构造期起等于让一个还没放行的进程去认领任务，
+      // 而认领是有租约的 —— 认了又不干活，那条任务要等租约过期才轮得到别人。
+      // `start()` 自己会先收敛旧进程遗留的 planning/executing claim，再开放泵。
+      if (delegatedTaskWorker && env.AIDCP_DELEGATED_TASK_WORKER !== 'false') {
+        await delegatedTaskWorker.start(Number(env.AIDCP_DELEGATED_TASK_POLL_MS ?? 5_000));
+      } else if (delegatedTaskWorker) {
+        // 显式关掉也要说出口：与「没建起来」是两回事，运营看到的现象却一样。
+        logger.warn('[aidcp-automation] DelegatedTaskWorker 已按配置禁用（任务可确认但不会执行）');
+      }
       // 在途动作恢复扫描：**就绪闸放行之后**才跑（构造期跑等于让一个未放行的进程动数据）。
       await facebookCoordinator.recoverActiveActions();
     },
     async stop() {
       // 逆序停。
+      delegatedTaskWorker?.stop();
       auditRelay.stop();
       await publishDispatch.close();
       await edgeAccess.close();

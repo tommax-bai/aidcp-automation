@@ -350,3 +350,53 @@ test('结构断言：发布授权客户端 MUST 用授权专用令牌，不许�
     '通用 api 令牌调不动授权那两组路由 —— 两侧是同一个 env 才对得上',
   );
 });
+
+test('结构断言：委托任务执行泵 MUST 在业务入口放行之后才起，且缺席具名', () => {
+  // 三件都不报错、只是能力悄悄没有或悄悄做错的事：
+  // ① 泵在构造期就起 ⇒ 一个还没放行的进程去认领任务，而认领带租约 —— 认了不干活，
+  //    那条任务要等租约过期才轮得到别人；
+  // ② 触发器缺席时静默 ⇒「确认了却永远不跑」与「队列里暂时没任务」完全同形；
+  // ③ 按配置禁用时也静默 ⇒ 与「没建起来」现象一样，运营查不出是哪一种。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const construct = body.indexOf('new DelegatedTaskWorker(');
+  const startCall = body.indexOf('delegatedTaskWorker.start(');
+  assert.ok(construct > 0, '委托任务执行器 MUST 由本进程构造');
+  assert.ok(startCall > construct, '泵 MUST 在构造之后、且在业务入口那一段里才起');
+  const ingress = body.slice(body.indexOf('const businessIngress'));
+  assert.match(ingress, /delegatedTaskWorker\.start\(/, '泵 MUST 起在业务入口的 start() 里');
+  assert.match(ingress, /delegatedTaskWorker\?\.stop\(\)/, 'stop() MUST 把泵一起停掉');
+  assert.match(
+    body,
+    /DelegatedTaskWorker 未建（发帖触发器缺席）/,
+    '触发器缺席 MUST 具名说出口，绝不静默',
+  );
+  assert.match(
+    body,
+    /DelegatedTaskWorker 已按配置禁用/,
+    '按配置禁用也 MUST 说出口 —— 与「没建起来」现象一样但原因不同',
+  );
+});
+
+test('结构断言：候选稿版本对不上时 MUST 只回读、不写授权决定', () => {
+  // 这条守的是「给旧稿盖章」：批准/驳回都要先比 contentVersion，不一致就照原样回读。
+  // 少了这一比不会报错 —— 它会在「稿子刚被改过、委托任务才轮到」那一刻把决定写到旧版本上。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const router = body.slice(body.indexOf('createDelegatedExecutorRouter('));
+  const guards = router.match(/draft\.contentVersion !== candidate\.contentVersion/g) ?? [];
+  assert.equal(guards.length, 2, '批准与驳回**两条**都 MUST 比版本');
+  assert.match(
+    router,
+    /preflightApprovePublish\(requestId\)/,
+    '批准前 MUST 过属主那道预检，MUST NOT 直接写决定',
+  );
+  assert.match(
+    router,
+    /writeApprovalDecision\(requestId, true, draft, decidedBy\)/,
+    '批准 MUST 经 api 属主那条授权决定口写，且 decidedBy 传真实决策主体',
+  );
+  assert.match(
+    body,
+    /publishApprovalDecisionWriter\.writeDecision\(/,
+    '本进程 MUST NOT 自己碰授权表 —— 只能经属主那条口',
+  );
+});

@@ -626,8 +626,15 @@ test('derived census separates the 21/59 transport package from the 20/58 automa
   // 同批补的前置：账号显示名此前没有任何跨进程读，4a 花名册组因此多了「账号目录」一条。
   // **诚实地记下没做到的**：飞书那条链一次都没真跑过（要真发一条消息才触发），已登记 backlog。
   //
+  // 2026-08-03：2 -> 1，content-owner 1 -> 0。撤的是**内容生成链**，第十一条真靠接线消掉的：
+  // `main()` 建 `PublishGenerationHttpClient`（超时取 180s 硬顶，必须 > 分段 long-poll 的 150s）
+  // 并喂给发帖触发器，触发器再喂给**委托任务执行器**——那是它在本进程唯一可达的消费方
+  //（排期 tick 那个类属 api、本仓没有；手动发布那条路由按 1.7b 刻意不接）。
+  // 对面那一半：内容进程的手写入口无条件注册 `registerPublishGenerationRoutes`，去它的 main() 读过。
+  // **只加客户端 + 建 scheduler 的那一版被 typecheck 以「声明了没人读」拦下**，是「建好零消费方」。
+  //
   // **这些计数只许因裁定而下降。** 下降但上面没有配套裁定说明 = 某个探针不再命中 = 回归。
-  assert.equal(blockers.length, 2);
+  assert.equal(blockers.length, 1);
   assert.deepEqual(
     Object.fromEntries(
       ['4b-mirror', 'operator-command', 'content-owner', 'composition-root'].map((category) => [
@@ -638,7 +645,7 @@ test('derived census separates the 21/59 transport package from the 20/58 automa
     {
       '4b-mirror': 0,
       'operator-command': 0,
-      'content-owner': 1,
+      'content-owner': 0,
       'composition-root': 1,
     },
   );
