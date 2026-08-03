@@ -94,3 +94,20 @@ test('路由名全局唯一：两族撞同一条路径时后注册的会当场�
   const all = SERVED_FAMILIES.flatMap((family) => Object.values(family.routes));
   assert.equal(new Set(all).size, all.length);
 });
+
+test('排期的推进权在接口进程：本进程只服务它的问询，自己不起排期心跳', async () => {
+  // **正向写**：本进程对内容排期的参与形态只有一种——注册被调面。
+  // 反过来写成「找不到 new ContentScheduler」是靠不住的：改个名就绕过去了。
+  assert.match(await assemblySource(), /registerContentSchedulingRoutes\(/);
+
+  // 而那个类**根本不在本仓**：归属表把它判给 api，派生只会把 api 的文件送进 api 仓。
+  // 归属是这条保证的事实源；它一旦被改成 automation，下一次派生就会把类送进来，这条会当场红。
+  const manifest = JSON.parse(
+    await readFile(new URL('../../boundaries/module-ownership.json', import.meta.url), 'utf8'),
+  ) as Array<{ path: string }>;
+  assert.equal(
+    manifest.some((entry) => entry.path === 'src/orchestrator/content-scheduler.ts'),
+    false,
+    '同一个后台任务绝不两处各跑一份；真正拦住重复触发的是小时格的数据库原子占位（唯一键=账号+动作），本条只是把归属决定钉在明面上',
+  );
+});
