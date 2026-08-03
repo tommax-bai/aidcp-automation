@@ -75,6 +75,7 @@ const CONFIG: AutomationRootConfig = {
   contentInternalToken: 'content-token',
   automationPort: 0,
   offboardWorkerId: 'offboard-reconcile-dev',
+  publishApprovalInternalToken: 'approval-token',
 };
 
 function runtimeHandles(): AutomationRuntimeHandles {

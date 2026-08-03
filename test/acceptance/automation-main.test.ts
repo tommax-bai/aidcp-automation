@@ -329,3 +329,24 @@ test('结构断言：幂等台账单独 try，且失败时换成具名 fail-clos
     '台账不可用时 MUST 换成具名 fail-closed 台账，MUST NOT 让委托控制面整体缺席',
   );
 });
+
+test('结构断言：发布授权客户端 MUST 用授权专用令牌，不许拿通用 api 令牌顶替', () => {
+  // 这条守的是一种**只有真跑两个进程才现形**的接线错：接口进程给授权权威与授权决定写那两组路由
+  // 挂的是 `AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN`，与 `AIDCP_API_INTERNAL_TOKEN` 是两个 env、
+  // 没有互相回落。拿错令牌 ⇒ 每一次授权读写都被判未授权，而这件事编译得过、两仓测试各自全绿。
+  // 现形方式还特别坏：调用方读到的是「授权读不出来」，一个很容易被当成业务原因的说法。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const i = body.indexOf('new PublishApprovalAuthorityHttpClient');
+  assert.ok(i > 0, '发布授权权威客户端 MUST 由本进程构造');
+  const block = body.slice(i, i + 300);
+  assert.match(
+    block,
+    /config\.publishApprovalInternalToken/,
+    '授权客户端 MUST 取授权专用令牌',
+  );
+  assert.doesNotMatch(
+    block,
+    /config\.apiInternalToken/,
+    '通用 api 令牌调不动授权那两组路由 —— 两侧是同一个 env 才对得上',
+  );
+});

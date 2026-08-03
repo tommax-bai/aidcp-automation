@@ -347,6 +347,15 @@ export interface AutomationRootConfig {
   contentInternalToken: string;
   automationPort: number;
   offboardWorkerId: string;
+  /**
+   * 发布授权那一族的**独立令牌**（`AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN`）。
+   *
+   * **它与 `apiInternalToken` 是两个 env、没有互相回落**：接口进程给授权权威与授权决定写这两组路由
+   * 挂的就是这一个，单体两侧也一直用它。拿通用的 api 令牌去调那两组 ⇒ 每一次调用都被判未授权，
+   * 而这件事**编译得过、两仓测试各自全绿**，只有真把两个进程一起跑起来才现形
+   * （现形方式还是「授权读不出来」这种最容易被读成业务原因的形态）。
+   */
+  publishApprovalInternalToken: string;
 }
 
 export interface AutomationRuntimeHandles {
@@ -572,7 +581,8 @@ function requiredEnv(
     | 'AIDCP_API_INTERNAL_TOKEN'
     | 'AIDCP_AUTOMATION_INTERNAL_TOKEN'
     | 'AIDCP_CONTENT_URL'
-    | 'AIDCP_CONTENT_INTERNAL_TOKEN',
+    | 'AIDCP_CONTENT_INTERNAL_TOKEN'
+    | 'AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN',
 ): string {
   const value = env[name]?.trim();
   if (!value || /\s/.test(value)) {
@@ -613,6 +623,8 @@ export function readAutomationRootConfig(
     contentInternalToken: requiredEnv(env, 'AIDCP_CONTENT_INTERNAL_TOKEN'),
     automationPort: optionalPort(env),
     offboardWorkerId: `offboard-reconcile-${executionTarget}`,
+    // 与上面那两个令牌同档必填、**且不许拿 apiInternalToken 顶替**（两侧是同一个 env 才对得上）。
+    publishApprovalInternalToken: requiredEnv(env, 'AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN'),
   };
 }
 

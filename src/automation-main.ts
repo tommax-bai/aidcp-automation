@@ -412,9 +412,12 @@ export async function runAutomationMain(
 
   // 发布授权权威（api 属主）。**组装根那 17 个客户端里没有它** —— 而发布下发链上有三处要它，
   // 一处都不能用发布日志客户端顶替（发布日志答的是「稿子怎么样了」，授权答的是「批没批、推进到哪一步」）。
+  // ⚠️ **令牌取 `publishApprovalInternalToken`，不是通用的 api 令牌**：接口进程给这一组路由挂的是
+  //    `AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN`，两者没有互相回落。拿错了每次调用都被判未授权，
+  //    而那要真把两个进程一起跑起来才看得见（编译过、两仓测试各自全绿）。
   const publishApprovalAuthority = new PublishApprovalAuthorityHttpClient(
     apiHttp,
-    config.apiInternalToken,
+    config.publishApprovalInternalToken,
   );
 
 

@@ -53,6 +53,7 @@ const CONFIG: AutomationRootConfig = {
   contentInternalToken: 'content-token',
   automationPort: 0,
   offboardWorkerId: 'offboard-reconcile-dev',
+  publishApprovalInternalToken: 'approval-token',
 };
 
 function runtimeHandles(): AutomationRuntimeHandles {
@@ -226,7 +227,27 @@ test('entry checks service mode before dependent configuration and never fakes i
     AIDCP_AUTOMATION_INTERNAL_TOKEN: 'automation-token',
     AIDCP_CONTENT_URL: 'http://127.0.0.1:8090',
     AIDCP_CONTENT_INTERNAL_TOKEN: 'content-token',
+    // 发布授权那一族**用自己的 env**（接口进程给那两组路由挂的就是它），不与 api 通用令牌互相回落。
+    // 同档必填：缺了不是「少一个可选项」，是所有授权读写在跑起来那一刻被判未授权。
+    AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN: 'approval-token',
   };
+  // 逐个必填项都要能把启动拦下来。**新增一个 env 时这份清单要跟着长**——
+  // 漏掉一项的后果不是启动失败，而是它悄悄可缺省，然后在真跑起来那一刻变成一次未授权。
+  for (const name of [
+    'AIDCP_API_URL',
+    'AIDCP_API_INTERNAL_TOKEN',
+    'AIDCP_AUTOMATION_INTERNAL_TOKEN',
+    'AIDCP_CONTENT_URL',
+    'AIDCP_CONTENT_INTERNAL_TOKEN',
+    'AIDCP_PUBLISH_APPROVAL_INTERNAL_TOKEN',
+  ] as const) {
+    const { [name]: _dropped, ...without } = env;
+    assert.throws(
+      () => readAutomationRootConfig(without),
+      new RegExp(`${name} is required`),
+      `${name} 缺失 MUST 拦下启动`,
+    );
+  }
   // task 2.4: the content egress is required, not optional. An unset AIDCP_CONTENT_URL means the
   // concept pool and the curated corpus are unreachable; booting anyway would surface that as
   // "no material" at every call site instead of as a missing configuration.
