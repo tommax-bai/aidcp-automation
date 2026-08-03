@@ -295,6 +295,11 @@
     "note": "change split-cloud-automation-production-runtime 批 E 前半：每连接运行时的装配（连接运行时注册表 + 互动去重守卫注册表 + 动作冷却兜底闸）。与批 B/C/D/F 同形，是可单测的工厂、由组装根调它。每连接角色调度器的构造工厂是必填注入口、由批 E 后半供；跨属主的两样（账号主数据窄口 / 结构化通知）都是注入进来的端口，本文件不持有任何 api 属主实现"
   },
   {
+    "path": "src/automation-content-scheduling.ts",
+    "layer": "composition",
+    "note": "change wire-content-scheduler-into-api-process 批 15c：内容排期调度器被调面的装配工厂。把本进程既有的在线清单 / 风控控制器 / 三条管线 / 委托台账装成 kernel 那个窄口，由 main() 注册成路由。与 automation-*.ts 那一族同形（可单测的工厂、构造期不起定时器），故同样落 composition"
+  },
+  {
     "path": "src/automation-edge-access.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 D：边缘接入的装配（验证码协助与协调 → 指令定序器 → 边缘任务租约客户端 → 消息处理器 → 边-云 WebSocket 服务端 → 成对指令接收器的依赖）。判 automation 而非 composition —— 与批 B/C 同形，是一个可单测的工厂、由组装根调它，不是组装根本身。装配的全是 automation 属主的东西（anchors/anchor_staging、pacing_floor_config、src/comm/ 边-云传输层、src/publish-agent/ 指令定序器），跨属主的四样（人设读写 / 发布授权 / 结构化通知 / 环境握手登记）一律是注入进来的端口，本文件不持有任何 api 属主实现"
@@ -1158,6 +1163,11 @@
     "path": "src/transport/content-media-usage-http.ts",
     "layer": "automation",
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
+    "path": "src/transport/content-scheduling-http.ts",
+    "layer": "automation",
+    "note": "§4.7 基线 sha 之后新增于共享传输目录：内容排期调度器那一族窄口的 api→automation 三件套（路由常量 + 服务端注册 + 客户端）。服务端跑本进程、客户端跑接口进程，两端必须拿同一份路由常量。整目录归 automation、无逐文件切分，新文件 inherit"
   },
   {
     "path": "src/transport/curated-content-http.ts",

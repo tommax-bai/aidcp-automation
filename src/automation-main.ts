@@ -120,6 +120,8 @@ import {
   registerDelegatedTaskTextCommandRoutes,
 } from './transport/operator-command-http.js';
 import { registerDelegatedTaskRoutes } from './transport/delegated-task-http.js';
+import { registerContentSchedulingRoutes } from './transport/content-scheduling-http.js';
+import { createAutomationContentSchedulingPort } from './automation-content-scheduling.js';
 import type { Envelope } from './comm/protocol.js';
 import type {
   ConceptExtractorFactoryOptions,
@@ -1383,6 +1385,37 @@ export async function runAutomationMain(
     );
   }
 
+
+  // ── 15c. 内容排期调度器的被调面 ─────────────────────────────────────────
+  //
+  // 调度器本身归接口进程（那边的手写 main 构造它），但它每分钟要问的事实与三类真正的扳机
+  // 都在本进程。**先注册、后有调用方是对的顺序**：反过来的代价是「客户端建得出来、调用编译
+  // 得过、两仓测试各自全绿，只有真把两个进程一起跑起来才 404」——而那个 404 会被读成
+  //「对面版本落后」，一个纯接线遗漏冒名顶替了具名原因。本仓在这件事上已经连撞五次。
+  //
+  // 发布触发器可缺席（概念池 / 点赞库不可用时刻意不建）；那一路 MUST 具名答「未受理」，
+  // MUST NOT 假装受理 —— 小时格幂等票在触发前就已认领，假受理一次就烧掉那一小时。
+  registerContentSchedulingRoutes(
+    root.internalServer,
+    createAutomationContentSchedulingPort({
+      onlineAccountIdentities: () => connectionRuntime.runtimes.onlineAccountIdentities(),
+      resolveController: (accountId) => riskFoundation.resolveController(accountId),
+      publishScheduler: publishScheduler ?? null,
+      commentScheduler: commentScheduler.executors.comment,
+      joinScheduler: commentScheduler.executors.join,
+      delegatedOwnership: (accountId, family) =>
+        delegatedTaskStore.hasActiveOwnership(accountId, family),
+      commentedTodayCount: (accountId) =>
+        riskFoundation.riskStore.countInteractionsTodayForAccount(accountId, 'comment'),
+      joinedTodayCount: (accountId) => facebookGroupMemberships.countJoinedToday(accountId),
+      getPlatform: async (accountId) =>
+        (await apiClients.accountRuntime.getPlatformOrNull(accountId)) ?? 'xiaohongshu',
+      deliverNotification: deliverStructuredNotification,
+      logger,
+    }),
+    config.automationInternalToken,
+    executionTarget,
+  );
 
   // ── 16. 启动外壳 ────────────────────────────────────────────────────────
   const businessIngress: AutomationBusinessIngress = {
