@@ -204,6 +204,18 @@ export const REQUIRED_SCHEMA_VERSION = '0106_automation_sync_read_facebook_opera
  * `same_cursor_payload_drift` 正确拒收 —— 而那条拒收发生在单体启动路径上，直接起不来
  * （dev 上实测到了）。形态与理由同 `0091_facebook_comment_config_snapshot_revision`。
  * 故 REQUIRED 与 KNOWN_MAX 一并抬到 0108。
+ *
+ * 注：`0109_content_schedule_hour_claim_env_key_optional`（change
+ * wire-content-scheduler-into-api-process）放宽 API 属主 `content_schedule_hour_claims.env_key`
+ * 的 NOT NULL —— 排期发帖不再绑定触发时刻的浏览器环境，拿不到环境标识时写 NULL。
+ * **REQUIRED 与 KNOWN_MAX 一并抬到 0109，这是硬依赖**：环境标识缺席时占位写的就是 NULL，
+ * 库若还没放宽 NOT NULL，该账号每次占位都抛。**它是条件性的**（有环境标识的账号照写不误），
+ * 而条件性正是最坏的一档 —— 平时不响，偏在「环境标识解析不出」的那个账号上响，
+ * 也就是本 change 专门为之放行的那一类。
+ *
+ * 第一版曾在 `ContentScheduleStore` 的启动 DDL 里加同一句 `DROP NOT NULL` 想绕开硬依赖，
+ * 被 `AC-SCHEMA-DDL-OWNER-01/02` 当场拦下：运行时 DDL 是只减不增的棘轮，新增 DDL 的落点只能是
+ * migrations/。**那道闸是对的** —— 绕过硬依赖的代价是把 schema 真相分散回运行期。
  */
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
 // start-up contract is narrowed to its own scope. Machine-derived on every sync by

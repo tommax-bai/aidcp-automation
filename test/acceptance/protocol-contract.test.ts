@@ -42,7 +42,7 @@ import {
  * 增删消息类型时：① 改 protocol.ts ② 同步本对象 ③ 同步边缘对照测试。
  */
 const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
-  hello: true, welcome: true,
+  hello: true, welcome: true, 'browser.status': true,
   'ui.snapshot': true,
   'plan.request': true, 'plan.response': true,
   'select.request': true, 'select.response': true,
