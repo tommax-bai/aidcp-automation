@@ -67,6 +67,7 @@ import {
 import { createAutomationConfigMirrorGate } from './automation-config-mirror-gate.js';
 import { createAutomationConfigAuditRelay } from './automation-config-audit-relay.js';
 import { createAutomationModelExit } from './automation-model-exit.js';
+import { createAutomationNurtureProvider } from './automation-nurture-provider.js';
 import { createAutomationRiskFoundation } from './automation-risk-foundation.js';
 import {
   createAutomationRiskAccounting,
@@ -800,6 +801,17 @@ export async function runAutomationMain(
     onCall: (info) => llmUsageBuffer.record(info),
   });
 
+  // ── 3b. 限额配置（**必须早于风控底座**） ───────────────────────────────────
+  // 它是风控判定的现读输入之一，所以家在这里、不在下面那批「面板要用的存储」里。
+  // 建在底座之后就等于承认有一段「已经在判定、数字还没接上」的启动窗口 —— 那段时间里
+  // 判的是编译期写死的默认档，而后台配的数字一个都不算数，且这件事没有任何现象。
+  // 面板那一侧的注册照旧留在原处：它用的是同一个实例，与判定同源。
+  const quotaConfigStore = new QuotaConfigStore({
+    pool: ownerPool,
+    mirrorVersionBumper: configMirrorOutboxBumper,
+  });
+  await quotaConfigStore.init();
+
   // ── 4. 风控底座（⚠️ 构造期抢写者锁，归还在 dispose） ───────────────────────
   const riskFoundation = await createAutomationRiskFoundation({
     ownerPool,
@@ -809,6 +821,15 @@ export async function runAutomationMain(
     // 环一：记账漏斗此刻还没建。**启动期窗口内恒判「未断链」**，与漏斗自己写明的
     // 回落语义一致（漏斗没起来时 `blocked()` 恒 false）。这是启动期窗口，不是常态。
     accountingBlocked: (accountId) => accountingRef.peek()?.blocked(accountId) ?? false,
+    // 判定的两路现读输入。**缺任一路都不会报错、只会静默换一套判据**，所以它们在这里是
+    // 显式接线，不是「有就传」：限额配置缺席 ⇒ 后台改的数字不生效；养号事实缺席 ⇒ 慢启动
+    // 与冷启动的逐日天花板整段不叠，一个今天刚开始爬坡的号直接按满档跑。
+    quotaProvider: quotaConfigStore,
+    nurture: createAutomationNurtureProvider(mirrors),
+    // 慢启动的两个闸**必须在判定所在的进程里可读**：只写在另一个进程的配置里，等于运营手上
+    // 那个「秒级止血」的开关对真正在放行动作的这一侧无效。
+    coldStartRampEnabled: env.AIDCP_COLDSTART_RAMP === 'true',
+    slowStartDisabled: env.AIDCP_SLOW_START_DISABLED === 'true',
     logger,
   });
 
@@ -1617,10 +1638,8 @@ export async function runAutomationMain(
     },
   } satisfies InteractionRuntimeControlsDelivery);
   // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
-  const quotaConfigStore = new QuotaConfigStore({
-    pool: ownerPool,
-    mirrorVersionBumper: configMirrorOutboxBumper,
-  });
+  // 限额配置不在这批里：它同时是风控判定的现读输入，已在风控底座之前建好（见第 3b 段），
+  // 面板与判定 MUST 共用那**一个**实例 —— 各建一份的现形方式是「后台显示已改、判定纹丝不动」。
   const pacingConfigStore = new PacingConfigStore({
     pool: ownerPool,
     mirrorVersionBumper: configMirrorOutboxBumper,
@@ -1632,7 +1651,6 @@ export async function runAutomationMain(
     executionTarget,
     logger,
   });
-  await quotaConfigStore.init();
   await pacingConfigStore.init();
   await groupRouteStore.init();
   registerRiskCommandRoutes(root.internalServer, riskCommandService);

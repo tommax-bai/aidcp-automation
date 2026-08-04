@@ -405,3 +405,43 @@ test('结构断言：候选稿版本对不上时 MUST 只回读、不写授权�
     '本进程 MUST NOT 自己碰授权表 —— 只能经属主那条口',
   );
 });
+
+test('结构断言：配额判定的两路现读输入 MUST 都接到风控底座上', () => {
+  // **这条守的是一次真事故**（2026-08-04）：两路输入都是可选参数、缺省各有一条「文档写明的回落」，
+  // 于是本进程接手边缘之后，慢启动整段不叠、后台配的限额一个都不算数，进程照起、零日志零告警，
+  // 客户端那半边还照常显示「冷启动 · 第 1 天」（那半边由接口进程直读环境表，是真话）。
+  //
+  // 判据只能钉在结构上：接不接线在行为上的差别是**判据被整套换掉**，而换掉之后的行为一样自洽——
+  // 满档跑不报错，任何一条端到端用例都照绿。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  const call = body.slice(body.indexOf('createAutomationRiskFoundation({'));
+  const options = call.slice(0, call.indexOf('\n  });'));
+  assert.match(
+    options,
+    /quotaProvider:\s*quotaConfigStore/,
+    '限额配置未接线 ⇒ 后台限额页改的数字在判定这一侧一个都不生效',
+  );
+  assert.match(
+    options,
+    /nurture:\s*createAutomationNurtureProvider\(mirrors\)/,
+    '养号事实未接线 ⇒ 慢启动 / 冷启动的逐日天花板整段不叠，新号直接按满档跑',
+  );
+  // 闸只写在另一个进程的配置里，等于运营手上那个「秒级止血」的开关对真正在放行动作的这一侧无效。
+  assert.match(options, /coldStartRampEnabled:\s*env\.AIDCP_COLDSTART_RAMP/);
+  assert.match(options, /slowStartDisabled:\s*env\.AIDCP_SLOW_START_DISABLED/);
+});
+
+test('结构断言：限额配置只建一份，且建在风控底座之前', () => {
+  // 面板与判定各建一份的现形方式是「后台显示已改、判定纹丝不动」——两份镜像各自都对。
+  // 建在底座之后则是另一种形态：有一段「已经在判定、数字还没接上」的启动窗口，同样没有任何现象。
+  const body = codeOf(MAIN).split('export async function runAutomationMain')[1] ?? '';
+  assert.equal(
+    (body.match(/new QuotaConfigStore\(/g) ?? []).length,
+    1,
+    '限额配置 MUST 只有一个实例，面板与判定共用它',
+  );
+  assert.ok(
+    body.indexOf('new QuotaConfigStore(') < body.indexOf('createAutomationRiskFoundation({'),
+    '限额配置 MUST 在风控底座之前就绪，否则判定先跑起来的那一段按编译期默认判',
+  );
+});

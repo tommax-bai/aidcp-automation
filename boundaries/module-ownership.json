@@ -335,6 +335,11 @@
     "note": "change split-cloud-automation-production-runtime A-1：本仓的文本模型出口构造。判 automation 而非 composition —— 它不是组装根，是一个可单测的工厂（组装根调它）。它是本仓**唯一**允许从 aidcp-transport 取东西的地方，且只取 llm/*（非传输原语、本仓不对它做 instanceof）；src/llm/* 在归属表里是 content、派生器不会拷进本仓 src，所以这条只能走包。本地依赖只有 src/transport/ 的两个属主内客户端与 kernel 端口，零跨层边"
   },
   {
+    "path": "src/automation-nurture-provider.ts",
+    "layer": "automation",
+    "note": "change restore-automation-risk-quota-inputs：养号事实（账号平台 / 入库时刻 / 环境慢启动锚点 / Facebook 逐日曲线）在本进程的唯一取用口，事实源在接口域、本进程只有同步读副本。**刻意不判 composition**：与 automation-persona-view 同形——一段纯派生逻辑、零装配，回落方向按「哪边更严」定（平台读不到 ⇒ undefined 绝不回落具体平台；绑定歧义 ⇒ 无锚点；曲线流没到过 ⇒ 方法本身不在，让消费方回落到编译期曲线而不是一份空曲线）"
+  },
+  {
     "path": "src/automation-persona-view.ts",
     "layer": "automation",
     "note": "change split-cloud-automation-production-runtime 批 H 第 5 片：人设在本进程的唯一取用口（绑定三态 + 人设本体），事实源在接口域、本进程只有同步读副本。**刻意不判 composition**：它是一段纯派生逻辑、零装配，被至少三个取用点（陪伴界面快照 / 每连接角色调度器 / 评论调度器）共用。收成一份的理由是「同一份判断被两处用，行为测试原理上看不见第二份」；回落方向按「哪边更严」定：副本陈旧 ⇒ 绑定态 unknown（绝不答 unbound）、取人设具名抛（绝不回落默认人设）"

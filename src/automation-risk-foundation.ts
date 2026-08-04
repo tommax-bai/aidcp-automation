@@ -26,8 +26,10 @@
  * 给个恒 `false` 的默认，等于本进程宣称「配置副本永远新鲜」「记账永远没断」——
  * 两句都不是真的，而且错了不报错、只是悄悄放行。批 C 装配它们时编译器会当场点名。
  *
- * `nurture`（养号事实）**是可选的**，且这不是双标：单体里它缺省就明写「不叠 clamp（零回归）」，
- * 那是一条文档写明的回落，不是一项能力静默消失。
+ * `nurture`（养号事实）与 `quotaProvider`（限额配置）在类型上仍是可选的 —— 但**「文档写明的回落」
+ * 挡不住「从来没接过线」**。2026-08-04 这两处双双没接，进程照常启动、照常放行，慢启动整段不叠、
+ * 后台配的限额一个不算数，零日志零告警。所以现在：两者缺席时本模块**当场各留一条具名 warn**，
+ * 说出哪项能力在本进程不生效、后果是什么。装配方 MUST 显式接线，MUST NOT 依赖那条回落。
  */
 import pg from 'pg';
 
@@ -264,6 +266,30 @@ export async function createAutomationRiskFoundation(
         ? '（未装配归属读口 → 无谓词覆盖；跨 target 接管保护不生效）'
         : ''),
   );
+  // 判定的两路**现读输入**同样在这里判掉并说出来。它们与归属读口是同一种形状的缺席：
+  // 参数可选、缺省有回落，所以缺了不报错、也没有任何现象 —— 而后果是判据被整套换掉。
+  // 2026-08-04 实测过这条缺口：本进程接手边缘之后，慢启动整段不叠、后台配的限额一个都不算数，
+  // 客户端那半边还照常显示「冷启动 · 第 1 天」（那半边由接口进程直读环境表，是真话）。
+  // **MUST NOT 只在源码注释里交代**：一条启动日志是它唯一会被人看见的形态。
+  if (!options.quotaProvider) {
+    logger.warn(
+      '[aidcp-automation] 安全限额配置未接线 —— 本进程按编译期写死的三档默认判定，'
+        + '后台限额页改的数字在这里一个都不生效（页面照常能改能存）。',
+    );
+  }
+  if (!options.nurture) {
+    logger.warn(
+      '[aidcp-automation] 养号事实未接线 —— 慢启动 / 冷启动的逐日天花板在本进程整段不叠，'
+        + '一个今天刚开始爬坡的账号会直接按满档跑；「运行方式」也判不出冷启动、恒回落底模式。',
+    );
+  }
+  if (options.quotaProvider && options.nurture) {
+    logger.log(
+      '[aidcp-automation] 配额判定输入已接线：限额配置 + 养号事实'
+        + `（慢启动全局停用=${options.slowStartDisabled ? '开' : '关'}，`
+        + `年龄爬坡=${options.coldStartRampEnabled ? '开' : '关'}）`,
+    );
+  }
   const riskStore = new PgRiskStore({
     pool: options.ownerPool,
     schemaEnsurer: ensureCapabilitySchema,
