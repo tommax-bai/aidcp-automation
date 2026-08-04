@@ -36,6 +36,7 @@ import { PANEL_AUTOMATION_ROUTES } from '../../src/transport/panel-automation-ht
 import { GROUP_ROUTE_ROUTES } from '../../src/transport/group-route-http.js';
 import { ALERT_RESOLUTION_ROUTES } from '../../src/transport/alert-resolution-http.js';
 import { PANEL_CONFIG_ROUTES } from '../../src/transport/panel-config-http.js';
+import { FACEBOOK_GROUP_OPS_ROUTES } from '../../src/transport/facebook-group-ops-http.js';
 
 /** 启动装配的两个文件：组装根 + 手写 main。路由只可能注册在这两处。 */
 const ASSEMBLY_FILES = ['../../src/automation-composition-root.ts', '../../src/automation-main.ts'];
@@ -66,6 +67,10 @@ const SERVED_FAMILIES: ReadonlyArray<{
   { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },
   { registerFn: 'registerAlertResolutionRoutes', routes: ALERT_RESOLUTION_ROUTES },
   { registerFn: 'registerPanelConfigRoutes', routes: PANEL_CONFIG_ROUTES },
+  // 第七族，与上面六族同因同果：客户端与 registrar 都在、本进程一条没注册。
+  // 它比那六族更难发现——面板那一侧 dep 是注入了的，所以不会答具名的 503，
+  // 而是被顶层 catch 兜成 500 internal_error。
+  { registerFn: 'registerFacebookGroupOpsRoutes', routes: FACEBOOK_GROUP_OPS_ROUTES },
 ];
 
 async function assemblySource(): Promise<string> {

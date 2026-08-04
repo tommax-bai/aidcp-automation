@@ -127,6 +127,7 @@ import { registerPanelAutomationRoutes } from './transport/panel-automation-http
 import { registerGroupRouteRoutes } from './transport/group-route-http.js';
 import { registerAlertResolutionRoutes } from './transport/alert-resolution-http.js';
 import { registerPanelConfigRoutes } from './transport/panel-config-http.js';
+import { registerFacebookGroupOpsRoutes } from './transport/facebook-group-ops-http.js';
 import { PgPanelAutomationRead } from './risk/panel-automation-read.js';
 import { PgRiskCommandService } from './risk/risk-command-service.js';
 import { GroupRouteStore } from './cache/group-route-store.js';
@@ -1478,6 +1479,34 @@ export async function runAutomationMain(
     pacing: createPacingConfigPanel({ store: pacingConfigStore }),
     session: createSessionLimitPanel({ store: sessionConfigStore }),
     resume: createResumeConfigPanel({ store: resumeConfigStore }),
+  });
+  // 第七族：Facebook 群组操作面。**与上面六族是同一个形态、同一个后果**——
+  // 客户端在接口进程里建得出来（面板的群目录 / 分面 / 区域评论模板 / 进度 / 认领全靠它），
+  // registrar 也一直在本仓，只是从来没有人调用过。单体停掉之后，面板的整个群组家族
+  // 会从「能出数」变成 500 internal_error（跨进程 no route 被顶层 catch 兜成 500，
+  // 连具名的 503 都不是）—— 那正是最难从现象倒推回原因的一种。
+  //
+  // 十二个方法分住三个存储（目标 / 成员账本 / 加群审计），与单体那一侧逐字同构：
+  // 这里 MUST NOT 只挑「面板今天用得到的那几个」注册，端口是闭集合，缺一个就是一条 404。
+  registerFacebookGroupOpsRoutes(root.internalServer, {
+    listTargets: (options) => facebookGroupTargets.listTargets(options),
+    listFacets: () => facebookGroupTargets.listFacets(),
+    listRegionCommentTemplates: () => facebookGroupTargets.listRegionCommentTemplates(),
+    setRegionCommentTemplates: (region, commentTemplates, updatedBy) =>
+      facebookGroupTargets.setRegionCommentTemplates(region, commentTemplates, updatedBy),
+    setEnabled: (groupUrl, enabled) => facebookGroupTargets.setEnabled(groupUrl, enabled),
+    accountProgress: () => facebookGroupTargets.accountProgress(),
+    scopedTargetCountForAccount: (accountId) =>
+      facebookGroupTargets.scopedTargetCountForAccount(accountId),
+    scopedTargetCountsForAccounts: (accountIds) =>
+      facebookGroupTargets.scopedTargetCountsForAccounts(accountIds),
+    listAssignments: (limit) => facebookGroupMemberships.listAssignments(limit),
+    reclaimStaleAssignments: (ttlMs) =>
+      facebookGroupMemberships.reclaimStaleAssignments(ttlMs),
+    latestScheduledResult: (accountId) =>
+      facebookGroupJoinAudit.latestScheduledResult(accountId),
+    latestScheduledResults: (accountIds) =>
+      facebookGroupJoinAudit.latestScheduledResults(accountIds),
   });
 
   // ── 16. 启动外壳 ────────────────────────────────────────────────────────
