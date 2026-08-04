@@ -155,6 +155,11 @@ function optionsFor(
         recorder.events.push(`reconcile:${accountId}`);
         recorder.reconciled.push(accountId);
       },
+      // 本文件测的是边缘接入、不是离场派发；桩只记事件，**不假装派发出去了**。
+      dispatchPendingOffboards: async (accountId) => {
+        recorder.events.push(`dispatch-offboards:${accountId}`);
+        return 0;
+      },
     },
   };
   return {

@@ -123,6 +123,7 @@ import { registerDelegatedTaskRoutes } from './transport/delegated-task-http.js'
 import { registerContentSchedulingRoutes } from './transport/content-scheduling-http.js';
 import { registerRiskReadRoutes } from './transport/risk-read-http.js';
 import { registerClientUsageRoutes } from './transport/client-usage-http.js';
+import { registerInteractionOffboardRoutes } from './transport/interaction-offboard-http.js';
 import { registerRiskCommandRoutes } from './transport/risk-command-http.js';
 import { registerPanelAutomationRoutes } from './transport/panel-automation-http.js';
 import { registerGroupRouteRoutes } from './transport/group-route-http.js';
@@ -1508,6 +1509,22 @@ export async function runAutomationMain(
   registerClientUsageRoutes(root.internalServer, {
     todayUsageForAccount: (accountId, edgeId) =>
       publishDispatch.buildTodayUsageForAccount(accountId, edgeId),
+  });
+  // 客户提交离场后的即时派发。推送目标（edgeId）由本进程就地解析 —— 见端口注释：
+  // 那是一次对外推送，目标不能取自调用方那份会陈旧的在场镜像。
+  //
+  // 互动能力整体不可用时**具名抛**、MUST NOT 回 0：0 的含义是「边缘不在线」（一个事实），
+  // 而「本进程压根没接互动能力」是配置/装配问题，两者的处置完全不同。
+  registerInteractionOffboardRoutes(root.internalServer, {
+    dispatchPendingOffboards: (accountId) => {
+      if (interaction.support.state !== 'wired') {
+        throw new Error(
+          `interaction_support_unavailable: ${interaction.support.reason}`
+            + '（本进程互动能力未接，无法派发离场指令；这不是「边缘不在线」）',
+        );
+      }
+      return interaction.support.port.dispatchPendingOffboards(accountId);
+    },
   });
   // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
   const quotaConfigStore = new QuotaConfigStore({

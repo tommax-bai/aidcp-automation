@@ -337,6 +337,23 @@ export async function createAutomationInteraction(
             await sender.reconcileRecoverable(accountId, edgeId);
           }
         },
+        // 客户提交离场后的即时派发。**边缘 id 在这里解析、不由调用方递进来**：
+        // 见端口注释——推送目标必须取自本进程的连接注册表，而不是调用方那份在场镜像。
+        // 边缘不在线是**事实**（回 0），派发失败是**故障**（抛出去），两者不合并。
+        dispatchPendingOffboards: async (accountId) => {
+          const resolve = options.edge.pusher.resolveEdgeIdForAccount;
+          if (!resolve) {
+            // 推送出口连 account→edge 解析都没有 ⇒ **装配缺陷**，不是「边缘不在线」。
+            // 回 0 会把这两件事压成一态，而后者是常态、前者要有人去修。
+            throw new Error(
+              'interaction_edge_resolver_unavailable: 推送出口缺 account→edge 解析，无法确定离场指令推给谁',
+            );
+          }
+          // 不带能力过滤，与单体那处逐字同口径（握手侧的能力检查是另一条路径上的事）。
+          const edgeId = resolve(accountId);
+          if (!edgeId) return 0;
+          return offboarding.dispatchPending(accountId, edgeId);
+        },
       },
     },
     start() {

@@ -154,6 +154,18 @@ export interface AutomationEdgeInteractionPort {
     edgeId: string;
     capabilities: ReadonlySet<string>;
   }): Promise<void>;
+  /**
+   * 把该账号名下**待办的离场指令**推给它此刻所在的边缘，返回真正推出去的条数。
+   *
+   * 客户提交离场后由接口进程隔进程调一次（提交与派发已经不在同一个进程里了）。
+   * **边缘 id 由本进程就地解析、MUST NOT 由调用方传进来**：那是一次**对外推送**的目标，
+   * 而调用方手上只有一份可能陈旧的在场镜像 —— 拿陈旧目标推真指令，
+   * 等于把「推给谁」建立在一个过期事实上。真值只在本进程的连接注册表里。
+   *
+   * 边缘不在线 ⇒ 回 `0`（**这是一个事实，不是失败**）。派发本身失败 ⇒ **抛**，
+   * MUST NOT 吞成 0 —— 那会让「推失败了」与「没人可推」同形，而前者需要有人处置。
+   */
+  dispatchPendingOffboards(accountId: string): Promise<number>;
 }
 
 /**
