@@ -28,6 +28,7 @@ import {
   AUTOMATION_ROOT_SURFACE,
   assertAutomationRootReady,
   AUTOMATION_SYNC_READ_CONSUMER_STREAMS,
+  AUTOMATION_SYNC_READ_REFRESH_MS,
   AutomationRootNotReadyError,
   createAutomationCompositionRoot,
   readAutomationRootConfig,
@@ -463,7 +464,10 @@ test('4b automation start listens before bidirectional bootstrap and reaches rea
     value: { binding: 'bound', personaText: 'persona-a', soul: null },
     asOf: 1_000,
   });
-  assert.deepEqual(scheduled, [30_000]);
+  // 按引用断，别再抄一遍数字：这个周期与新鲜期的比例是「接口进程的就绪闸能不能开」的前提
+  // （比例本身由 sync-read-refresh-margin 那条用例守）。抄成字面量之后，调周期只会让本用例
+  // 红在一个看不出所以然的地方，读的人多半会顺手把数字改掉。
+  assert.deepEqual(scheduled, [AUTOMATION_SYNC_READ_REFRESH_MS]);
 
   const snapshotClient = new SyncReadSnapshotHttpClient(
     new InternalHttpClient(`http://127.0.0.1:${port}`),

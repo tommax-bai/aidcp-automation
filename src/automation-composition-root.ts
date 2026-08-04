@@ -454,7 +454,20 @@ export type AutomationSyncReadOwnerStream =
 export const AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER =
   'api-sync-read-changed-relay';
 
-const AUTOMATION_SYNC_READ_REFRESH_MS = 30_000;
+/**
+ * 本进程重发属主快照的周期。
+ *
+ * **MUST 明显短于对面那份事实的新鲜期**（`DEFAULT_FRESH_MS`，见
+ * `src/transport/automation-sync-read-source.ts`）。两者相等时，每个周期末尾都有一段
+ * 「刚过期、还没重发」的窗口；接口进程的就绪闸要求**多条流同时新鲜**，于是
+ * 「全部同时新鲜」几乎永远不成立 —— 表现是就绪度在 ready / not_ready 之间反复抖，
+ * 业务入口一次都开不了，而每条流单看都「刚刚还是好的」。
+ *
+ * 2026-08-04 dev 实测：两者都是 30s，五条流轮流报 stale，切流后飞书与排期心跳
+ * 一次都没起来。取新鲜期的三分之一，留两次重试的余量。这条比例由
+ * `test/acceptance/sync-read-refresh-margin.test.ts` 钉住。
+ */
+export const AUTOMATION_SYNC_READ_REFRESH_MS = 10_000;
 
 type AutomationConsumerMirror =
   | AutomationSyncReadMirrors['persona']
