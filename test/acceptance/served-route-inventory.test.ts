@@ -31,6 +31,7 @@ import {
   DELEGATED_TASK_TEXT_COMMAND_ROUTES,
 } from '../../src/transport/operator-command-http.js';
 import { RISK_READ_ROUTES } from '../../src/transport/risk-read-http.js';
+import { CLIENT_USAGE_ROUTES } from '../../src/transport/client-usage-http.js';
 import { RISK_COMMAND_ROUTES } from '../../src/transport/risk-command-http.js';
 import { PANEL_AUTOMATION_ROUTES } from '../../src/transport/panel-automation-http.js';
 import { GROUP_ROUTE_ROUTES } from '../../src/transport/group-route-http.js';
@@ -63,6 +64,9 @@ const SERVED_FAMILIES: ReadonlyArray<{
   // 单体停掉之后，管理后台的风控页 / 配额页 / 节奏页 / 会话上限页 / 续场页 / 告警页 / 群路由页
   // 全靠它们，而漏注册的表现是跨进程 404 —— 会被读成「对面版本落后」。
   { registerFn: 'registerRiskReadRoutes', routes: RISK_READ_ROUTES },
+  // 客户端「今日进展」那块用量载荷（2026-08-04 用户实测报障后补）。
+  // 与上面那六族同因：客户端与 registrar 都在、本进程没注册。
+  { registerFn: 'registerClientUsageRoutes', routes: CLIENT_USAGE_ROUTES },
   { registerFn: 'registerRiskCommandRoutes', routes: RISK_COMMAND_ROUTES },
   { registerFn: 'registerPanelAutomationRoutes', routes: PANEL_AUTOMATION_ROUTES },
   { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },

@@ -122,6 +122,7 @@ import {
 import { registerDelegatedTaskRoutes } from './transport/delegated-task-http.js';
 import { registerContentSchedulingRoutes } from './transport/content-scheduling-http.js';
 import { registerRiskReadRoutes } from './transport/risk-read-http.js';
+import { registerClientUsageRoutes } from './transport/client-usage-http.js';
 import { registerRiskCommandRoutes } from './transport/risk-command-http.js';
 import { registerPanelAutomationRoutes } from './transport/panel-automation-http.js';
 import { registerGroupRouteRoutes } from './transport/group-route-http.js';
@@ -1493,6 +1494,20 @@ export async function runAutomationMain(
       riskFoundation.riskRegistry.getController(accountId).then((c) => c.effectiveQuotas()),
     slowStartView: (accountId) =>
       riskFoundation.riskRegistry.getController(accountId).then((c) => c.slowStartView()),
+  });
+  // 客户端「今日进展」那块用量载荷。**本进程零新增取数逻辑**——那个装配器早就在
+  // 给边缘陪伴界面供数，这里只是给它多开一个调用面。
+  //
+  // 粒度刻意是「装配好的整块」：它的输入里既有本域属主表的四个时间窗计数，也有
+  // **只存在于本进程内存里的活体会话**用量，还要过平台能力投影（那张注册表被终局裁定
+  // 留在本域）。把原料递出去让接口进程自己拼，等于逼它给投影传空值 —— 那不报错，
+  // 只会让 Facebook 账号重新看到「收藏 0/N」，即已被除掉的那个谎。
+  //
+  // **零 catch**：失败原样抛出，由调用侧最外层收成 503。在这里兜一块空载荷，
+  // 客户端会把每个动作渲染成 0，而 0 比 503 难发现得多。
+  registerClientUsageRoutes(root.internalServer, {
+    todayUsageForAccount: (accountId, edgeId) =>
+      publishDispatch.buildTodayUsageForAccount(accountId, edgeId),
   });
   // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
   const quotaConfigStore = new QuotaConfigStore({
