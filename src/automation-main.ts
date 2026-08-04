@@ -1127,6 +1127,9 @@ export async function runAutomationMain(
   // ── 14. 边缘接入 ⇒ 回填 12 / 13 / 13b 的薄壳 ──────────────────────────────
   const edgeAccess = await createAutomationEdgeAccess({
     ownerPool,
+    // 那个模块自建了第二个节奏兜底配置存储，而它有写口 —— 不接推进器就是一条静默通道
+    // （写照常提交、失效信号从源头不产生、零告警）。本行由 AC-MIRROR-02 钉住。
+    mirrorVersionBumper: configMirrorOutboxBumper,
     port: Number(env.AIDCP_WS_PORT ?? 8787),
     llm: modelExit.client,
     eventBus,

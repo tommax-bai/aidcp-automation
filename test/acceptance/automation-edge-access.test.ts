@@ -164,6 +164,9 @@ function optionsFor(
   };
   return {
     ownerPool: DEAD_POOL,
+    // 桩：本用例跑不到任何写口（池是死池）。这一格**必填**是有意的——缺席时的真实行为是
+    // 「写照常提交、失效信号从源头不产生、零告警」，那条静默通道不配有可选写法。
+    mirrorVersionBumper: { bumpDomain: 'automation', bumpInTx: async () => undefined },
     port: 0,
     llm: { complete: async () => '' } as never,
     eventBus: { emit: () => undefined, on: () => undefined } as never,

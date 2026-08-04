@@ -57,7 +57,10 @@ import type pg from 'pg';
 
 import type { AccountPausePort, AccountPauseState } from 'aidcp-kernel/kernel/account-pause-port.js';
 import type { StructuredNotificationDeliveryInput } from 'aidcp-kernel/kernel/api-direct-port.js';
-import type { ConfigMirrorGatePort } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
+import type {
+  ConfigMirrorGatePort,
+  MirrorVersionBumper,
+} from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import type { TextCompletionPort } from 'aidcp-kernel/kernel/llm-contract.js';
 import { allowsTransportWhenGateUnknown } from 'aidcp-kernel/kernel/transport-gate-exemptions.js';
 
@@ -227,6 +230,15 @@ export interface AutomationEdgeEnvironmentRegistryPort {
 export interface AutomationEdgeAccessOptions {
   /** automation 属主池。锚点缓存与节奏兜底配置都落在它上面。 */
   ownerPool: pg.Pool;
+  /**
+   * 配置镜像失效信号的推进器（本仓是 outbox 型：同库同事务写一行，中继再异步推给 api）。
+   *
+   * **必填**：本模块自己构造一个节奏兜底配置存储，而那个存储有写口。
+   * `writeWithMirrorBump` 在推进器缺席时的行为是 `if (!bumper) return run(pool)` ——
+   * 写照常提交、失效信号从源头就不产生、**不报错也不告警**。写成可选等于把这条静默通道留着；
+   * 组装根里它早在本模块的调用点之前就有了，所以「拿不到」从来不是理由。
+   */
+  mirrorVersionBumper: MirrorVersionBumper;
   /** 边-云 WebSocket 监听端口。 */
   port: number;
   /** 文本模型出口（批 A-1 的工厂产出）。 */
@@ -411,7 +423,10 @@ export async function createAutomationEdgeAccess(
 
   // 节奏兜底 floor：`pacing_floor_config` 是 automation 属主表，本进程读自己的库。
   // init 失败也安全——空镜像 → 逐项回落内置默认，这是该文件写明的回落。
-  const pacingFloors = new PacingConfigStore({ pool: options.ownerPool });
+  const pacingFloors = new PacingConfigStore({
+    pool: options.ownerPool,
+    mirrorVersionBumper: options.mirrorVersionBumper,
+  });
   try {
     await pacingFloors.init();
   } catch (error) {
