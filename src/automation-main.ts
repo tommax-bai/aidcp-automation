@@ -121,6 +121,21 @@ import {
 } from './transport/operator-command-http.js';
 import { registerDelegatedTaskRoutes } from './transport/delegated-task-http.js';
 import { registerContentSchedulingRoutes } from './transport/content-scheduling-http.js';
+import { registerRiskReadRoutes } from './transport/risk-read-http.js';
+import { registerRiskCommandRoutes } from './transport/risk-command-http.js';
+import { registerPanelAutomationRoutes } from './transport/panel-automation-http.js';
+import { registerGroupRouteRoutes } from './transport/group-route-http.js';
+import { registerAlertResolutionRoutes } from './transport/alert-resolution-http.js';
+import { registerPanelConfigRoutes } from './transport/panel-config-http.js';
+import { PgPanelAutomationRead } from './risk/panel-automation-read.js';
+import { PgRiskCommandService } from './risk/risk-command-service.js';
+import { GroupRouteStore } from './cache/group-route-store.js';
+import { QuotaConfigStore } from './config/quota-config-store.js';
+import { PacingConfigStore } from './config/pacing-config-store.js';
+import { createQuotaConfigPanel } from './config/quota-config-facade.js';
+import { createPacingConfigPanel } from './config/pacing-config-facade.js';
+import { createSessionLimitPanel } from './config/session-config-facade.js';
+import { createResumeConfigPanel } from './config/resume-config-facade.js';
 import { createAutomationContentSchedulingPort } from './automation-content-scheduling.js';
 import type { Envelope } from './comm/protocol.js';
 import type {
@@ -1416,6 +1431,54 @@ export async function runAutomationMain(
     config.automationInternalToken,
     executionTarget,
   );
+
+  // ── 15b. 面板与客户端要问本域的那几族（change deploy-derived-services-to-dev）────────
+  //
+  // 这几族在 `aidcp-transport` 里**客户端与 registrar 都齐**，本进程却一条都没注册过。
+  // 后果不是编译错误：接口进程那边把客户端建得出来、调用点编译得过、两仓测试各自全绿，
+  // **只有两个进程真跑起来才 404** —— 而那个 404 会被读成「对面版本落后」。
+  // 单体停掉之后，管理后台的风控页 / 配额页 / 告警页 / 群路由页全靠这几条。
+  //
+  // 顺序同上一段：**先注册、后有调用方**。
+  registerRiskReadRoutes(root.internalServer, {
+    getState: (accountId) =>
+      riskFoundation.riskRegistry.getController(accountId).then((c) => c.getState()),
+    effectiveQuotas: (accountId) =>
+      riskFoundation.riskRegistry.getController(accountId).then((c) => c.effectiveQuotas()),
+    slowStartView: (accountId) =>
+      riskFoundation.riskRegistry.getController(accountId).then((c) => c.slowStartView()),
+  });
+  // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
+  const quotaConfigStore = new QuotaConfigStore({ pool: ownerPool });
+  const pacingConfigStore = new PacingConfigStore({ pool: ownerPool });
+  const groupRouteStore = new GroupRouteStore({ pool: ownerPool });
+  const riskCommandService = new PgRiskCommandService({
+    pool: ownerPool,
+    // 归属目标构造期钉死，**绝不从请求里推**：推导等于让调用方挑自己写进哪个环境的账。
+    executionTarget,
+    logger,
+  });
+  await quotaConfigStore.init();
+  await pacingConfigStore.init();
+  await groupRouteStore.init();
+  registerRiskCommandRoutes(root.internalServer, riskCommandService);
+  registerPanelAutomationRoutes(root.internalServer, new PgPanelAutomationRead({ pool: ownerPool }));
+  registerGroupRouteRoutes(root.internalServer, groupRouteStore);
+  if (riskFoundation.alertStore) {
+    registerAlertResolutionRoutes(root.internalServer, riskFoundation.alertStore);
+  } else {
+    // **缺席具名说出**：告警存储 init 失败与「注册了但没有告警」在面板那一侧完全同形。
+    logger.warn(
+      '[aidcp-automation] alert-resolution 路由未注册（AlertStore 初始化失败）'
+        + ' —— 面板的告警处置按钮会 404，那不是「没有告警」',
+    );
+  }
+  registerPanelConfigRoutes(root.internalServer, {
+    quota: createQuotaConfigPanel({ store: quotaConfigStore }),
+    pacing: createPacingConfigPanel({ store: pacingConfigStore }),
+    session: createSessionLimitPanel({ store: sessionConfigStore }),
+    resume: createResumeConfigPanel({ store: resumeConfigStore }),
+  });
 
   // ── 16. 启动外壳 ────────────────────────────────────────────────────────
   const businessIngress: AutomationBusinessIngress = {

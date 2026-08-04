@@ -30,6 +30,12 @@ import {
   AUTOMATION_DISPATCH_COMMAND_ROUTES,
   DELEGATED_TASK_TEXT_COMMAND_ROUTES,
 } from '../../src/transport/operator-command-http.js';
+import { RISK_READ_ROUTES } from '../../src/transport/risk-read-http.js';
+import { RISK_COMMAND_ROUTES } from '../../src/transport/risk-command-http.js';
+import { PANEL_AUTOMATION_ROUTES } from '../../src/transport/panel-automation-http.js';
+import { GROUP_ROUTE_ROUTES } from '../../src/transport/group-route-http.js';
+import { ALERT_RESOLUTION_ROUTES } from '../../src/transport/alert-resolution-http.js';
+import { PANEL_CONFIG_ROUTES } from '../../src/transport/panel-config-http.js';
 
 /** 启动装配的两个文件：组装根 + 手写 main。路由只可能注册在这两处。 */
 const ASSEMBLY_FILES = ['../../src/automation-composition-root.ts', '../../src/automation-main.ts'];
@@ -51,6 +57,15 @@ const SERVED_FAMILIES: ReadonlyArray<{
     routes: DELEGATED_TASK_TEXT_COMMAND_ROUTES,
   },
   { registerFn: 'registerContentSchedulingRoutes', routes: CONTENT_SCHEDULING_ROUTES },
+  // change deploy-derived-services-to-dev：这六族此前**客户端与 registrar 都在、本进程一条都没注册**。
+  // 单体停掉之后，管理后台的风控页 / 配额页 / 节奏页 / 会话上限页 / 续场页 / 告警页 / 群路由页
+  // 全靠它们，而漏注册的表现是跨进程 404 —— 会被读成「对面版本落后」。
+  { registerFn: 'registerRiskReadRoutes', routes: RISK_READ_ROUTES },
+  { registerFn: 'registerRiskCommandRoutes', routes: RISK_COMMAND_ROUTES },
+  { registerFn: 'registerPanelAutomationRoutes', routes: PANEL_AUTOMATION_ROUTES },
+  { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },
+  { registerFn: 'registerAlertResolutionRoutes', routes: ALERT_RESOLUTION_ROUTES },
+  { registerFn: 'registerPanelConfigRoutes', routes: PANEL_CONFIG_ROUTES },
 ];
 
 async function assemblySource(): Promise<string> {
