@@ -35,6 +35,8 @@ import {
   type CaptchaAssistClickResultPayload,
   type CaptchaAssistTypeReportPayload,
   type PageCardsPayload,
+  type HelloPayload,
+  type BrowserStatusPayload,
 } from '../../src/comm/protocol.js';
 
 /**
@@ -506,5 +508,12 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal(cards[0]!.noteIdKind, 'content_ref');
     assert.equal(cards[1]!.noteIdKind, 'permalink');
     assert.equal(cards[2]!.noteIdKind, undefined);
+  });
+
+  it('AC-PROTO-21 browser readiness 初始快照与同连接变化逐字段往返存活', () => {
+    const hello: HelloPayload = { edgeId: 'edge-queued', accountId: 'acct-queued', browserState: 'absent' };
+    const status: BrowserStatusPayload = { state: 'ready', reason: 'wake_completed' };
+    assert.deepEqual(parseEnvelope(JSON.stringify(makeEnvelope('hello', 'hello-browser', 1, hello)))?.payload, hello);
+    assert.deepEqual(parseEnvelope(JSON.stringify(makeEnvelope('browser.status', 'status-browser', 2, status)))?.payload, status);
   });
 });
