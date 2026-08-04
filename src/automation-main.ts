@@ -128,6 +128,13 @@ import { registerGroupRouteRoutes } from './transport/group-route-http.js';
 import { registerAlertResolutionRoutes } from './transport/alert-resolution-http.js';
 import { registerPanelConfigRoutes } from './transport/panel-config-http.js';
 import { registerFacebookGroupOpsRoutes } from './transport/facebook-group-ops-http.js';
+import { registerClientEnvAutomationRoutes } from './transport/client-env-automation-http.js';
+import { PgClientEnvAutomationRead } from './interactions/client-env-automation-read.js';
+import {
+  ConfigMirrorBumpRelay,
+  OutboxMirrorVersionBumper,
+} from './config/mirror-bump-outbox.js';
+import { ConfigMirrorBumpHttpClient } from './transport/config-mirror-bump-http.js';
 import { PgPanelAutomationRead } from './risk/panel-automation-read.js';
 import { PgRiskCommandService } from './risk/risk-command-service.js';
 import { GroupRouteStore } from './cache/group-route-store.js';
@@ -415,11 +422,49 @@ export async function runAutomationMain(
       notification: payload as StructuredNotificationDeliveryInput['notification'],
     });
 
+  // ── 1e-0. 跨域配置镜像失效信号：本域 outbox 入队 + 进程内中继 ──────────────
+  // 四类限频配置写在本进程本库，而镜像版本表属接口域 ⇒ 信号要跨进程送过去：
+  // 同事务入队 → 中继 → 对面库内「按去重键入 inbox + 推版本」一笔事务。
+  // 落地端已就位（接口进程注册了那条路由），**本段之前生产方一直是空的**
+  // ⇒ 后台改配额 / 节奏 / 单场上限 / 续场之后，信号原地蒸发、对面版本永不前进。
+  //
+  // ⚠️ 单体那侧把这一段包在「部署目标存在吗」的判断里，**本进程 MUST NOT 照抄那个判断**：
+  // 读配置时就已经 fail-fast（目标非法直接抛死在建池之前），到这里它类型上已非可空。
+  // 抄一个恒真的判断只会让读者以为这里还有一条降级路径。
+  const configMirrorBumpRelay = new ConfigMirrorBumpRelay({
+    // MUST 是本域属主池：outbox 行就落在这个库里。
+    pool: ownerPool,
+    // 另起一个薄客户端而不是复用下面那个：它只是个基址包装、无状态，
+    // 而这一段必须排在四个配置存储之前（存储要拿推进器）。
+    sink: new ConfigMirrorBumpHttpClient(new InternalHttpClient(config.apiBaseUrl)),
+    executionTarget,
+  });
+  // 闭集合**手写**：本仓没有那张镜像注册表（它归接口域），所以抄不了「按属主过滤」那两行。
+  // 这四个就是注册表里属于本域的全部；写口传了不在集合里的键会当场抛，不会静默入队。
+  const AUTOMATION_OWNED_MIRROR_KEYS = new Set<string>([
+    'quota_config',
+    'pacing_floor_config',
+    'session_config_global',
+    'resume_config_global',
+  ]);
+  const configMirrorOutboxBumper = new OutboxMirrorVersionBumper({
+    allowedMirrorKeys: AUTOMATION_OWNED_MIRROR_KEYS,
+    executionTarget,
+    onCommitted: () => configMirrorBumpRelay.wake(),
+    logger,
+  });
+
   // ── 1e~1g. `main()` 自己持有的存储与客户端 ────────────────────────────────
   // 会话配置 / 续场配置：**唯一实例**。发布下发、每连接调度器、业务配置的活跃周历、
   // 以及 `session_config_global` 那条属主流全部取它，不许任何一处自建第二个。
-  const sessionConfigStore = new SessionConfigStore({ pool: ownerPool });
-  const resumeConfigStore = new ResumeConfigStore({ pool: ownerPool });
+  const sessionConfigStore = new SessionConfigStore({
+    pool: ownerPool,
+    mirrorVersionBumper: configMirrorOutboxBumper,
+  });
+  const resumeConfigStore = new ResumeConfigStore({
+    pool: ownerPool,
+    mirrorVersionBumper: configMirrorOutboxBumper,
+  });
 
   // 内容侧另外四个客户端：组装根那两个（概念池 / 精选召回）之外的部分。
   const contentHttp = new InternalHttpClient(config.contentBaseUrl);
@@ -1450,8 +1495,14 @@ export async function runAutomationMain(
       riskFoundation.riskRegistry.getController(accountId).then((c) => c.slowStartView()),
   });
   // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
-  const quotaConfigStore = new QuotaConfigStore({ pool: ownerPool });
-  const pacingConfigStore = new PacingConfigStore({ pool: ownerPool });
+  const quotaConfigStore = new QuotaConfigStore({
+    pool: ownerPool,
+    mirrorVersionBumper: configMirrorOutboxBumper,
+  });
+  const pacingConfigStore = new PacingConfigStore({
+    pool: ownerPool,
+    mirrorVersionBumper: configMirrorOutboxBumper,
+  });
   const groupRouteStore = new GroupRouteStore({ pool: ownerPool });
   const riskCommandService = new PgRiskCommandService({
     pool: ownerPool,
@@ -1508,6 +1559,14 @@ export async function runAutomationMain(
     latestScheduledResults: (accountIds) =>
       facebookGroupJoinAudit.latestScheduledResults(accountIds),
   });
+  // 第八族：客户环境生命周期要的那份 automation 侧只读投影。
+  // 调用方（客户身份与环境归属）住在接口进程，而这六个方法读的全是本进程的属主表；
+  // 接口进程侧那个端口是「未注入即当场抛」的形态 —— 这一族缺席的表现不是某个字段为空，
+  // 而是**管理后台的环境页整页 500**（2026-08-04 切流当天实测）。
+  registerClientEnvAutomationRoutes(
+    root.internalServer,
+    new PgClientEnvAutomationRead({ pool: ownerPool }),
+  );
 
   // ── 16. 启动外壳 ────────────────────────────────────────────────────────
   const businessIngress: AutomationBusinessIngress = {
@@ -1515,6 +1574,9 @@ export async function runAutomationMain(
       await edgeAccess.start();
       publishDispatch.start();
       auditRelay.start();
+      // 配置失效信号的中继。**不包进任何 try/catch**：上一段初始化失败时更需要它跑起来
+      // 把积压信号投出去。start() 幂等；投递失败不推游标、下一轮重放。
+      configMirrorBumpRelay.start();
       interaction.start();
       llmUsageBuffer.start();
       // 委托任务的执行泵：**就绪闸放行之后**才起。构造期起等于让一个还没放行的进程去认领任务，
@@ -1533,6 +1595,9 @@ export async function runAutomationMain(
       // 逆序停。
       delegatedTaskWorker?.stop();
       auditRelay.stop();
+      // 单体那侧没有这一步（进程退出即止），但本进程的 stop() 在测试与优雅重启里会真被调，
+      // 漏了就是一个悬挂定时器。
+      configMirrorBumpRelay.stop();
       await publishDispatch.close();
       await edgeAccess.close();
       await connectionRuntime.close();

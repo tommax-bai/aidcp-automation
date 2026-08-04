@@ -37,6 +37,7 @@ import { GROUP_ROUTE_ROUTES } from '../../src/transport/group-route-http.js';
 import { ALERT_RESOLUTION_ROUTES } from '../../src/transport/alert-resolution-http.js';
 import { PANEL_CONFIG_ROUTES } from '../../src/transport/panel-config-http.js';
 import { FACEBOOK_GROUP_OPS_ROUTES } from '../../src/transport/facebook-group-ops-http.js';
+import { CLIENT_ENV_AUTOMATION_ROUTES } from '../../src/transport/client-env-automation-http.js';
 
 /** 启动装配的两个文件：组装根 + 手写 main。路由只可能注册在这两处。 */
 const ASSEMBLY_FILES = ['../../src/automation-composition-root.ts', '../../src/automation-main.ts'];
@@ -71,6 +72,9 @@ const SERVED_FAMILIES: ReadonlyArray<{
   // 它比那六族更难发现——面板那一侧 dep 是注入了的，所以不会答具名的 503，
   // 而是被顶层 catch 兜成 500 internal_error。
   { registerFn: 'registerFacebookGroupOpsRoutes', routes: FACEBOOK_GROUP_OPS_ROUTES },
+  // 第八族：同因同果。缺它的表现是管理后台的环境页整页 500 —— 因为调用方那个端口
+  // 是「未注入即当场抛」，不是「缺一个字段」。
+  { registerFn: 'registerClientEnvAutomationRoutes', routes: CLIENT_ENV_AUTOMATION_ROUTES },
 ];
 
 async function assemblySource(): Promise<string> {
