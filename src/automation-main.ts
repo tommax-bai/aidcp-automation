@@ -124,6 +124,22 @@ import { registerContentSchedulingRoutes } from './transport/content-scheduling-
 import { registerRiskReadRoutes } from './transport/risk-read-http.js';
 import { registerClientUsageRoutes } from './transport/client-usage-http.js';
 import { registerInteractionOffboardRoutes } from './transport/interaction-offboard-http.js';
+import {
+  INTERACTION_STORE_READER_ROUTES,
+  registerInteractionStoreReaderRoutes,
+} from './transport/interaction-store-reader-http.js';
+import {
+  INTERACTION_SEND_ROUTES,
+  INTERACTION_WORKFLOW_ROUTES,
+  registerInteractionSendRoutes,
+  registerInteractionWorkflowRoutes,
+} from './transport/interaction-automation-http.js';
+import { unavailableInteractionPort } from './transport/interaction-failure-wire.js';
+import type { InteractionStoreReaderPort } from 'aidcp-kernel/kernel/interaction-types.js';
+import type {
+  InteractionSendPort,
+  ReplyWorkflowWritePort,
+} from 'aidcp-kernel/kernel/interaction-automation-ports.js';
 import { registerRiskCommandRoutes } from './transport/risk-command-http.js';
 import { registerPanelAutomationRoutes } from './transport/panel-automation-http.js';
 import { registerGroupRouteRoutes } from './transport/group-route-http.js';
@@ -1526,6 +1542,44 @@ export async function runAutomationMain(
       return interaction.support.port.dispatchPendingOffboards(accountId);
     },
   });
+  // ── 15c. 客户端收件箱那一整片的编排面（change deploy-derived-services-to-dev）───────
+  //
+  // 存储读侧 / 回复工作流写侧 / 发送编排三族。**接口进程一件都做不了**：这三件的实现需要
+  // 本进程的属主池、边缘连接注册表与推送出口。三族缺任意一族的后果不是 503，是
+  // **客户端整片收件箱路由 404** —— 那边的构造式是五个依赖的全或无。
+  //
+  // **互动能力不可用时照样注册**，由具名缺席实现当场抛出带原因的 503：
+  // 不注册的现形方式是 404，而 404 在调用侧只能被读成「对面漏注册了一族路由」，
+  // 与「这台机器上互动 schema 没建」是完全不同的两个排查方向。
+  const interactionBackingReason =
+    interaction.support.state === 'wired' ? null : interaction.support.reason;
+  if (interactionBackingReason) {
+    logger.warn(
+      `[aidcp-automation] 互动编排面三族以「具名缺席」注册（${interactionBackingReason}）`
+        + ' —— 路由在，但每次调用都会带原因拒绝；客户端收件箱不可用',
+    );
+  }
+  registerInteractionStoreReaderRoutes(
+    root.internalServer,
+    interaction.backing?.store
+      ?? unavailableInteractionPort<InteractionStoreReaderPort>(
+        INTERACTION_STORE_READER_ROUTES, interactionBackingReason ?? 'unknown',
+      ),
+  );
+  registerInteractionWorkflowRoutes(
+    root.internalServer,
+    interaction.backing?.workflow
+      ?? unavailableInteractionPort<ReplyWorkflowWritePort>(
+        INTERACTION_WORKFLOW_ROUTES, interactionBackingReason ?? 'unknown',
+      ),
+  );
+  registerInteractionSendRoutes(
+    root.internalServer,
+    interaction.backing?.sender
+      ?? unavailableInteractionPort<InteractionSendPort>(
+        INTERACTION_SEND_ROUTES, interactionBackingReason ?? 'unknown',
+      ),
+  );
   // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
   const quotaConfigStore = new QuotaConfigStore({
     pool: ownerPool,

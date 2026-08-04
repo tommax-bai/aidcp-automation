@@ -33,6 +33,11 @@ import {
 import { RISK_READ_ROUTES } from '../../src/transport/risk-read-http.js';
 import { CLIENT_USAGE_ROUTES } from '../../src/transport/client-usage-http.js';
 import { INTERACTION_OFFBOARD_ROUTES } from '../../src/transport/interaction-offboard-http.js';
+import { INTERACTION_STORE_READER_ROUTES } from '../../src/transport/interaction-store-reader-http.js';
+import {
+  INTERACTION_SEND_ROUTES,
+  INTERACTION_WORKFLOW_ROUTES,
+} from '../../src/transport/interaction-automation-http.js';
 import { RISK_COMMAND_ROUTES } from '../../src/transport/risk-command-http.js';
 import { PANEL_AUTOMATION_ROUTES } from '../../src/transport/panel-automation-http.js';
 import { GROUP_ROUTE_ROUTES } from '../../src/transport/group-route-http.js';
@@ -70,6 +75,11 @@ const SERVED_FAMILIES: ReadonlyArray<{
   { registerFn: 'registerClientUsageRoutes', routes: CLIENT_USAGE_ROUTES },
   // 客户提交离场后的即时派发（同批补）。缺它时离场指令只能等边缘下次重连才投得出去。
   { registerFn: 'registerInteractionOffboardRoutes', routes: INTERACTION_OFFBOARD_ROUTES },
+  // 客户端收件箱那一整片的编排面。三族任缺其一，客户端看到的不是 503 而是**整片路由 404**
+  // ——接口进程那边的构造式是五个依赖的全或无。
+  { registerFn: 'registerInteractionStoreReaderRoutes', routes: INTERACTION_STORE_READER_ROUTES },
+  { registerFn: 'registerInteractionWorkflowRoutes', routes: INTERACTION_WORKFLOW_ROUTES },
+  { registerFn: 'registerInteractionSendRoutes', routes: INTERACTION_SEND_ROUTES },
   { registerFn: 'registerRiskCommandRoutes', routes: RISK_COMMAND_ROUTES },
   { registerFn: 'registerPanelAutomationRoutes', routes: PANEL_AUTOMATION_ROUTES },
   { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },

@@ -297,7 +297,7 @@
   {
     "path": "src/automation-content-scheduling.ts",
     "layer": "composition",
-    "note": "change wire-content-scheduler-into-api-process 批 15c：内容排期调度器被调面的装配工厂。把本进程既有的在线清单 / 风控控制器 / 三条管线 / 委托台账装成 kernel 那个窄口，由 main() 注册成路由。与 automation-*.ts 那一族同形（可单测的工厂、构造期不起定时器），故同样落 composition"
+    "note": "change deploy-derived-services-to-dev 登记现状（非重新裁决）：本文件由 change wire-content-scheduler-into-api-process 新增，生成物里一直记作 composition，但派生仓的规则表从未收过它 ⇒ 生成器无法重放、boundaries:refresh 自那时起一直拒跑，账本随之比代码旧了 4 条。判 composition 与既有事实一致且不改任何边：它是排期器那一族的**被调面装配**，全仓唯一引用者是 automation-main.ts（composition→composition），它自己只向下引 automation 属主实现与 kernel 端口。"
   },
   {
     "path": "src/automation-edge-access.ts",
@@ -1150,6 +1150,11 @@
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
   },
   {
+    "path": "src/transport/client-usage-http.ts",
+    "layer": "automation",
+    "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
     "path": "src/transport/config-mirror-bump-http.ts",
     "layer": "automation",
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
@@ -1172,7 +1177,7 @@
   {
     "path": "src/transport/content-scheduling-http.ts",
     "layer": "automation",
-    "note": "§4.7 基线 sha 之后新增于共享传输目录：内容排期调度器那一族窄口的 api→automation 三件套（路由常量 + 服务端注册 + 客户端）。服务端跑本进程、客户端跑接口进程，两端必须拿同一份路由常量。整目录归 automation、无逐文件切分，新文件 inherit"
+    "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
   },
   {
     "path": "src/transport/curated-content-http.ts",
@@ -1206,6 +1211,21 @@
   },
   {
     "path": "src/transport/image-model-selection-http.ts",
+    "layer": "automation",
+    "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
+    "path": "src/transport/interaction-automation-http.ts",
+    "layer": "automation",
+    "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
+    "path": "src/transport/interaction-failure-wire.ts",
+    "layer": "automation",
+    "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
+  },
+  {
+    "path": "src/transport/interaction-offboard-http.ts",
     "layer": "automation",
     "note": "§4.7 基线 sha 之后由 change block2-outbox-transport 新增的目录：拆进程用的异步事件 outbox 传输原语（有 SQL、不进 kernel）。首个消费者为风控事件、与既有 risk_counter_outbox 同域，整目录归 automation；本目录只承载共享传输原语、无逐文件切分，新文件 inherit。MUST 回写 §4.7"
   },

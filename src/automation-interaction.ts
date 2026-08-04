@@ -55,7 +55,14 @@ import {
   type InteractionStoreOptions,
 } from './interactions/interaction-store.js';
 import { ReplyWorkflow } from './interactions/reply-workflow.js';
-import type { ReplyAiPort } from 'aidcp-kernel/kernel/interaction-types.js';
+import type {
+  ReplyAiPort,
+  InteractionStoreReaderPort,
+} from 'aidcp-kernel/kernel/interaction-types.js';
+import type {
+  InteractionSendPort,
+  ReplyWorkflowWritePort,
+} from 'aidcp-kernel/kernel/interaction-automation-ports.js';
 import { projectRuntimeControls } from './interactions/runtime-controls-provider.js';
 import {
   InteractionSendOrchestrator,
@@ -66,6 +73,19 @@ import type { AutomationEdgeInteractionSupport } from './automation-edge-access.
 
 /** 每日保留期清理的周期。与单体逐字一致。 */
 const RETENTION_SWEEP_MS = 24 * 60 * 60 * 1_000;
+/** 半途停下的回复的恢复扫描周期。与单体逐字一致。 */
+const RECOVERY_SWEEP_MS = 30_000;
+
+/**
+ * 判「分类中」卡住多久算超时用的基准。
+ *
+ * **本进程只读这一次**：同一个进程里读两遍同一个 env 就是两个会各自漂的默认值，
+ * 而漂了不报错、只是两段对「多久算超时」看法不同。
+ */
+function resolveInteractionAiTimeoutMs(env: NodeJS.ProcessEnv): number {
+  const raw = Number(env.AIDCP_INTERACTION_AI_TIMEOUT_MS);
+  return Math.max(1_000, Number.isFinite(raw) && raw > 0 ? raw : 20_000);
+}
 
 /**
  * 边缘推送出口的晚绑定薄壳。
@@ -169,9 +189,29 @@ export interface AutomationInteractionOptions {
   clearTimer?: (handle: ReturnType<typeof setInterval>) => void;
 }
 
+/**
+ * 接口进程要经内部 HTTP 驱动的那三件套（存储读侧 / 回复工作流写侧 / 发送编排）。
+ *
+ * **为什么要从这里露出来**：客户端收件箱那一整片路由由接口进程服务，而这三件的实现只可能
+ * 在本进程（它才持有边缘连接注册表与推送出口）。露不出来的后果不是 503 —— 接口进程那个
+ * 构造式是五个依赖的全或无，缺一个就整块不装，客户端看到的是**整片路由 404**。
+ *
+ * 类型刻意写成 kernel 端口而不是具体类：路由注册按端口走，签名漂移在这里当场被 typecheck 逮住。
+ */
+export interface AutomationInteractionBacking {
+  store: InteractionStoreReaderPort;
+  workflow: ReplyWorkflowWritePort;
+  sender: InteractionSendPort;
+}
+
 export interface AutomationInteraction {
   /** 交给边缘接入的那个必填二态口。 */
   support: AutomationEdgeInteractionSupport;
+  /**
+   * 跨进程取用面。**互动能力不可用时为 undefined**——此时路由仍要注册、由处理器具名抛错，
+   * MUST NOT 干脆不注册：不注册的现形方式是 404，而 404 在调用侧会被读成「对面版本落后」。
+   */
+  backing?: AutomationInteractionBacking;
   /**
    * 周期性任务起转（保留期清理）。**刻意不在构造期起**：构造发生在就绪闸之前，
    * 那时业务还没放行，起一张表就等于让一个未放行的进程开始动数据。
@@ -193,6 +233,7 @@ export async function createAutomationInteraction(
   const clearTimer =
     options.clearTimer ?? ((handle: ReturnType<typeof setInterval>) => clearInterval(handle));
   const env = options.env ?? process.env;
+  const aiTimeoutMs = resolveInteractionAiTimeoutMs(env);
   const metrics = new InteractionMetrics();
 
   // 回复生成缺席 ⇒ **整条不组装**。这一跳放在建存储之前，省掉一次没有意义的建表探测，
@@ -304,8 +345,70 @@ export async function createAutomationInteraction(
   });
 
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
+  let recoveryTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * 半途停下的回复的恢复扫描。**拆仓时没搬过来，全仓零调用方**，后果是：
+   * 一条 `queued` 的回复只要那次 fire-and-forget 的下发失败了，今天就没有任何东西会再派发它
+   * —— 它会一直停在 queued，而客户端那一侧看到的是「已批准、在发」。
+   *
+   * 三段与单体逐字同序：先把卡在分类中的放回去，再补生成、再补下发。
+   * 每条单独 try：一条恢复不了 MUST NOT 连累同批其余的，那会把一次偶发放大成整批停摆。
+   * 失败只记「推迟」而不落终态——下一轮还会再来，这正是「有界自愈」而非「判死」。
+   */
+  let recoveryRunning = false;
+  const drainRecovery = async (): Promise<void> => {
+    if (recoveryRunning) return;
+    recoveryRunning = true;
+    try {
+      const resetClassifying = await store.recoverStalledClassifyingJobs(
+        Date.now() - aiTimeoutMs * 2,
+      );
+      metrics.gauge('interaction_recovered_classifying_jobs', resetClassifying);
+      const drafts = await store.pendingGenerationJobs();
+      for (const ref of drafts) {
+        try {
+          const job = await workflow.generate({
+            accountId: ref.accountId, envKey: ref.envKey, jobId: ref.jobId,
+            expectedVersion: ref.version, actor: 'system',
+          });
+          if (job.state === 'queued') {
+            await sender.dispatchQueued({
+              accountId: ref.accountId, envKey: ref.envKey,
+              jobId: ref.jobId, expectedVersion: job.version,
+            });
+          }
+        } catch {
+          metrics.increment('interaction_recovery_total', { stage: 'generation', status: 'deferred' });
+        }
+      }
+      const queued = await store.pendingQueuedJobs();
+      for (const ref of queued) {
+        try {
+          await sender.dispatchQueued({
+            accountId: ref.accountId, envKey: ref.envKey,
+            jobId: ref.jobId, expectedVersion: ref.version,
+          });
+        } catch {
+          metrics.increment('interaction_recovery_total', { stage: 'dispatch', status: 'deferred' });
+        }
+      }
+      metrics.gauge('interaction_recovery_pending_drafts', drafts.length);
+      metrics.gauge('interaction_recovery_pending_queued', queued.length);
+    } catch (error) {
+      // 扫描本身失败（取数炸了）也不能让定时器悄悄断掉：记一次、下一轮照跑。
+      logger.warn(
+        `[interaction] 恢复扫描失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      recoveryRunning = false;
+    }
+  };
 
   return {
+    // 接口进程经内部 HTTP 驱动的三件套。**按端口暴露、不暴露具体类**：路由注册按端口走，
+    // 签名漂移在这里当场被 typecheck 逮住，而不是等两个进程真跑起来才现形。
+    backing: { store, workflow, sender },
     support: {
       state: 'wired',
       port: {
@@ -366,11 +469,19 @@ export async function createAutomationInteraction(
         );
       }, RETENTION_SWEEP_MS);
       retentionTimer.unref?.();
+      if (recoveryTimer !== null) return;
+      recoveryTimer = setTimer(() => void drainRecovery(), RECOVERY_SWEEP_MS);
+      recoveryTimer.unref?.();
+      void drainRecovery();
     },
     async dispose() {
       if (retentionTimer !== null) {
         clearTimer(retentionTimer);
         retentionTimer = null;
+      }
+      if (recoveryTimer !== null) {
+        clearTimer(recoveryTimer);
+        recoveryTimer = null;
       }
       // 存储的 `close()` 是裸 `pool.end()`，而池是**注入进来的共享属主池**
       // ⇒ 关它会打死本进程其余十几个存储。归还只到停表为止。
