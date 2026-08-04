@@ -35,6 +35,7 @@ import { CLIENT_USAGE_ROUTES } from '../../src/transport/client-usage-http.js';
 import { INTERACTION_OFFBOARD_ROUTES } from '../../src/transport/interaction-offboard-http.js';
 import { INTERACTION_STORE_READER_ROUTES } from '../../src/transport/interaction-store-reader-http.js';
 import {
+  INTERACTION_RUNTIME_CONTROLS_ROUTES,
   INTERACTION_SEND_ROUTES,
   INTERACTION_WORKFLOW_ROUTES,
 } from '../../src/transport/interaction-automation-http.js';
@@ -80,6 +81,10 @@ const SERVED_FAMILIES: ReadonlyArray<{
   { registerFn: 'registerInteractionStoreReaderRoutes', routes: INTERACTION_STORE_READER_ROUTES },
   { registerFn: 'registerInteractionWorkflowRoutes', routes: INTERACTION_WORKFLOW_ROUTES },
   { registerFn: 'registerInteractionSendRoutes', routes: INTERACTION_SEND_ROUTES },
+  {
+    registerFn: 'registerInteractionRuntimeControlsRoutes',
+    routes: INTERACTION_RUNTIME_CONTROLS_ROUTES,
+  },
   { registerFn: 'registerRiskCommandRoutes', routes: RISK_COMMAND_ROUTES },
   { registerFn: 'registerPanelAutomationRoutes', routes: PANEL_AUTOMATION_ROUTES },
   { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },

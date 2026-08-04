@@ -131,8 +131,10 @@ import {
 import {
   INTERACTION_SEND_ROUTES,
   INTERACTION_WORKFLOW_ROUTES,
+  registerInteractionRuntimeControlsRoutes,
   registerInteractionSendRoutes,
   registerInteractionWorkflowRoutes,
+  type InteractionRuntimeControlsDelivery,
 } from './transport/interaction-automation-http.js';
 import { unavailableInteractionPort } from './transport/interaction-failure-wire.js';
 import type { InteractionStoreReaderPort } from 'aidcp-kernel/kernel/interaction-types.js';
@@ -164,6 +166,10 @@ import { createSessionLimitPanel } from './config/session-config-facade.js';
 import { createResumeConfigPanel } from './config/resume-config-facade.js';
 import { createAutomationContentSchedulingPort } from './automation-content-scheduling.js';
 import type { Envelope } from './comm/protocol.js';
+import {
+  INTERACTION_RUNTIME_CONTROLS_CAPABILITY,
+  makeEnvelope,
+} from './comm/protocol.js';
 import type {
   ConceptExtractorFactoryOptions,
   CuratedCommentEvaluatorFactoryOptions,
@@ -1580,6 +1586,36 @@ export async function runAutomationMain(
         INTERACTION_SEND_ROUTES, interactionBackingReason ?? 'unknown',
       ),
   );
+  // 运行时开关改完之后的即时下发。**快照在这里取**（入参只有账号与版本）：
+  // 从调用方把快照递过来，等于让「发给边缘的是什么」取自一份可能已经陈旧的副本。
+  // 边缘不在线时回 0 —— 那是**事实**，客户端据此显示「已保存、待生效」，不是失败。
+  registerInteractionRuntimeControlsRoutes(root.internalServer, {
+    deliverRuntimeControls: async ({ accountId, version }) => {
+      if (interaction.support.state !== 'wired') {
+        throw new Error(
+          `interaction_support_unavailable: ${interaction.support.reason}`
+            + '（本进程互动能力未接，无法下发运行时开关；这不是「边缘不在线」）',
+        );
+      }
+      const edgeId = edgeAccessRef.get().server.resolveEdgeIdForAccount(
+        accountId,
+        INTERACTION_RUNTIME_CONTROLS_CAPABILITY,
+      );
+      if (!edgeId) return { delivered: 0 };
+      const payload = await interaction.support.port.runtimeControls.getSnapshot(accountId);
+      return {
+        delivered: edgeAccessRef.get().server.pushToEdges(
+          makeEnvelope(
+            'interaction.runtime.controls',
+            `runtime-controls-${accountId}-${version}`,
+            Date.now(),
+            payload,
+          ),
+          edgeId,
+        ),
+      };
+    },
+  } satisfies InteractionRuntimeControlsDelivery);
   // 这几个存储此前本进程一个都没建（它们的消费者全在面板那一侧）。都吃本进程的属主池。
   const quotaConfigStore = new QuotaConfigStore({
     pool: ownerPool,
