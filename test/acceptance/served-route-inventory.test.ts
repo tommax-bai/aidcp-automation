@@ -44,6 +44,7 @@ import { PANEL_AUTOMATION_ROUTES } from '../../src/transport/panel-automation-ht
 import { GROUP_ROUTE_ROUTES } from '../../src/transport/group-route-http.js';
 import { ALERT_RESOLUTION_ROUTES } from '../../src/transport/alert-resolution-http.js';
 import { PANEL_CONFIG_ROUTES } from '../../src/transport/panel-config-http.js';
+import { PANEL_AUTOMATION_EXTRA_ROUTES } from '../../src/transport/panel-automation-extra-http.js';
 import { FACEBOOK_GROUP_OPS_ROUTES } from '../../src/transport/facebook-group-ops-http.js';
 import { CLIENT_ENV_AUTOMATION_ROUTES } from '../../src/transport/client-env-automation-http.js';
 
@@ -90,6 +91,12 @@ const SERVED_FAMILIES: ReadonlyArray<{
   { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },
   { registerFn: 'registerAlertResolutionRoutes', routes: ALERT_RESOLUTION_ROUTES },
   { registerFn: 'registerPanelConfigRoutes', routes: PANEL_CONFIG_ROUTES },
+  {
+    // change restore-panel-capability-wiring：验证码人工协助 + 授权前置。
+    // 验证码那五条只在协助能力启用时注册，授权前置恒注册；两者同一个 registerFn。
+    registerFn: 'registerPanelAutomationExtraRoutes',
+    routes: PANEL_AUTOMATION_EXTRA_ROUTES,
+  },
   // 第七族，与上面六族同因同果：客户端与 registrar 都在、本进程一条没注册。
   // 它比那六族更难发现——面板那一侧 dep 是注入了的，所以不会答具名的 503，
   // 而是被顶层 catch 兜成 500 internal_error。

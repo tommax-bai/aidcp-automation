@@ -148,6 +148,7 @@ import { registerPanelAutomationRoutes } from './transport/panel-automation-http
 import { registerGroupRouteRoutes } from './transport/group-route-http.js';
 import { registerAlertResolutionRoutes } from './transport/alert-resolution-http.js';
 import { registerPanelConfigRoutes } from './transport/panel-config-http.js';
+import { registerPanelAutomationExtraRoutes } from './transport/panel-automation-extra-http.js';
 import { registerFacebookGroupOpsRoutes } from './transport/facebook-group-ops-http.js';
 import { registerClientEnvAutomationRoutes } from './transport/client-env-automation-http.js';
 import { PgClientEnvAutomationRead } from './interactions/client-env-automation-read.js';
@@ -1674,6 +1675,29 @@ export async function runAutomationMain(
     session: createSessionLimitPanel({ store: sessionConfigStore }),
     resume: createResumeConfigPanel({ store: resumeConfigStore }),
   });
+  // 验证码人工协助 + 授权前置（change restore-panel-capability-wiring）。
+  // 现场快照 / scoped-token 秘密 / edge 实时循环都在本进程；面板在接口进程，
+  // 不开这条口后台「验证码协助」整页 503 —— 运营就没有过验证码的手段了。
+  //
+  // **协助未启用时不注册那一族**（与单体 `isAvailable() ? … : undefined` 同口径）：
+  // 注册一条恒答「找不到事件」的路由，会让「本机没开这个能力」长得和「这个事件不存在」一样。
+  // 图像字节与验证码答案明文只经本通道透传，两侧都 MUST NOT 落日志。
+  {
+    const captchaEnabled =
+      env.AIDCP_CAPTCHA_ASSIST_ENABLED?.trim() === 'true'
+      && edgeAccessRef.get().captchaAssist.isAvailable();
+    if (!captchaEnabled) {
+      logger.warn(
+        '[aidcp-automation] panel-captcha 路由未注册（协助能力未启用或不可用）'
+          + ' —— 后台「验证码协助」页会 503，那不是「没有待协助事件」',
+      );
+    }
+    registerPanelAutomationExtraRoutes(root.internalServer, {
+      ...(captchaEnabled ? { captchaAssist: edgeAccessRef.get().captchaAssist } : {}),
+      preflightApprovePublish: (requestId) =>
+        publishDispatchRef.get().preflightApprovePublish(requestId),
+    });
+  }
   // 第七族：Facebook 群组操作面。**与上面六族是同一个形态、同一个后果**——
   // 客户端在接口进程里建得出来（面板的群目录 / 分面 / 区域评论模板 / 进度 / 认领全靠它），
   // registrar 也一直在本仓，只是从来没有人调用过。单体停掉之后，面板的整个群组家族
