@@ -15,6 +15,12 @@ import {
   ruleBatchContactCommentOptions,
   type AutomationDispatcherDeps,
 } from '../../src/automation-connection-dispatcher.js';
+import {
+  SEARCH_ACTIVITY_RECEIPT_CAPABILITY,
+  IDENTITY_READ_CURRENT_CAPABILITY,
+  IDENTITY_READ_SELF_PROFILE_CAPABILITY,
+} from '../../src/comm/protocol.js';
+import { FACEBOOK_REEL_FOLLOW_EDGE_CAPABILITY } from '../../src/platform/facebook-presented-video.js';
 
 /* ─────────────────── 规则批次终态口径 ─────────────────── */
 
@@ -403,4 +409,59 @@ test('联系人名册每连接只订阅一次，且没有名册时不订阅', ()
   subscriptions.length = 0;
   createAutomationDispatcherFactory(stubDeps().deps)(ctx);
   assert.deepEqual(subscriptions, [], '没有名册时 MUST 不订阅（单体同形）');
+});
+
+/* ─────────────────── 版本偏斜闸：能力名按引用比对 ─────────────────── */
+
+/**
+ * 这五道闸决定「新边端能不能拿到新能力」。它们比对的是**握手声明的能力名**，
+ * 两端都是裸 `string` ⇒ 抄错一个字 typecheck 一个字都不说，闸只是对所有边缘恒判 false，
+ * 新边端被静默降级成老边端。**已实测发生过**：派生 automation 手抄时漏了 `_v1` 后缀，
+ * 四道闸恒关，OL/dev 上 Reel 自动关注与免导航身份读全线消失，日志只留一句
+ * `facebook_reel_follow_edge_capability_missing` —— 看着像边缘旧，其实是云端读错名。
+ *
+ * 故本组按**引用**断言（名字取协议侧常量），并额外喂一遍「漏后缀」的错名钉死那次真实回归：
+ * 只断言「正确名 ⇒ true」不够，实现若改成同时接受两种写法，那条也照样绿。
+ */
+const CAPABILITY_GATES = [
+  ['hasInlineTargeting', 'inline_targeting'],
+  ['hasReelFollow', FACEBOOK_REEL_FOLLOW_EDGE_CAPABILITY],
+  ['hasSearchActivityReceipt', SEARCH_ACTIVITY_RECEIPT_CAPABILITY],
+  ['hasIdentityReadCurrent', IDENTITY_READ_CURRENT_CAPABILITY],
+  ['hasIdentityReadSelfProfile', IDENTITY_READ_SELF_PROFILE_CAPABILITY],
+] as const;
+
+const gateOf = (options: Record<string, unknown>, name: string): boolean =>
+  (options[name] as () => boolean)();
+
+const captureWithCapabilities = (capabilities: readonly string[]): Record<string, unknown> => {
+  const { deps, captured } = stubDeps();
+  createAutomationDispatcherFactory(deps)(buildCtx({ capabilities: [...capabilities] }));
+  return captured[0]!;
+};
+
+test('五道版本偏斜闸 MUST 按协议常量识别能力名（抄错名 = 该能力对所有边缘恒关）', () => {
+  const options = captureWithCapabilities(CAPABILITY_GATES.map(([, name]) => name));
+  for (const [gate, name] of CAPABILITY_GATES) {
+    assert.equal(gateOf(options, gate), true, `${gate} 认不出 ${name}`);
+  }
+});
+
+test('握手没声明能力时五道闸 MUST 全关（闸恒真等于闸不在）', () => {
+  const options = captureWithCapabilities([]);
+  for (const [gate] of CAPABILITY_GATES) {
+    assert.equal(gateOf(options, gate), false, `${gate} 在无能力声明时仍放行`);
+  }
+});
+
+test('漏 `_v1` 后缀的错名 MUST NOT 被认成能力（钉死那次真实回归）', () => {
+  const versioned = CAPABILITY_GATES.filter(([, name]) => name.endsWith('_v1'));
+  // 前提自检：真有带 `_v1` 的名字，否则下面那圈断言是空转。
+  assert.equal(versioned.length, 4, '带 `_v1` 的能力名数量变了，这条用例需要重写');
+  const options = captureWithCapabilities(
+    versioned.map(([, name]) => name.replace(/_v1$/, '')),
+  );
+  for (const [gate, name] of versioned) {
+    assert.equal(gateOf(options, gate), false, `${gate} 把截短名认成了 ${name}`);
+  }
 });
