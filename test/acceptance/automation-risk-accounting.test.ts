@@ -19,6 +19,7 @@ import {
   createAutomationRiskAccounting,
   type AutomationRiskAccountingOptions,
 } from '../../src/automation-risk-accounting.js';
+import { AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER } from '../../src/automation-composition-root.js';
 import type { AutomationRiskAlertInput } from '../../src/automation-risk-foundation.js';
 import { RISK_COMMAND_TOPIC } from '../../src/transport/risk-command-outbox.js';
 import { PANEL_EVENT_OUTBOX_TOPIC } from '../../src/transport/eventbus-outbox-bridge.js';
@@ -33,6 +34,7 @@ function baseOptions(
   return {
     ownerPool: POOL,
     executionTarget: 'dev',
+    syncReadChangedConsumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
     registry: {
       getControllerForAccounting: async () => ({ record: async () => true }),
     } as unknown as AutomationRiskAccountingOptions['registry'],
@@ -59,6 +61,7 @@ function baseOptions(
 
 test('承重命令主题 MUST NOT 设兜底强删；纯观测流可以', () => {
   const topics = automationOutboxRetentionTopics({
+    syncReadChangedConsumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
     panelEventConsumed: false,
     riskCommandConsumed: false,
   });
@@ -77,19 +80,37 @@ test('承重命令主题 MUST NOT 设兜底强删；纯观测流可以', () => {
 
 test('「等谁追平才敢剪」由模式决定，不由游标行倒推', () => {
   const none = automationOutboxRetentionTopics({
+    syncReadChangedConsumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
     panelEventConsumed: false,
     riskCommandConsumed: false,
   });
   const both = automationOutboxRetentionTopics({
+    syncReadChangedConsumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
     panelEventConsumed: true,
     riskCommandConsumed: true,
   });
-  assert.deepEqual(none.map((t) => t.consumers), [[], []]);
-  assert.deepEqual(
-    both.map((t) => t.consumers.length),
-    [1, 1],
-    '有消费者时才等它追平；靠「游标行在不在」倒推会让没有消费者的形态永久拒绝剪裁 + 永久告警',
-  );
+  // 按主题取、不按下标取：这张名单会随新主题增长（本次加两条通知主题就把下标断言撞红了），
+  // 而这条用例问的是「面板事件 / 风控命令这两条的 consumers 由模式决定」，与顺序无关。
+  const consumersOf = (
+    topics: ReturnType<typeof automationOutboxRetentionTopics>,
+    topic: string,
+  ) => topics.find((entry) => entry.topic === topic)!.consumers;
+
+  for (const topic of [PANEL_EVENT_OUTBOX_TOPIC, RISK_COMMAND_TOPIC]) {
+    assert.deepEqual(consumersOf(none, topic), []);
+    assert.equal(
+      consumersOf(both, topic).length,
+      1,
+      '有消费者时才等它追平；靠「游标行在不在」倒推会让没有消费者的形态永久拒绝剪裁 + 永久告警',
+    );
+  }
+
+  // 反过来，两条变更通知主题的中继是本进程常驻的，**不随这两个模式开关变化**：
+  // 它们恒有消费者，所以恒按游标下界剪，绝不会退化成按年龄裸剪。
+  for (const topic of ['sync_read.changed', 'config_mirror.bump']) {
+    assert.equal(consumersOf(none, topic).length, 1);
+    assert.equal(consumersOf(both, topic).length, 1);
+  }
 });
 
 test('记账 outbox 与风控存储 MUST 同一个池（exactly-once 靠的是同库那条唯一索引）', async () => {

@@ -33,6 +33,10 @@ import { RiskCounterReconciler } from './risk/risk-counter-reconciler.js';
 import { PgRiskCounterOutboxStore } from './risk/risk-counter-outbox-store.js';
 import type { RiskControllerRegistry } from './risk/risk-controller-registry.js';
 import type { PgRiskStore } from './risk/pg-risk-store.js';
+import { CONFIG_MIRROR_BUMP_TOPIC } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
+import { SYNC_READ_CHANGED_TOPIC } from 'aidcp-kernel/kernel/sync-read-snapshot.js';
+
+import { CONFIG_MIRROR_BUMP_CONSUMER } from './config/mirror-bump-outbox.js';
 import { OutboxRetentionPruner } from './transport/event-outbox.js';
 import {
   PANEL_EVENT_OUTBOX_TOPIC,
@@ -79,6 +83,15 @@ export interface AutomationRiskAccountingOptions {
   panelEventConsumed?: boolean;
   /** 是否消费风控命令。 */
   riskCommandConsumed?: boolean;
+  /**
+   * 同步读变更通知中继的消费者名（组装根注入；本文件不 import 组装根，见
+   * {@link automationOutboxRetentionTopics}）。
+   *
+   * **必填、无缺省**：给一个默认字符串的后果是它与真中继的名字对不上时，剪裁器会永远
+   * 等一个不存在的消费者追平 ⇒ 该主题一行都不剪、只在日志里留一条「拒绝剪裁」——
+   * 与「漏登记」几乎同形，而这正是本 change 要消灭的那类缺口。
+   */
+  syncReadChangedConsumer: string;
   /** 替身注入（测试用）。 */
   createOutboxStore?: (options: {
     executionTarget: DeploymentTarget;
@@ -133,12 +146,51 @@ export interface AutomationRiskAccounting {
   stop(): void;
 }
 
-/** 保留期配置：**风控命令那条刻意没有 `unconsumedRetentionMs`**，见文件头第 3 条。 */
+/**
+ * 变更通知主题的保留期。
+ *
+ * 两条都只是**通知**：真正承重的是「完整快照 / 版本表」，通知投递过去（游标越过）之后
+ * 这一行就没有信息价值了，留一小段只为出问题时能回溯。
+ * 取值刻意不同：`config_mirror.bump` 是承重失效信号、产量极低（九天 17 行），
+ * 留一天不占地方却好查；`sync_read.changed` 是纯加速器、产量随事实变化走，留一小时够用。
+ */
+const SYNC_READ_CHANGED_RETENTION_MS = 60 * 60 * 1000;
+const CONFIG_MIRROR_BUMP_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 保留期配置：**风控命令那条刻意没有 `unconsumedRetentionMs`**，见文件头第 3 条。
+ *
+ * ⚠️ **这张名单少一条主题的后果是那条主题在共用生产库上无界增长，且不报错、不告警。**
+ * 2026-08-05 实测：`sync_read.changed` 与 `config_mirror.bump` 两条都漏在这里，
+ * 前者长到 8 万行 / 占该表 99%（整表 141,245 行 / 45MB），后者九天 17 行、所以没人看见 ——
+ * 同一个缺口，只是产量不同。现在由 `EVENT_OUTBOX_RETENTION_ROSTER` 穷举登记 +
+ * `test/acceptance/outbox-retention-coverage.test.ts` 双向对账钉住，漏一条即验收失败。
+ */
 export function automationOutboxRetentionTopics(options: {
   panelEventConsumed: boolean;
   riskCommandConsumed: boolean;
+  /**
+   * 同步读变更通知中继的消费者名。**由组装根注入，不在本文件 import**——
+   * 那个常量住在组装根里，而本文件是 automation 层：automation → composition 是
+   * 被边界门禁禁止的方向（`AC-BOUND-04` / census 会当场判 forbidden）。
+   */
+  syncReadChangedConsumer: string;
 }): ConstructorParameters<typeof OutboxRetentionPruner>[0]['topics'] {
   return [
+    {
+      // 同步读变更通知：中继是本进程自己的常驻消费者（`signalRelay`），恒在。
+      // 按它的游标下界剪；**不设强删**——它虽是加速器（承重面是接口进程的周期完整快照），
+      // 但没有非开不可的理由，开了就是给将来留一条「消费者没上线也照删」的路。
+      topic: SYNC_READ_CHANGED_TOPIC,
+      retentionMs: SYNC_READ_CHANGED_RETENTION_MS,
+      consumers: [options.syncReadChangedConsumer],
+    },
+    {
+      // 配置失效信号：**承重**，删掉未投递的 = 一处配置永远不 reload ⇒ MUST NOT 强删。
+      topic: CONFIG_MIRROR_BUMP_TOPIC,
+      retentionMs: CONFIG_MIRROR_BUMP_RETENTION_MS,
+      consumers: [CONFIG_MIRROR_BUMP_CONSUMER],
+    },
     {
       topic: PANEL_EVENT_OUTBOX_TOPIC,
       retentionMs: PANEL_EVENT_RETENTION_MS,
@@ -169,6 +221,7 @@ export async function createAutomationRiskAccounting(
     pool: options.ownerPool,
     executionTarget: options.executionTarget,
     topics: automationOutboxRetentionTopics({
+      syncReadChangedConsumer: options.syncReadChangedConsumer,
       panelEventConsumed: options.panelEventConsumed ?? false,
       riskCommandConsumed: options.riskCommandConsumed ?? false,
     }),

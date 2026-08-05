@@ -121,7 +121,6 @@ const SYNC_READ_PAYLOADS = {
   captcha_availability: { state: 'disabled' },
   automation_config_mirror_health: {
     sourceService: 'automation',
-    asOf: 1_000,
     enabled: true,
     pollMs: 30_000,
     entries: [],

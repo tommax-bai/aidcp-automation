@@ -46,6 +46,7 @@ import type { ApprovalVoidReason } from 'aidcp-kernel/kernel/publish-approval-co
 import type { TextCardTranscriber } from 'aidcp-kernel/kernel/text-card-transcriber-port.js';
 
 import {
+  AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
   createAutomationCompositionRoot,
   readAutomationRootConfig,
   type AutomationApiClients,
@@ -370,9 +371,14 @@ export async function runAutomationMain(
     //    ⇒ 如实报「没有在跑的镜像刷新」，**MUST NOT 编一份看着健康的条目表**。
     //    真正的缺口不在这条流上，而是「后台改了这四类配置之后谁去通知本进程重读」——
     //    已按 5.5 登记，别在这里用一份假条目把它盖住。
+    //
+    // ⚠️ **这里 MUST NOT 出现 `Date.now()` 或任何逐次变化的值。** 载荷整份进变更摘要，
+    //    放一个时钟等于把「内容变没变」打成恒真：generation 每轮 +1、每 10 秒写一条
+    //    `sync_read.changed`。实测代价是 dev/ol 共用的生产库上 8 万行 / 该表 99%，
+    //    而这份载荷的内容自始至终就是下面这个恒定的空表。投递时刻由信封的 asOf 承担。
+    //    （契约侧另有穷举键校验挡着，见 AutomationConfigMirrorHealthSnapshot 头注。）
     configMirrorHealth: () => ({
       sourceService: 'automation',
-      asOf: Date.now(),
       enabled: false,
       pollMs: 0,
       entries: [],
@@ -874,6 +880,9 @@ export async function runAutomationMain(
     // **同一口**归属读。不接这一口，对账器就会拿另一个 target 正在驱动的账号跟共用计数表比对，
     // 每 5 分钟刷一批必然不等的 P1，把这条零容忍信号淹掉。
     ownership: apiClients.accountOwnership,
+    // 剪裁 `sync_read.changed` 要等这个中继的游标追平。名字由组装根传进去——
+    // 记账那个模块是 automation 层，不许 import 组装根（边界门禁会当场判 forbidden）。
+    syncReadChangedConsumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
     raiseAlert: riskFoundation.raiseAlert,
     logger,
   });
