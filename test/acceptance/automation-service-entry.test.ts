@@ -129,7 +129,7 @@ const SYNC_READ_PAYLOADS = {
   account_persona: { accounts: [] },
   client_environment_automation: { blockedEnvironmentKeys: [], slowStartAnchors: [] },
   automation_account_projection: { accounts: [] },
-  content_schedule: { global: null, accounts: [] },
+  content_schedule: { global: null, accounts: [], facebookGroupCommentPolicy: null },
   hot_lead_config: { maxAgeHours: 24, velocityMin: 3, minLikeFloor: 5, floorHours: 2 },
   facebook_comment_config: { accounts: [] },
   facebook_group_join_automation_config: { accounts: [] },

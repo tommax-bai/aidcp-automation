@@ -153,7 +153,7 @@ const SYNC_READ_PAYLOADS = {
       },
     ],
   },
-  content_schedule: { global: null, accounts: [] },
+  content_schedule: { global: null, accounts: [], facebookGroupCommentPolicy: null },
   hot_lead_config: {
     maxAgeHours: 24,
     velocityMin: 3,

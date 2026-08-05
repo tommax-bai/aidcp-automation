@@ -787,6 +787,36 @@ export async function runAutomationMain(
   // ── 2. 配置副本停手闸 ────────────────────────────────────────────────────
   const configMirrorGate = createAutomationConfigMirrorGate({ mirrors, logger });
 
+  /**
+   * 群评论时序策略（入群后首次评论等待 + 同群再评冷却）。
+   *
+   * 事实源在接口域，本进程经 `content_schedule` 同步读流拿副本——选这条流不是就近凑合：
+   * 该策略落库时 bump 的 mirror key 本来就是 `content_schedule`，单体里读它的闸也正是
+   * `isStale('content_schedule')`，所以游标天然覆盖载荷、语义与单体逐位一致。
+   *
+   * **陈旧 / 缺载荷一律返回 null**（fail-closed 逐字不变）：协调器照旧报
+   * `facebook_group_comment_policy_unavailable`，MUST NOT 在这里塞默认时长顶替——
+   * 顶替会让「策略还没同步过来」与「运营就是这么配的」变成同一件事，
+   * 而下游那一步是真往群里发评论。
+   *
+   * **两个取用点共用这一个实例**：各拿一份会让「预热多久」在同一个进程里有两个答案。
+   */
+  const groupCommentPolicyPort = {
+    get: () => {
+      if (configMirrorGate.isStale('content_schedule')) return null;
+      const lookup = mirrors.businessConfig('content_schedule');
+      if (lookup.state !== 'fresh') return null;
+      const fact = lookup.value?.facebookGroupCommentPolicy ?? null;
+      if (!fact) return null;
+      return {
+        joinToFirstCommentHours: fact.joinToFirstCommentHours,
+        revision: fact.revision,
+        source: fact.source,
+        sameGroupRecommentCooldownHours: fact.sameGroupRecommentCooldownHours,
+      };
+    },
+  };
+
   // ── 2b. 模型用量的合并缓冲 ───────────────────────────────────────────────
   // 家在这里、不在模型出口工厂里：工厂只留缝（`onCall`），缓冲的生命周期归进程。
   // **周期表在业务入口放行之后才起**，与本仓其余各片一致。
@@ -947,12 +977,10 @@ export async function runAutomationMain(
       joinAudit: facebookGroupJoinAudit,
       commentAudit: facebookCommentAudit,
     },
-    // **用户已裁定暂不接**（接口域配置表，本进程既无同步读流也无 HTTP 口，而协调器要的是同步取用）。
-    // 缺席后果写明：本进程的 Facebook 覆盖评论**一条都不会发**。这是显式缺席，不是漏传。
-    groupCommentPolicy: {
-      state: 'unavailable',
-      reason: 'group_comment_policy_not_wired_by_adjudication',
-    },
+    // 群评论时序策略：经 `content_schedule` 同步读流取副本（见上面那个口的注释）。
+    // 曾按属主裁定长期缺席，登记的后果只写了「覆盖评论一条都不会发」——
+    // 实际后果比那句大得多：消费链的评论义务卡在等待态，把同账号的点赞与加群一并冻死。
+    groupCommentPolicy: { state: 'wired', port: groupCommentPolicyPort },
     accountPause: {
       state: 'wired',
       port: {
@@ -989,10 +1017,7 @@ export async function runAutomationMain(
     // 与评论调度器**同一个实例**。
     memberships: facebookGroupMemberships,
     // 与评论调度器**同一个口**：两片各拿一份会让「预热多久」在同一进程里有两个答案。
-    groupCommentPolicy: {
-      state: 'unavailable',
-      reason: 'group_comment_policy_not_wired_by_adjudication',
-    },
+    groupCommentPolicy: { state: 'wired', port: groupCommentPolicyPort },
     configMirrorGate,
     facebookOperationBaseFor: (accountId) => businessConfig.facebookOperationBaseFor(accountId),
     risk: {

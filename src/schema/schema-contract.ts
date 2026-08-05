@@ -217,10 +217,7 @@ export const REQUIRED_SCHEMA_VERSION = '0106_automation_sync_read_facebook_opera
  * 被 `AC-SCHEMA-DDL-OWNER-01/02` 当场拦下：运行时 DDL 是只减不增的棘轮，新增 DDL 的落点只能是
  * migrations/。**那道闸是对的** —— 绕过硬依赖的代价是把 schema 真相分散回运行期。
  */
-// Derived automation checkout: this repo only ships automation-owned migrations, so the
-// start-up contract is narrowed to its own scope. Machine-derived on every sync by
-// scripts/sync-split-repos:derived_schema_version — do not hand-edit.
-export const KNOWN_MAX_SCHEMA_VERSION = '0106_automation_sync_read_facebook_operation_policy';
+export const KNOWN_MAX_SCHEMA_VERSION = '0111_facebook_consumption_obligation_per_type';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 
