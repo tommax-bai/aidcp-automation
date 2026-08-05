@@ -839,6 +839,10 @@ export async function runAutomationMain(
     executionTarget,
     registry: riskFoundation.riskRegistry,
     riskStore: riskFoundation.riskStore,
+    // 对账范围按归属收敛（change scope-risk-reconcile-to-owned-accounts）：与底座、与风控条件写
+    // **同一口**归属读。不接这一口，对账器就会拿另一个 target 正在驱动的账号跟共用计数表比对，
+    // 每 5 分钟刷一批必然不等的 P1，把这条零容忍信号淹掉。
+    ownership: apiClients.accountOwnership,
     raiseAlert: riskFoundation.raiseAlert,
     logger,
   });

@@ -174,10 +174,14 @@ export async function createAutomationRiskFoundation(
   // 没绑上时**照样 warn** —— 可检索性降级，信息不消失。
   let alertSink: Pick<PgAlertStore, 'raise'> | undefined;
   const raiseAlert = async (input: AutomationRiskAlertInput): Promise<void> => {
-    logger.warn(`[aidcp-automation][risk] ${input.title} — ${input.detail}`);
+    // 来源 target 标注（change scope-risk-reconcile-to-owned-accounts）：告警表由 dev / ol
+    // 共库共用且没有 target 列，两方的告警混在同一个列表里，看卡片分不出是谁报的——而风控告警的
+    // 处置动作（去哪台机器看、改哪个环境）完全取决于这一点。收口在此一处，覆盖是结构性的。
+    const stamped = { ...input, detail: `[${options.executionTarget}] ${input.detail}` };
+    logger.warn(`[aidcp-automation][risk] ${stamped.title} — ${stamped.detail}`);
     if (!alertSink) return;
     try {
-      await alertSink.raise(input);
+      await alertSink.raise(stamped);
     } catch (error) {
       logger.warn(
         `[aidcp-automation][risk] 告警落库失败: ${
