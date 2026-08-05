@@ -137,6 +137,39 @@ export interface AutomationPublishLogPort
   countPublishedTodayForAccount(accountId: string): Promise<number>;
 }
 
+/**
+ * 下发段存储 = 属主客户端的五个方法 + 一处本进程专属的显式拒绝。
+ *
+ * ⚠️ **这里 MUST NOT 写成 `{ ...publishLog, listPendingApprovalIds: … }`。**
+ * 属主客户端是 class 实例，方法挂在 prototype 上，而对象展开只拷**自有可枚举属性** ——
+ * 展开出来的是一个「只剩构造器参数字段、一个方法都没有」的壳。
+ * 而 TS 对展开 class 实例的类型推导**仍保留全部方法签名**，于是
+ * **编译期与单测全绿、只有真跑起来才炸**：实测表现为已批准稿的兜底下发每 30s 报一次
+ * `this.store.loadForDispatch is not a function` 后 `跳过`，人审通过的稿**永远发不出去**，
+ * 而这条路径只 warn 不抛（dev 2026-08-05，recordId=216/220 卡在「已批准·待下发」）。
+ *
+ * 故逐方法显式委托：多几行，但契约增删时编译器实打实拦得住，
+ * 且本函数具名导出后可被 `test/acceptance/publish-dispatch-store-wiring.test.ts` 用
+ * **真 class 实例**喂一遍——那条闸是唯一能证明方法没在装配处丢掉的东西。
+ */
+export function dispatchStoreFromPublishLog(
+  publishLog: AutomationPublishLogPort,
+): DispatchStore {
+  return {
+    loadForDispatch: (recordId) => publishLog.loadForDispatch(recordId),
+    updateStatus: (id, status) => publishLog.updateStatus(id, status),
+    updatePostId: (id, postId, postUrl) => publishLog.updatePostId(id, postId, postUrl),
+    markScheduled: (id, scheduledAt, scheduledPlatformId) =>
+      publishLog.markScheduled(id, scheduledAt, scheduledPlatformId),
+    markImagesAttached: (id, count) => publishLog.markImagesAttached(id, count),
+    // 唯一不来自属主客户端的一处：兜底扫描走按 target 批量拉的那条口径。
+    // 本进程 MUST NOT 用「遍历待审 id 逐个查授权」那个放大器，故显式拒绝 ——
+    // 给空数组会被读成「没有待下发的」，那是一句谎。
+    listPendingApprovalIds: () =>
+      Promise.reject(new Error('publish_pending_scan_uses_authenticated_listPendingDispatch')),
+  };
+}
+
 /** 发布授权（api 属主客户端）。 */
 export interface AutomationPublishApprovalPort {
   readApproval(requestId: string): Promise<{
@@ -653,16 +686,7 @@ export async function createAutomationPublishDispatch(
     );
   };
   const publishDispatcher = new PublishDispatcher({
-    store: {
-      // 属主客户端本身就满足下发存储契约，故**整体透传**，不逐方法再包一层箭头函数 ——
-      // 那层转发没有任何窄化作用，只是把同一组方法抄一遍，多一处会漂的地方。
-      ...options.publishLog,
-      // 唯一要覆盖的一处：兜底扫描走下面那条按 target 批量拉的口径。
-      // 本进程 MUST NOT 用「遍历待审 id 逐个查授权」那个放大器，故显式拒绝 ——
-      // 给空数组会被读成「没有待下发的」，那是一句谎。
-      listPendingApprovalIds: () =>
-        Promise.reject(new Error('publish_pending_scan_uses_authenticated_listPendingDispatch')),
-    },
+    store: dispatchStoreFromPublishLog(options.publishLog),
     sequencer: options.commandSequencer,
     edgeTaskLeases: options.edgeTaskLeases,
     resolveEdgeIdForAccount: (accountId) => options.edge.resolveEdgeIdForAccount(accountId),
