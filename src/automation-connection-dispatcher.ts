@@ -50,6 +50,15 @@ import {
   type RoleDispatcherOptions,
 } from './orchestrator/role-dispatcher.js';
 import { decideFacebookBrowseMode } from './orchestrator/facebook-rule-mode.js';
+// 版本偏斜闸比对的能力名 MUST 取自协议侧常量，MUST NOT 手抄字面量：这几个名字带 `_v1` 后缀，
+// 抄漏后缀不报错、typecheck 也看不见（两侧都是裸 string），只是该能力对**所有**边缘恒判为「没有」，
+// 于是新边端被静默降级成老边端。已实测发生过：切流后 Reel 自动关注 / 免导航身份读全线消失。
+import {
+  SEARCH_ACTIVITY_RECEIPT_CAPABILITY,
+  IDENTITY_READ_CURRENT_CAPABILITY,
+  IDENTITY_READ_SELF_PROFILE_CAPABILITY,
+} from './comm/protocol.js';
+import { FACEBOOK_REEL_FOLLOW_EDGE_CAPABILITY } from './platform/facebook-presented-video.js';
 
 /** 浏览模式决策的返回形状：与单体逐字同源（`unsupported` / `blocked` 都带具名 blocker）。 */
 export type FacebookOperationDecision =
@@ -415,11 +424,11 @@ export function createAutomationDispatcherFactory(
       accountPlatform: ctx.platform,
       // 版本偏斜闸：本连接握手声明的能力位快照（重连按新连接重建、天然刷新）。
       hasInlineTargeting: () => capabilities.includes('inline_targeting'),
-      hasReelFollow: () => capabilities.includes('facebook_reel_follow'),
-      hasSearchActivityReceipt: () => capabilities.includes('search_activity_receipt'),
-      hasIdentityReadCurrent: () => capabilities.includes('identity_read_current'),
+      hasReelFollow: () => capabilities.includes(FACEBOOK_REEL_FOLLOW_EDGE_CAPABILITY),
+      hasSearchActivityReceipt: () => capabilities.includes(SEARCH_ACTIVITY_RECEIPT_CAPABILITY),
+      hasIdentityReadCurrent: () => capabilities.includes(IDENTITY_READ_CURRENT_CAPABILITY),
       hasIdentityReadSelfProfile: () =>
-        capabilities.includes('identity_read_self_profile'),
+        capabilities.includes(IDENTITY_READ_SELF_PROFILE_CAPABILITY),
       ...(deps.facebookDailyOnlineMinutes !== undefined
         ? { facebookDailyOnlineMinutes: deps.facebookDailyOnlineMinutes }
         : {}),
