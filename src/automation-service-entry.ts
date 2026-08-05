@@ -143,8 +143,17 @@ export interface AutomationServiceOptions {
   logger?: Pick<Console, 'log' | 'warn' | 'error'>;
   /**
    * 信号处理挂在哪。传 `null` 表示不挂（测试与嵌入式调用用）。缺省是 `process`。
+   *
+   * **本外壳是信号的唯一属主。** 可执行入口 MUST NOT 另挂一个 —— 它一旦不摘自己，
+   * 下面 {@link onSignal} 那条「摘掉自己 ⇒ 第二个信号落回默认处置」的逃生口就被堵死，
+   * 而堵死之后现象与「关停本来就慢」完全同形（前科：入口曾常驻一个处理器把第二个信号
+   * 吞成一行「重复信号」，于是发多少个 SIGTERM 都杀不掉这个进程）。
    */
   signals?: AutomationSignalSource | null;
+  /**
+   * 进程退出。抽出来只为测试可观测；生产上就是 `process.exit`。形态与 api / content 两个入口一致。
+   */
+  exit?: (code: number) => never;
   /** 就绪度巡视周期。业务入口放行后立即停表。 */
   readinessWatchMs?: number;
   setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>;
@@ -203,6 +212,7 @@ export async function startAutomationService(
   let closePromise: Promise<void> | null = null;
   const signalSource: AutomationSignalSource | null =
     options.signals === null ? null : options.signals ?? process;
+  const exit = options.exit ?? ((code: number) => process.exit(code));
 
   // 要点 4：探活路由在 listen 之前注册，且把「业务入口放行了没有」一并报出去。
   root.internalServer.registerBearer(
@@ -272,15 +282,33 @@ export async function startAutomationService(
       // 关停时可能正有一次放行在途：等它落地再停，否则会出现「stop 了但 start 还在跑」。
       const inflight = businessStart;
       if (inflight) await inflight.catch(() => undefined);
+      // **一步失败 MUST NOT 跳过后面几步。** 顺序照旧、错误照旧往外抛（关停失败要如实变成非 0
+      // 退出），但每一步都要跑到 —— 早先写成一串裸 `await`，`stop()` 或 `dispose()` 一抛，
+      // 后面的归还就整段被跳过：根从来没关过、内部监听还在、自持池还连着，
+      // 而回执只说「关停失败」，完全看不出**还漏了哪几样没还**。
+      let firstError: unknown;
+      const step = async (label: string, run: () => Promise<void>): Promise<void> => {
+        try {
+          await run();
+        } catch (error) {
+          // 只留第一个错误当失败原因（它才是根因；后面几步的错误多半是它的次生现象），
+          // 但每一个都要具名留痕，绝不压成一条。
+          if (firstError === undefined) firstError = error;
+          logger.error(`[aidcp-automation] 关停步骤「${label}」失败：` + describeError(error));
+        }
+      };
       if (businessIngressStarted) {
-        await options.businessIngress.stop();
-        businessIngressStarted = false;
+        await step('停业务入口', async () => {
+          await options.businessIngress.stop();
+          businessIngressStarted = false;
+        });
       }
       // 构造期占住的资源**无条件**归还：`stop()` 只在放行过之后才跑，而写者锁 / 周期表 /
       // 模型轮询在就绪闸之前就已经占着了。「一直没就绪就收到终止信号」正是它们唯一的泄漏路径。
       // 放在 root.close() 之前：它们用的是本进程的属主池与连接，晚于根关停就没得还了。
-      await options.businessIngress.dispose();
-      await root.close();
+      await step('归还构造期资源', () => options.businessIngress.dispose());
+      await step('关组装根', () => root.close());
+      if (firstError !== undefined) throw firstError;
     })();
     return closePromise;
   };
@@ -288,13 +316,25 @@ export async function startAutomationService(
   /**
    * 收到信号就摘掉自己再关停 —— **第二个信号因此落回 Node 默认处置（立刻结束）**。
    * 这是有意的：关停若卡住，运维不该被迫去找 kill -9，而本外壳也不该自己发明一个超时上限。
+   *
+   * ## 关停走完 MUST 显式退出，不能等事件循环自己排空
+   *
+   * 只设 `exitCode` 不 `exit` 的话，进程会不会退出取决于「还有没有句柄挂着」——
+   * 于是「关停干净」与「还剩一个句柄没还」在进程管理器那一侧完全同形，而那是运维唯一会看的一眼。
+   * 更具体的一条：处理器已经把自己摘了，同一次信号会落回 Node 默认处置、进程以 143 结束，
+   * 而 systemd 把非 0 一律记成 `failed` —— 一次完全正常的停机会显示成崩溃（api 侧实测过）。
    */
   function onSignal(): void {
     logger.log('[aidcp-automation] 收到终止信号，开始优雅关停');
-    void stopService().catch((error: unknown) => {
-      logger.error('[aidcp-automation] 优雅关停失败：' + describeError(error));
-      process.exitCode = 1;
-    });
+    void stopService()
+      .then(() => {
+        logger.log('[aidcp-automation] 已关停');
+        exit(0);
+      })
+      .catch((error: unknown) => {
+        logger.error('[aidcp-automation] 优雅关停失败：' + describeError(error));
+        exit(1);
+      });
   }
 
   if (signalSource) {

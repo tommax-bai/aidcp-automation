@@ -14,6 +14,7 @@
  * - **探活里必须带上放行状态**：只报就绪度的话，「监听着但没放行业务」这个中间态是不可观测的。
  */
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import type pg from 'pg';
 
@@ -237,6 +238,19 @@ function recordingIngress(): AutomationBusinessIngress & {
 
 const SILENT = { log: () => undefined, warn: () => undefined, error: () => undefined };
 
+/**
+ * 记录退出码而不真的退出。
+ *
+ * 类型是 `(code: number) => never`（生产上就是 `process.exit`），而一个只记录的替身当然会返回 —— 故断言转型。
+ * **别为了省掉这个转型就把生产签名放宽成 `void`**：`never` 是在告诉调用方「这一行之后不会再执行」，
+ * 放宽之后，某天有人在 `exit(0)` 后面接一段代码，编译器就不会再说话了。
+ */
+function recordExit(sink: number[]): (code: number) => never {
+  return ((code: number) => {
+    sink.push(code);
+  }) as unknown as (code: number) => never;
+}
+
 test('就绪时先监听、再放行业务，探活如实报出两者', async () => {
   const ingress = recordingIngress();
   const service = await startAutomationService({
@@ -409,6 +423,7 @@ test('终止信号触发优雅关停，且处理器摘掉自己（第二个信�
       return undefined;
     },
   };
+  const exits: number[] = [];
   const service = await startAutomationService({
     schemaGate: SCHEMA_GATE,
     config: CONFIG,
@@ -417,6 +432,7 @@ test('终止信号触发优雅关停，且处理器摘掉自己（第二个信�
     createRoot: rootFactory(() => false),
     signals,
     logger: SILENT,
+    exit: recordExit(exits),
   });
   assert.equal(handlers.get('SIGTERM')?.length, 1);
   assert.equal(handlers.get('SIGINT')?.length, 1);
@@ -426,6 +442,85 @@ test('终止信号触发优雅关停，且处理器摘掉自己（第二个信�
   assert.equal(ingress.stops, 1);
   assert.equal(handlers.get('SIGTERM')?.length, 0, '摘掉自己：第二个信号交回 Node 默认处置');
   assert.equal(handlers.get('SIGINT')?.length, 0);
+});
+
+test('关停干净后 MUST 显式退 0，绝不指望事件循环自己排空', async () => {
+  // **别把这条并进上面那条**：上面守的是「摘掉自己」，这条守的是「真的退出」。
+  // 两者失手的现象完全不同 —— 前者是杀不掉，后者是停不下来却显示 failed（退出码 143）
+  // 或干脆挂着不动（还有句柄没还）。它们各自有过一次生产事故。
+  const exits: number[] = [];
+  const handlers: (() => void)[] = [];
+  const service = await startAutomationService({
+    schemaGate: SCHEMA_GATE,
+    config: CONFIG,
+    runtime: runtimeHandles(),
+    businessIngress: recordingIngress(),
+    createRoot: rootFactory(() => false),
+    signals: {
+      on: (signal, handler) => {
+        if (signal === 'SIGTERM') handlers.push(handler);
+        return undefined;
+      },
+      off: () => undefined,
+    },
+    logger: SILENT,
+    exit: recordExit(exits),
+  });
+
+  handlers[0]!();
+  await service.close();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(exits, [0], '关停干净 ⇒ 退出码 0（非 0 会被 systemd 记成 failed）');
+});
+
+test('可执行入口 MUST NOT 自己注册终止信号处理器（外壳是唯一属主）', async () => {
+  // **这条只能是源码闸。** 上面那些用例驱动的是注入的假信号源，它们看得见外壳挂的那一个，
+  // 看不见入口挂在真 `process` 上的那一个 —— 而正是那一个曾经把「第二个信号立刻结束」
+  // 这条逃生口堵死（重复信号被吞成一行日志，于是发多少个 SIGTERM 都杀不掉进程）。
+  // 行为用例原理上抓不到它，所以判据只能落在源码上。
+  const source = await readFile(new URL('../../src/server.ts', import.meta.url), 'utf8');
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    assert.ok(
+      !withoutComments.includes(signal),
+      `src/server.ts MUST NOT 提到 ${signal}：信号的唯一属主是 automation-service-entry 的 onSignal，`
+        + '它收到第一个信号就摘掉自己；入口再挂一个不摘的，逃生口就没了。',
+    );
+  }
+});
+
+test('关停失败 MUST 以非 0 退出，绝不把一次失败下线报成干净下线', async () => {
+  const exits: number[] = [];
+  const handlers: (() => void)[] = [];
+  const failing: AutomationBusinessIngress = {
+    start: async () => undefined,
+    stop: async () => undefined,
+    dispose: async () => {
+      throw new Error('dispose_blew_up');
+    },
+  };
+  await startAutomationService({
+    schemaGate: SCHEMA_GATE,
+    config: CONFIG,
+    runtime: runtimeHandles(),
+    businessIngress: failing,
+    createRoot: rootFactory(() => false),
+    signals: {
+      on: (signal, handler) => {
+        if (signal === 'SIGTERM') handlers.push(handler);
+        return undefined;
+      },
+      off: () => undefined,
+    },
+    logger: SILENT,
+    exit: recordExit(exits),
+  });
+
+  handlers[0]!();
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(exits, [1], '关停失败 ⇒ 非 0 退出');
 });
 
 test('关停等在途放行落地后再停业务，绝不把它丢在半途', async () => {

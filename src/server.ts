@@ -11,16 +11,27 @@
  *    由内部 HTTP 监听与边缘 WS 撑着；
  * 2. 失败时打一条结构化日志并**以非 0 退出**。systemd 是 `Restart=on-failure`，
  *    所以「起不来」会表现成重启循环 —— 那是设计（比一个静默半死的进程好查）；
- * 3. 收到 SIGTERM / SIGINT 时**优雅关停一次**：停业务入口、还锁、关池。
+ * 3. 信号与关停**不归本文件管**，见下。
+ *
+ * ## 本文件 MUST NOT 注册终止信号处理器
+ *
+ * 信号的唯一属主是启动外壳（`automation-service-entry.ts` 的 `onSignal`）：它收到第一个信号就
+ * **摘掉自己**，好让第二个信号落回 Node 默认处置、当场结束进程 —— 那是关停卡住时运维唯一
+ * 不必去找 kill -9 的路子。
+ *
+ * 本文件曾经另挂过一个**从不摘除**的处理器，把第二个信号吞成一行「重复信号」就返回。
+ * 后果不是多打一行日志，而是**那条逃生口彻底失效**：发多少个 SIGTERM 都杀不掉这个进程。
+ * 而它一直没被用例抓到，因为覆盖信号的那条用例驱动的是注入的假信号源 ——
+ * 它看得见外壳挂的那一个，看不见本文件挂在真 `process` 上的那一个。
  *
  * ## 部署形态 MUST 是 stop→start，禁止滚动 / 蓝绿
  *
  * 风控写者锁是**会话级 advisory lock、构造期就抢**：两个进程重叠期间后起的那个会抢不到锁并
- * 拒绝启动。所以这里收到信号后要**真的等关停做完**再让进程退出，不能立刻 `process.exit()` ——
- * 那会把锁留给一个已经不存在的会话，下一个进程要等它超时。
+ * 拒绝启动。所以收到信号后要**真的等关停做完**再让进程退出，不能立刻 `process.exit()` ——
+ * 那会把锁留给一个已经不存在的会话，下一个进程要等它超时。这条约束现在由启动外壳落实
+ * （`onSignal` 先 await 关停、再显式退出），本文件不参与。
  */
 import { isDirectExecution, runAutomationEntry } from './automation-composition-root.js';
-import type { AutomationService } from './automation-service-entry.js';
 
 export { runAutomationEntry } from './automation-composition-root.js';
 
@@ -28,40 +39,9 @@ function logEvent(event: string, detail: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ service: 'aidcp-automation', event, ...detail }));
 }
 
-/**
- * 装一次关停。**重复信号只关一次**（第二次 SIGTERM 常见于编排器强杀前的催促），
- * 但两次都要如实留痕 —— 「又来了一个信号」与「第一个信号没生效」现象一样、原因完全不同。
- */
-function installShutdown(service: AutomationService): void {
-  let closing: Promise<void> | null = null;
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    process.on(signal, () => {
-      if (closing) {
-        logEvent('shutdown_signal_repeat', { signal });
-        return;
-      }
-      logEvent('shutdown_begin', { signal });
-      closing = service
-        .close()
-        .then(() => {
-          logEvent('shutdown_complete', { signal });
-        })
-        .catch((error: unknown) => {
-          // 关停失败也要以非 0 退出：静默退 0 会让编排器把这次当成一次干净下线。
-          logEvent('shutdown_failed', {
-            signal,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          process.exitCode = 1;
-        });
-    });
-  }
-}
-
 if (isDirectExecution(import.meta.url)) {
   void runAutomationEntry()
     .then((service) => {
-      installShutdown(service);
       logEvent('started', { port: service.port });
     })
     .catch((error: unknown) => {
