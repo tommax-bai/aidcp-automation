@@ -25,6 +25,7 @@
 import type pg from 'pg';
 
 import type { DeploymentTarget } from 'aidcp-kernel/deployment-target.js';
+import type { AccountOwnershipPort } from 'aidcp-kernel/kernel/account-ownership-port.js';
 
 import type { RiskAction } from './risk/types.js';
 import { RiskAccounting } from './risk/risk-accounting.js';
@@ -56,6 +57,18 @@ export interface AutomationRiskAccountingOptions {
   registry: RiskControllerRegistry;
   /** 风控存储。本模块只用它做启动期 schema 探测与对账取数，不自己拼 SQL。 */
   riskStore: Pick<PgRiskStore, 'init' | 'totalsForAccountSince'>;
+  /**
+   * 账号归属的三态读（change scope-risk-reconcile-to-owned-accounts）。**对账范围据此收敛为
+   * 「归属为本 target 的账号」**：计数表是 dev / ol 共用且不带 target 的既成事实账本，而内存计数
+   * 只在本进程自己记账时递增 —— 对「归属在另一个 target 的账号」两者结构上不可能相等，而面板的
+   * 只读用量查询又会顺手把这些账号的控制器物化进来。不接这一口 ⇒ 每 5 分钟每账号每动作各刷一条
+   * P1，把这条刻意做成零容忍的信号淹进常态噪音。
+   *
+   * **MUST 传底座给注册表用的同一口**（`AccountOwnershipPort`），MUST NOT 另起读法：两份读法
+   * 漂开不会报错，只会让「条件写认为账号是我的、对账认为不是」。缺省 ⇒ 不过滤、全量对账
+   * （逐字回到本 change 之前的行为）。
+   */
+  ownership?: Pick<AccountOwnershipPort, 'resolveExecutionTarget'>;
   /** 告警出口（批 B 的底座给）。**起不来时靠它说话**，所以是必填。 */
   raiseAlert: (input: AutomationRiskAlertInput) => Promise<void>;
   logger?: Pick<Console, 'log' | 'warn' | 'error'>;
@@ -199,9 +212,17 @@ export async function createAutomationRiskAccounting(
       `[aidcp-automation] 风控记账 outbox 已就绪（target=${options.executionTarget}，启动回收在途行=${recovered}）`,
     );
 
+    const ownership = options.ownership;
     reconciler = new RiskCounterReconciler({
       registry: options.registry,
       totalsSince: (accountId, since) => options.riskStore.totalsForAccountSince(accountId, since),
+      // 对账范围按归属收敛（change scope-risk-reconcile-to-owned-accounts）：见 options.ownership 的注释。
+      ...(ownership
+        ? {
+            executionTarget: options.executionTarget,
+            ownerTargetFor: (accountId: string) => ownership.resolveExecutionTarget(accountId),
+          }
+        : {}),
       intervalMs: options.reconcileIntervalMs ?? 5 * 60_000,
       logger,
       onDrift: (drift) =>
@@ -212,11 +233,16 @@ export async function createAutomationRiskAccounting(
           title: `风控计数与库内事实不一致：账号 ${drift.accountId} 的 ${drift.action}`,
           detail:
             `内存=${drift.memory}，库=${drift.database}。**判据是偏差是否为零，没有容忍阈值。**`
-            + '已按库内事实重建该账号计数；偏差来源通常是归属变更、运维手工 SQL 或另一 target 的遗留行。',
+            + '已按库内事实重建该账号计数；对账范围已限定为归属本 target 的账号，故这条偏差不来自另一 target 的正常驱动；'
+            + '来源通常是运维手工 SQL、归属刚变更时飞在半路的回执，或本进程记账链路漏记。',
         }),
     });
     reconciler.start();
-    logger.log('[aidcp-automation] 风控计数对账已启动（偏差非零即告警并以库为准重建）');
+    logger.log(
+      `[aidcp-automation] 风控计数对账已启动（偏差非零即告警并以库为准重建）：范围=${
+        ownership ? `归属为 ${options.executionTarget} 的账号` : '全部已物化账号（归属读口缺席，未过滤）'
+      }`,
+    );
   } catch (error) {
     inactiveReason = error instanceof Error ? error.message : String(error);
     // 起不来 MUST NOT 静默降级为「照跑」，也不该把整个进程拖死。
