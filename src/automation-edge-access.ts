@@ -71,6 +71,7 @@ import type { ResumeGateVerdict } from './comm/browser-standby.js';
 import { CaptchaAssistService } from './comm/captcha-assist.js';
 import { CaptchaCoordinator } from './comm/captcha-coordinator.js';
 import { EdgeTaskLeaseClient } from './comm/edge-task-lease-client.js';
+import { HostStandbyDecisionStore } from './comm/host-standby-decision-store.js';
 import type { EdgeResumeCommandReceiverDeps } from './comm/edge-resume-command-receiver.js';
 import { DefaultMessageHandler } from './comm/handler.js';
 import type { HandlerDeps, HandshakeOutcome } from './comm/handler.js';
@@ -342,6 +343,13 @@ export interface AutomationEdgeAccess {
   accountPause: AccountPausePort;
   /** 喂给组装根 `AutomationRuntimeHandles.edgeResume` 的那一份。 */
   edgeResumeDeps: EdgeResumeCommandReceiverDeps;
+  /**
+   * 宿主层让位判决遥测的当前态持有方（change report-host-standby-decisions）。
+   *
+   * 写侧只有上面那个消息处理器（收下边缘回执），读侧只有面板（经内部 HTTP 的只读路由）。
+   * 它 MUST NOT 被接进任何下发决策路径——可见性是宿主层持有槽位决策权的对价，不是审批权。
+   */
+  hostStandbyDecisions: HostStandbyDecisionStore;
   /** 起监听。**进程入口在就绪闸之后调**，工厂本身不起。 */
   start(): Promise<void>;
   /** 退化项（init 失败但不阻塞启动的那些）。**说得出来**，不是一个 undefined 了事。 */
@@ -577,8 +585,11 @@ export async function createAutomationEdgeAccess(
         + '这是显式声明的缺席，不是「接了但没生效」。',
     );
   }
+  // 宿主层让位判决遥测：本进程是这份事实的唯一写者（边缘回执只到这条 WebSocket）。
+  const hostStandbyDecisions = new HostStandbyDecisionStore({ logger });
   const handler = new DefaultMessageHandler({
     configMirrorGate: options.configMirrorGate,
+    hostStandbyDecisions,
     planner,
     llm: options.llm,
     cache: anchorCache,
@@ -708,6 +719,7 @@ export async function createAutomationEdgeAccess(
     pacingFloors,
     accountPause,
     edgeResumeDeps: { wsServer: constructedServer },
+    hostStandbyDecisions,
     start: () => constructedServer.start(),
     degraded,
     close: async () => {

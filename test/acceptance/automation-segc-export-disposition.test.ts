@@ -32,8 +32,8 @@ test('判据清单覆盖自动化段导出面全集，句柄唯一且有序', ()
   const handles = AUTOMATION_SEGC_EXPORT_DISPOSITION.map((entry) => entry.handle);
   assert.equal(
     handles.length,
-    41,
-    '自动化段今天导出 41 个句柄；条数对不上意味着导出面变了，'
+    42,
+    '自动化段今天导出 42 个句柄；条数对不上意味着导出面变了，'
       + '先在 aidcp-cloud 跑 test/acceptance/helpers/segc-export-face.ts 重新派生，再逐条重判去处',
   );
   assert.equal(new Set(handles).size, handles.length, '句柄必须唯一');

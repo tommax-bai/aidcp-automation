@@ -31,6 +31,7 @@ import {
   DELEGATED_TASK_TEXT_COMMAND_ROUTES,
 } from '../../src/transport/operator-command-http.js';
 import { RISK_READ_ROUTES } from '../../src/transport/risk-read-http.js';
+import { HOST_STANDBY_DECISION_ROUTES } from '../../src/transport/host-standby-decision-http.js';
 import { CLIENT_USAGE_ROUTES } from '../../src/transport/client-usage-http.js';
 import { INTERACTION_OFFBOARD_ROUTES } from '../../src/transport/interaction-offboard-http.js';
 import { INTERACTION_STORE_READER_ROUTES } from '../../src/transport/interaction-store-reader-http.js';
@@ -88,6 +89,9 @@ const SERVED_FAMILIES: ReadonlyArray<{
   },
   { registerFn: 'registerRiskCommandRoutes', routes: RISK_COMMAND_ROUTES },
   { registerFn: 'registerPanelAutomationRoutes', routes: PANEL_AUTOMATION_ROUTES },
+  // change report-host-standby-decisions：宿主层让位判决遥测的只读读口。
+  // 本进程是这份事实的唯一写者，面板只能问过来；漏注册的表现是面板端点恒 503。
+  { registerFn: 'registerHostStandbyDecisionRoutes', routes: HOST_STANDBY_DECISION_ROUTES },
   { registerFn: 'registerGroupRouteRoutes', routes: GROUP_ROUTE_ROUTES },
   { registerFn: 'registerAlertResolutionRoutes', routes: ALERT_RESOLUTION_ROUTES },
   { registerFn: 'registerPanelConfigRoutes', routes: PANEL_CONFIG_ROUTES },

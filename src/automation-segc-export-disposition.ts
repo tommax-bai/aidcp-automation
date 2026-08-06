@@ -1,9 +1,9 @@
 /**
- * 判据清单 · cloud 单体自动化段的 41 个导出面，逐条判「本进程有没有去处」（task 3.5，批 A）。
+ * 判据清单 · cloud 单体自动化段的 42 个导出面，逐条判「本进程有没有去处」（task 3.5，批 A）。
  *
  * ## 它回答的问题
  *
- * `segCAutomation` 在段尾把 41 个句柄赋给共享上下文。搬进本包写 `main()` 时，
+ * `segCAutomation` 在段尾把 42 个句柄赋给共享上下文。搬进本包写 `main()` 时，
  * **最容易犯的错不是漏搬，是顺手全搬**：把只有接口服务段读的对象也在自动化进程里 `new` 一遍，
  * 于是那个对象在本进程里没有任何消费者、却照样占着连接与定时器，而且**没有任何机械手段看得见**
  * —— 它构造成功、日志无异常，只是永远没人读它算出来的东西。
@@ -96,7 +96,7 @@ export interface AutomationSegCExportDisposition {
 }
 
 /**
- * 41 条，按句柄名字典序。数字与顺序都不是手打的结论 —— 见文件头「重新派生的办法」。
+ * 42 条，按句柄名字典序。数字与顺序都不是手打的结论 —— 见文件头「重新派生的办法」。
  *
  * 派生时点：2026-08-01，源 `aidcp-cloud@f489e5e`。
  */
@@ -258,6 +258,21 @@ export const AUTOMATION_SEGC_EXPORT_DISPOSITION = [
     reason:
       '草稿删图处理器，自动化段在边缘会话分支里调它。'
       + '与 approvePublishForClient 同形：接口服务段另建一份自己的，故接口进程不依赖本进程这一份。',
+  },
+  {
+    handle: 'hostStandbyDecisions',
+    verdict: 'construct',
+    automationConsumers: ['automation-runtime', 'automation-internal-api'],
+    foreignReaders: ['api-serving'],
+    servesOtherProcess: false,
+    batch: 'D',
+    reason:
+      '宿主层让位判决遥测的当前态持有方（change report-host-standby-decisions，晚于批 B–H 的迁移窗口）。'
+      + '本进程两处真消费：边-云消息处理器收下边缘回执写进去（automation-runtime），'
+      + '内部 HTTP 面把它暴露成一条只读路由供面板取（automation-internal-api）。'
+      + '因此 servesOtherProcess=false —— 它不是「构造只为答别的进程」，本进程自己就是唯一写者。'
+      + '只读边界：它 MUST NOT 被接进任何下发决策路径（待机提示产出 / 命令下发 / 风控裁决），'
+      + '槽位不跨机器、调度权在宿主层，可见性是那份决策权的对价、不是审批权。',
   },
   {
     handle: 'interactionCustomerApi',

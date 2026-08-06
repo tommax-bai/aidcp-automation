@@ -146,6 +146,7 @@ import type {
 } from 'aidcp-kernel/kernel/interaction-automation-ports.js';
 import { registerRiskCommandRoutes } from './transport/risk-command-http.js';
 import { registerPanelAutomationRoutes } from './transport/panel-automation-http.js';
+import { registerHostStandbyDecisionRoutes } from './transport/host-standby-decision-http.js';
 import { registerGroupRouteRoutes } from './transport/group-route-http.js';
 import { registerAlertResolutionRoutes } from './transport/alert-resolution-http.js';
 import { registerPanelConfigRoutes } from './transport/panel-config-http.js';
@@ -1697,6 +1698,10 @@ export async function runAutomationMain(
   await groupRouteStore.init();
   registerRiskCommandRoutes(root.internalServer, riskCommandService);
   registerPanelAutomationRoutes(root.internalServer, new PgPanelAutomationRead({ pool: ownerPool }));
+  // 宿主层让位判决遥测（change report-host-standby-decisions）：**只读**路由。
+  // 本进程是这份事实的唯一写者（边缘回执只到本进程这条 WebSocket），接口进程的面板只能问过来。
+  // 不注册的后果不是报错，是面板那条端点恒 503 —— 而「读不到」绝不能被读成「没有环境卡住」。
+  registerHostStandbyDecisionRoutes(root.internalServer, edgeAccess.hostStandbyDecisions);
   registerGroupRouteRoutes(root.internalServer, groupRouteStore);
   if (riskFoundation.alertStore) {
     registerAlertResolutionRoutes(root.internalServer, riskFoundation.alertStore);
