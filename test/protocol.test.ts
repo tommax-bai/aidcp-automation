@@ -29,16 +29,18 @@ test('parseEnvelope 对坏数据返回 null', () => {
   assert.equal(parseEnvelope('{"v":1}'), null, '缺字段不是合法信封');
 });
 
-test('makeEnvelope 构造 publish.request（类型安全 payload）', () => {
-  const env = makeEnvelope('publish.request', 'pub-1', 9, {
-    title: '调 RAG 踩坑',
-    content: '昨天分块切碎了召回一坨',
-    tags: ['RAG', '踩坑'],
+test('makeEnvelope 构造 publish.command（类型安全 payload）', () => {
+  const env = makeEnvelope('publish.command', 'pub-1', 9, {
+    kind: 'fill_field',
+    seq: 1,
+    recordId: 42,
+    taskId: 'task-1',
+    params: { value: '调 RAG 踩坑' },
   });
-  assert.equal(env.type, 'publish.request');
+  assert.equal(env.type, 'publish.command');
   assert.ok(isEnvelope(env));
   const round = parseEnvelope(JSON.stringify(env));
-  assert.equal(round?.type, 'publish.request');
+  assert.equal(round?.type, 'publish.command');
 });
 
 test('makeEnvelope 构造 publish.approval_request', () => {

@@ -51,7 +51,7 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'anchor.get': true, 'anchor.get.result': true, 'anchor.report': true,
   'action.result': true,
   'note.content': true, 'note.ack': true,
-  'browse.next': true, 'browse.scroll': true, 'note.open': true, 'note.close': true,
+  'note.open': true, 'note.close': true,
   'search.execute': true, 'session.end': true,
   'session.budget.request': true, 'session.budget': true,
   'risk.canDo': true, 'risk.canDo.result': true, 'risk.record': true, 'risk.record.result': true,
@@ -62,7 +62,7 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'edge.task.release': true, 'edge.task.released': true,
   'publish.approval_request': true, 'publish.approval_action': true, 'publish.approval_action.result': true,
   'publish.draft_image_remove': true, 'publish.draft_image_remove.result': true,
-  'publish.request': true, 'publish.result': true,
+  'publish.result': true,
   'publish.command': true, 'publish.command.result': true,
   'page.scroll': true, 'feed.refresh': true, 'pacing.update': true, 'interaction.like': true, 'interaction.collect': true, 'interaction.follow': true,
   'interaction.comment': true, 'interaction.like_comment': true,
@@ -92,8 +92,8 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal(PROTOCOL_VERSION, 2);
   });
 
-  it('AC-PROTO-02 消息类型总数为 96（增删消息须同步冻结契约 + 本断言）', () => {
-    assert.equal(ALL_TYPES.length, 96);
+  it('AC-PROTO-02 消息类型总数为 93（增删消息须同步冻结契约 + 本断言）', () => {
+    assert.equal(ALL_TYPES.length, 93);
   });
 
   it('AC-PROTO-03 每个消息类型都能构造合法信封且版本一致', () => {
