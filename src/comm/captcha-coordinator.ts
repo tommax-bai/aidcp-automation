@@ -22,7 +22,17 @@ import type {
 } from './protocol.js';
 import type { EdgePusher, EdgeSession } from './ws-server.js';
 import type { CaptchaAssistDetectedResult } from './captcha-assist.js';
+import type { BlockingOverlaySampleStore } from '../alerts/blocking-overlay-sample-store.js';
 import { isFacebookThrottleText } from './facebook-throttle-signals.js';
+
+/**
+ * 一次现场留存的结果，供告警正文展示。
+ * `stored=false` 时告警仍展示 captureId 并注明未存住——见 recordOverlaySample 的说明。
+ */
+interface OverlaySampleOutcome {
+  captureId: string;
+  stored: boolean;
+}
 
 export interface CaptchaAssistCoordinatorPort {
   onDetected(
@@ -55,6 +65,11 @@ export interface CaptchaCoordinatorDeps {
   cooldownMs?: number;
   /** 告警日志（V1 task 9.5）：飞书卡发送点写入、清除点 resolveByEdge。未注入则不落库（向后兼容）。 */
   alertStore?: Pick<AlertStore, 'raise' | 'resolveByEdge'>;
+  /**
+   * 阻断现场样本存储（change blocking-overlay-dom-capture）。未注入则不留样本，
+   * 但**响亮记录**——「样本一条都没有」必须能区分「没接线」与「没弹窗」。
+   */
+  overlaySampleStore?: Pick<BlockingOverlaySampleStore, 'record'>;
   /** 账号展示名读取。仅用于飞书卡片文案；账号归属仍使用 accountId。 */
   getAccountName?: (accountId: string) => string | null | undefined;
   /** 云端协助处置通道。未注入或未配置时飞书卡只发 notify-only 告警、不带协助链接。 */
@@ -81,6 +96,12 @@ export class CaptchaCoordinator {
   ): Promise<void> {
     const edgeId = payload.edgeId ?? session.edgeId;
     const accountId = payload.accountId ?? session.accountId;
+
+    // ⓪ 现场样本留存（change blocking-overlay-dom-capture）。
+    //    刻意排在**所有其他动作之前**，尤其在 maybeAlert 的去重冷却之前：冷却在落库动作之前
+    //    return，样本若挂在告警链路上，冷却窗内的上报就一条都留不下——而弹窗越随机越需要那些。
+    //    样本写入的成败 MUST NOT 影响风控迁移 / 暂停下发 / 告警投递（见 recordOverlaySample）。
+    const sampleOutcome = await this.recordOverlaySample(payload, session, edgeId, accountId);
 
     // ① 风控态迁移（云端单写，retire-default-account：按真实账号解析 controller，绝不回落全局 default）。
     //    captcha=强信号→restricted；unknown=弱信号→warned。缺账号=上游缺陷，honest-fail 跳过迁移 + 告警。
@@ -131,7 +152,72 @@ export class CaptchaCoordinator {
     });
 
     // ③ 去重冷却后发飞书告警。
-    await this.maybeAlert(payload, session, edgeId, accountId, status, assistActionUrl, throttled);
+    await this.maybeAlert(
+      payload,
+      session,
+      edgeId,
+      accountId,
+      status,
+      assistActionUrl,
+      throttled,
+      sampleOutcome,
+    );
+  }
+
+  /**
+   * 留存一条现场样本。
+   *
+   * 返回值供告警正文使用：运营收到卡片后靠 captureId 直接查到样本。**留存失败时仍返回
+   * captureId 并标注未存住**——省略它会使该次现场既查不到样本、也无从得知曾经采到过，
+   * 那是静默假失败。
+   */
+  private async recordOverlaySample(
+    payload: CaptchaDetectedPayload,
+    session: EdgeSession,
+    edgeId: string | undefined,
+    accountId: string | undefined,
+  ): Promise<OverlaySampleOutcome | undefined> {
+    const overlay = payload.overlay;
+    const captureId = overlay?.captureId?.trim();
+    // 无采集标识 = 旧边缘或未采集：不臆造标识、不写空样本，告警也不必展示无从查起的一行。
+    if (!overlay || !captureId) return undefined;
+    if (!this.deps.overlaySampleStore) {
+      // 未注入 ≠ 无事发生。响亮记录，否则「样本一条都没有」在运维侧看不出是没接线还是没弹窗。
+      this.logger.warn('[captcha] 现场样本存储未注入，样本未留存', { edgeId, captureId });
+      return { captureId, stored: false };
+    }
+    try {
+      const { inserted } = await this.deps.overlaySampleStore.record({
+        captureId,
+        ...(session.platform ? { platform: session.platform } : {}),
+        ...(edgeId ? { edgeId } : {}),
+        ...(accountId ? { accountId } : {}),
+        kind: payload.kind,
+        status: overlay.captureStatus ?? 'captured',
+        ...(overlay.firstDetectedUrl ?? payload.url
+          ? { url: overlay.firstDetectedUrl ?? payload.url }
+          : {}),
+        ...(overlay.text ? { text: overlay.text } : {}),
+        ...(overlay.capturedAt ? { capturedAt: overlay.capturedAt } : {}),
+        payload: overlay,
+      });
+      this.logger.log('[captcha] 现场样本已留存', {
+        edgeId,
+        captureId,
+        status: overlay.captureStatus,
+        containers: overlay.candidates?.length ?? 0,
+        // 重投命中幂等键时 inserted=false。如实记录，绝不宣称又存了一条。
+        inserted,
+      });
+      return { captureId, stored: true };
+    } catch (err) {
+      // 红线：留存失败记录、不静默吞；且 MUST NOT 阻断风控迁移 / 暂停下发 / 告警投递。
+      this.logger.error(
+        '[captcha] 现场样本留存失败:',
+        err instanceof Error ? err.message : String(err),
+      );
+      return { captureId, stored: false };
+    }
   }
 
   async onCleared(
@@ -182,6 +268,7 @@ export class CaptchaCoordinator {
     status: string,
     assistActionUrl?: string,
     throttled = false,
+    sample?: OverlaySampleOutcome,
   ): Promise<void> {
     if (!this.deps.deliverAlert && !this.deps.sendAlertCard) return;
     // change fb-throttle-popup-zh-frequency-copy：type 决定告警面貌，故先于冷却算出。
@@ -208,7 +295,7 @@ export class CaptchaCoordinator {
     }
     this.lastAlertAt.set(key, now);
 
-    const detail = buildCaptchaAlertDetail(payload, session, edgeId, status, Boolean(assistActionUrl));
+    const detail = buildCaptchaAlertDetail(payload, session, edgeId, status, Boolean(assistActionUrl), sample);
 
     // 告警落库（V1 task 9.5）：与飞书投递解耦——即便无群/发送失败，告警事件仍被记录。
     if (this.deps.alertStore) {
@@ -286,6 +373,7 @@ function buildCaptchaAlertDetail(
   edgeId: string | undefined,
   status: string,
   hasAssistAction: boolean,
+  sample?: OverlaySampleOutcome,
 ): string {
   const machine = session.machineLabel ?? edgeId ?? '未知机器';
   const firstUrl = payload.overlay?.firstDetectedUrl ?? payload.url;
@@ -297,11 +385,30 @@ function buildCaptchaAlertDetail(
     firstUrl ? `**首次检测 URL**：${firstUrl}` : '',
     payload.url && payload.url !== firstUrl ? `**上报时页面**：${payload.url}` : '',
     ...formatOverlaySnapshotLines(payload.overlay),
+    ...formatSampleLines(sample),
     hasAssistAction
       ? '可点击卡片按钮在云端协助页处理；远程连接该机器仍可作为兜底。处置后边缘会自动复检并恢复浏览。'
       : '请远程连到该机器人工处置；处置后边缘会自动恢复浏览。',
   ];
   return lines.filter(Boolean).join('\n');
+}
+
+/**
+ * 现场样本的可回溯行（change blocking-overlay-dom-capture）。
+ *
+ * 运营收到告警后靠这一行直接查到样本；没有它，告警与样本之间只剩「同一台机器 + 时间接近」
+ * 这种猜测，同机短时间内多次阻断就配不上号。
+ *
+ * **留存失败时仍展示标识并注明未存住**：省略标识会使该次现场既查不到样本、也无从得知曾经
+ * 采到过——那是静默假失败，比「存了但没存上」更难排查。
+ */
+function formatSampleLines(sample: OverlaySampleOutcome | undefined): string[] {
+  if (!sample) return [];
+  return [
+    sample.stored
+      ? `**现场样本**：\`${sample.captureId}\``
+      : `**现场样本**：\`${sample.captureId}\`（未存住，请按此标识查边缘日志）`,
+  ];
 }
 
 function formatOverlaySnapshotLines(overlay: BlockingOverlaySnapshotPayload | undefined): string[] {

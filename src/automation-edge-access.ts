@@ -66,6 +66,7 @@ import { allowsTransportWhenGateUnknown } from 'aidcp-kernel/kernel/transport-ga
 
 import type { AlertData } from './alerts/alert-notification.js';
 import type { AlertStore } from './alerts/index.js';
+import type { BlockingOverlaySampleStore } from './alerts/blocking-overlay-sample-store.js';
 import { PgAnchorCache } from './cache/pg-anchor-cache.js';
 import type { ResumeGateVerdict } from './comm/browser-standby.js';
 import { CaptchaAssistService } from './comm/captcha-assist.js';
@@ -194,6 +195,8 @@ export interface AutomationEdgeRiskPort {
   }): Promise<void>;
   /** 验证码告警落库口（批 B 的告警存储）。退化时缺席——那时告警只留日志。 */
   alertStore?: Pick<AlertStore, 'raise' | 'resolveByEdge'>;
+  /** 阻断现场样本存储（change blocking-overlay-dom-capture）。缺席只退化为不留样本。 */
+  overlaySampleStore?: Pick<BlockingOverlaySampleStore, 'record'>;
 }
 
 /**
@@ -527,6 +530,9 @@ export async function createAutomationEdgeAccess(
       });
     },
     ...(options.risk.alertStore ? { alertStore: options.risk.alertStore } : {}),
+    ...(options.risk.overlaySampleStore
+      ? { overlaySampleStore: options.risk.overlaySampleStore }
+      : {}),
     ...(options.getAccountName ? { getAccountName: options.getAccountName } : {}),
     assist: captchaAssist,
     // 群解析归接口域（通知路由 4a 之后由通知授权自己决定发到哪），本进程不臆造。

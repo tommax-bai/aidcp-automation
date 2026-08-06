@@ -39,6 +39,7 @@ import type { ConfigMirrorKey } from 'aidcp-kernel/kernel/config-mirror-bump-typ
 import { resolveOwnerPgConfig } from 'aidcp-kernel/kernel/pg-owner-connection-resolver.js';
 
 import { PgAlertStore } from './alerts/alert-store.js';
+import { PgBlockingOverlaySampleStore } from './alerts/blocking-overlay-sample-store.js';
 import { InteractionFeedStore } from './cache/interaction-feed-store.js';
 import { LikedNoteStore } from './cache/liked-note-store.js';
 import { ValuableCommentStore } from './cache/valuable-comment-store.js';
@@ -146,6 +147,7 @@ export interface AutomationRiskFoundation {
   /** 告警出口。绑定前后都可调：没绑上时照样 warn，绝不静默。 */
   raiseAlert(input: AutomationRiskAlertInput): Promise<void>;
   alertStore?: PgAlertStore;
+  overlaySampleStore?: PgBlockingOverlaySampleStore;
   likedNoteStore?: LikedNoteStore;
   valuableCommentStore?: ValuableCommentStore;
   interactionFeedStore?: InteractionFeedStore;
@@ -369,6 +371,14 @@ export async function createAutomationRiskFoundation(
   // 绑上之后 raiseAlert 才会落库；在此之前发生的告警已经以 warn 形式留过痕。
   alertSink = alertStore;
 
+  // 现场样本存储（change blocking-overlay-dom-capture）。初始化失败只退化为「不留样本」，
+  // 绝不阻断风控与告警——样本是留证，不是控制信号。
+  const overlaySampleStore = await initStore(
+    'PgBlockingOverlaySampleStore',
+    new PgBlockingOverlaySampleStore({ pool: options.ownerPool }),
+    '阻断现场样本不留存',
+  );
+
   const likedNoteStore = await initStore(
     'LikedNoteStore',
     new LikedNoteStore({ pool: options.ownerPool }),
@@ -392,6 +402,7 @@ export async function createAutomationRiskFoundation(
     resolvedController: (accountId) => resolved.get(accountId),
     raiseAlert,
     alertStore,
+    overlaySampleStore,
     likedNoteStore,
     valuableCommentStore,
     interactionFeedStore,

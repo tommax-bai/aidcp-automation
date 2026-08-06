@@ -1186,6 +1186,7 @@ export async function runAutomationMain(
       resolveController: (accountId) => riskFoundation.resolveController(accountId),
       raiseAlert: riskFoundation.raiseAlert,
       alertStore: riskFoundation.alertStore,
+      overlaySampleStore: riskFoundation.overlaySampleStore,
     },
     // 漏斗没起来时**字段省略**（工厂如实答 undefined）⇒ 处理器保持改动前行为：
     // 直接 emit、记账由订阅者承担。这是单体写明的回落，不是能力静默消失。

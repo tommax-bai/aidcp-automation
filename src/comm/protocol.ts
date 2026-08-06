@@ -1146,12 +1146,32 @@ export interface PersonaPersistResultPayload {
  * 云端据此置风控态(restricted)、停止下发浏览命令、按 (edgeId,account) 去重后通知飞书人工处理。
  * 注意：检测/暂停/恢复全在 edge 本地完成，本消息只是通知，云端从不被边缘动作回查。
  */
+/**
+ * 阻断遮罩内的一个可点击子元素（change blocking-overlay-dom-capture）。
+ *
+ * `rect` 是**硬要求而非可选优化**：同一平台上不同部位所需的点击方式不同（部分部位只有元素点击
+ * 有效，部分只有坐标点击有效），事先无法判断新形态属于哪一类，故两种方式所需的信息都必须留全。
+ * 只留文字的记录，后续照着写动作时会当场卡住。
+ */
+export interface BlockingOverlayClickablePayload {
+  tag: string;
+  role?: string;
+  text?: string;
+  label?: string;
+  testId?: string;
+  rect?: { x: number; y: number; width: number; height: number };
+  disabled?: boolean;
+}
+
 export interface BlockingOverlayDomFeaturePayload {
   tag: string;
   id?: string;
   className?: string;
   role?: string;
   ariaModal?: string;
+  ariaLabel?: string;
+  /** `data-testid` / `data-pagelet`：FB 的 class 是混淆的，这一格才是跨改版稳定的锚点。 */
+  testId?: string;
   selector?: string;
   text?: string;
   rect?: { x: number; y: number; width: number; height: number };
@@ -1160,6 +1180,12 @@ export interface BlockingOverlayDomFeaturePayload {
   iframeSrcs?: string[];
   hasClose?: boolean;
   matchReasons?: string[];
+  /** 容器内可点击子元素清单（按上限截断，见 clickablesTruncated）。 */
+  clickables?: BlockingOverlayClickablePayload[];
+  clickablesTruncated?: boolean;
+  /** 容器 HTML 原文（按上限截断）。信息量最大的一层，作用是覆盖字段设计未预料到的后续需求。 */
+  html?: string;
+  htmlTruncated?: boolean;
 }
 
 export interface BlockingOverlaySnapshotPayload {
@@ -1170,6 +1196,28 @@ export interface BlockingOverlaySnapshotPayload {
   text?: string;
   dom?: BlockingOverlayDomFeaturePayload;
   candidates: BlockingOverlayDomFeaturePayload[];
+  /**
+   * 由边缘生成的采集标识（change blocking-overlay-dom-capture），贯穿
+   * 「边缘诊断行 → 上报载荷 → 云端样本行 → 告警正文」四处。
+   *
+   * 刻意**不**由页面内容派生（如文案哈希）：同一形态的弹窗会反复出现，内容派生的标识会把多次
+   * 独立采集折叠成一条。也刻意**不**用云端自增主键：那样边缘日志永远对不上号，且样本落库失败
+   * 时连「曾经采到过」都无从得知。
+   */
+  captureId?: string;
+  /**
+   * 采集三态。MUST NOT 用同一个空结果同时表示「确实没有」与「没能采到」——
+   * `none_visible` = 采集跑通了、页面上确实没有符合口径的可见容器；
+   * `failed` = 采集本身没跑通（原因见 captureReason）。
+   */
+  captureStatus?: 'captured' | 'none_visible' | 'failed';
+  captureReason?: string;
+  viewport?: { width: number; height: number };
+  /** 入选口径命中的容器总数（未受 containers 上限截断前的数量）。 */
+  seenCount?: number;
+  /** 任一上限被触及（容器数 / 子元素数 / 字节数 / 访问预算）。 */
+  truncated?: boolean;
+  budgetExhausted?: boolean;
 }
 
 export interface CaptchaDetectedPayload {

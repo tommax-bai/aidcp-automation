@@ -234,10 +234,17 @@ export const REQUIRED_SCHEMA_VERSION = '0113_panel_hardening_indexes_content';
  * 注：`0114_facebook_global_policy_collapse_target`（change collapse-facebook-global-policy-target-column）
  * 是收缩：删列 + 换单例主键。它与 REQUIRED 一起抬，理由见上。
  */
+/*
+ * 注：`0115_blocking_overlay_samples`（change blocking-overlay-dom-capture）是纯扩张：
+ * 新建一张留证表 + 三个索引，不碰任何既有对象。**只抬 KNOWN_MAX、不抬 REQUIRED** ——
+ * 抬 REQUIRED 会让尚未跑 migrate 的既有环境在下次重启时一路判 behind 并拒绝启动，
+ * 而它们缺的只是一张留证表。缺表时该存储按能力探测自行退化为「不留样本」，
+ * 风控迁移与告警投递完全不受影响。
+ */
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
-// start-up contract is narrowed to its own scope. Machine-derived on every sync by
-// scripts/sync-split-repos:derived_schema_version — do not hand-edit.
-export const KNOWN_MAX_SCHEMA_VERSION = '0113_panel_hardening_indexes_content';
+// start-up contract is narrowed to its own scope. 原为 scripts/sync-split-repos 每次同步机器派生；
+// 事实源翻转（change invert-split-fact-source）后重放已双重封死、本仓即自身事实源，故改为手工维护。
+export const KNOWN_MAX_SCHEMA_VERSION = '0115_blocking_overlay_samples';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 

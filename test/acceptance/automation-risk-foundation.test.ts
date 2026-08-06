@@ -204,6 +204,9 @@ test('存储 init 失败要具名退化：说得出是哪个存储、因为什�
     'InteractionFeedStore',
     'LikedNoteStore',
     'PgAlertStore',
+    // change blocking-overlay-dom-capture：现场样本存储同样按名退化——探不到表就不留样本，
+    // 但 MUST 说得出是它、因为什么，绝不静默消失。
+    'PgBlockingOverlaySampleStore',
     'ValuableCommentStore',
   ]);
   for (const entry of foundation.degraded) {
