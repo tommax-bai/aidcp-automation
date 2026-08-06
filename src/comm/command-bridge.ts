@@ -53,6 +53,9 @@ export function edgeCommandToEnvelope(command: EdgeCommand): Envelope {
       return createEnvelope('identity.read_current', command.params ?? {});
     case 'identity_read_self_profile':
       return createEnvelope('identity.read_self_profile', command.params ?? {});
+    case 'state_read':
+      // 观察命令「问现状」（change add-state-observation-command）：captureId 随 params 透传。
+      return createEnvelope('state.read', command.params ?? {});
     case 'open_notifications':
       return createEnvelope('notification.open', command.params ?? {});
     case 'browse_notification_comments':

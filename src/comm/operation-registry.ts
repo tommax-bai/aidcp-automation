@@ -4,7 +4,10 @@ export type AutomationOperationClass =
   | 'automation_control'
   | 'platform_api_automation'
   | 'browser_lifecycle'
-  | 'page_automation';
+  | 'page_automation'
+  // 页面观察（change add-state-observation-command；与批 2 recategorize-nonpage-commands 协调，
+  // 落地时对齐类别词汇）：需要浏览器、纯读、不以页面账号名义动作。
+  | 'page_observation';
 
 /**
  * 平台留痕维（platform footprint）——「判错了会不会在平台上留痕」这条尺子的机读形态。
@@ -51,6 +54,12 @@ const pageAutomation = (
   platformFootprint: PlatformFootprint = 'account_visible',
 ): AutomationOperationDescriptor => ({
   category: 'page_automation', transport: 'automation_ws', identity: 'page_account', browser: 'required', platformFootprint,
+});
+// 页面观察（change add-state-observation-command）：identity 维非 page_account——观察询问的是
+// 「环境→账号」翻译层的现场事实，不代表页面账号动作；身份未落定时它 MUST 可用（正是解开
+// 「不知道浏览器里登着谁」终局的探针之一）。与边缘那份逐字段一致（跨仓 parity 闸守全字段）。
+const pageObservation = (): AutomationOperationDescriptor => ({
+  category: 'page_observation', transport: 'automation_ws', identity: 'bound_account', browser: 'required', platformFootprint: 'none',
 });
 
 /**
@@ -106,6 +115,8 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   // 静默拒发、投递数返回 0 ⇒ 那条自救通道结构上不成立。位置与边缘那份逐行对齐，便于人工比对。
   'identity.read_current': pageAutomation('none'),
   'identity.read_self_profile': pageAutomation('none'),
+  // 观察命令「问现状」（change add-state-observation-command）：纯读探针，一次带回当前面 + 登录身份。
+  'state.read': pageObservation(),
   'notification.open': pageAutomation('none'),
   'notification.browse_comments': pageAutomation('none'),
   'notification.browse_likes': pageAutomation('none'),

@@ -37,6 +37,7 @@ import {
   type NoteDetailPayload,
   type ProfileDetailPayload,
   type IdentityObservedPayload,
+  type StateReportPayload,
   type ActionCompletedPayload,
   type CaptchaDetectedPayload,
   type CaptchaClearedPayload,
@@ -898,6 +899,19 @@ export class DefaultMessageHandler implements MessageHandler {
         this.bus(session).emit('identity.observed.arrived', {
           observation,
           accountId: session.accountId,
+          ts: this.clock(),
+        });
+        return null;
+      }
+      // 观察命令「问现状」应答（change add-state-observation-command）：边缘按请求信封 id 回填
+      // env.id（信封关联）。这里把应答连同 envelopeId 转成事件，pending 表（StateObservationChannel）
+      // 按 payload.captureId 关联回请求方；只落通道，何时问 / 问完怎么改航向＝阶段四。
+      case 'state.report': {
+        const report = env.payload as StateReportPayload;
+        this.bus(session).emit('state.report.arrived', {
+          report,
+          accountId: session.accountId,
+          envelopeId: env.id,
           ts: this.clock(),
         });
         return null;

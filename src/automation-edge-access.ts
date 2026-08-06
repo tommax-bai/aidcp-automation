@@ -63,6 +63,7 @@ import type {
 } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import type { TextCompletionPort } from 'aidcp-kernel/kernel/llm-contract.js';
 import { allowsTransportWhenGateUnknown } from 'aidcp-kernel/kernel/transport-gate-exemptions.js';
+import type { TransportControlCategory } from 'aidcp-kernel/kernel/transport-gate-exemptions.js';
 
 import type { AlertData } from './alerts/alert-notification.js';
 import type { AlertStore } from './alerts/index.js';
@@ -316,10 +317,14 @@ export function createAutomationEdgeTransportGate(
     const gate = options.mirrors.automationGateForEdgeId(edgeId);
     if (gate === 'allowed') return true;
     if (gate === 'blocked') return false;
-    const allowed = allowsTransportWhenGateUnknown(
-      envelope.type,
-      automationOperationDescriptorFor(envelope.type)?.category ?? null,
-    );
+    // `page_observation`（观察探针，change add-state-observation-command）不在 kernel 传输闸的
+    // 类别词汇里：副本陈旧（unknown）时扣住它**不会造成死锁**——云端通道对没送出去的问询有自己的
+    // 诚实结局（not_sent / timeout），按「未列入即不放行」的保守侧映射成 null。kernel 词汇扩容
+    // 与批 2（recategorize-nonpage-commands）的类别改判一起串行走，本批不动 kernel。
+    const category = automationOperationDescriptorFor(envelope.type)?.category ?? null;
+    const kernelCategory: TransportControlCategory | null =
+      category === 'page_observation' ? null : category;
+    const allowed = allowsTransportWhenGateUnknown(envelope.type, kernelCategory);
     // 只有真的拦下来才算一次「因陈旧的拒绝」——放行的那些不记账，否则指标被纯控制面淹没。
     if (!allowed) {
       options.refusals.noteStaleRefusal(
