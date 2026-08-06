@@ -60,8 +60,6 @@ export type MessageType =
   // —— 浏览会话编排（ManagerAgent 驱动）——
   | 'note.content' // edge → cloud：上报一条笔记的标题/摘要/指标，供评估与概念抽取
   | 'note.ack'    // cloud → edge：确认收到笔记，异步处理中
-  | 'browse.next' // cloud → edge：滚动/滑到下一条笔记
-  | 'browse.scroll' // cloud → edge：在当前页面滚动
   | 'note.open' // cloud → edge：打开一条笔记
   | 'note.close' // cloud → edge：关闭当前笔记
   | 'search.execute' // cloud → edge：执行一次关键词搜索
@@ -91,7 +89,6 @@ export type MessageType =
   | 'publish.approval_action.result' // cloud → edge：返回审批动作受理结果
   | 'publish.draft_image_remove' // edge → cloud：客户端预览内删除待审稿件的某张配图
   | 'publish.draft_image_remove.result' // cloud → edge：返回删配图结果（含写后真态）
-  | 'publish.request' // cloud → edge：请求在浏览器中发布一篇帖子（v1 整页路径，地基阶段并行保留）
   | 'publish.result' // edge → cloud：发布结果回传（v1 整页路径）
   | 'publish.command' // cloud → edge：下发一条参数化发布原子指令（A 阶段1 指令驱动路径）
   | 'publish.command.result' // edge → cloud：回传单条发布指令的执行结果
@@ -890,16 +887,6 @@ export interface NoteContentPayload {
   author?: string;
 }
 
-/** 让边缘滑到下一条笔记（cloud → edge）。 */
-export interface BrowseNextPayload {
-  /** 调试说明（为什么继续刷） */
-  reason?: string;
-}
-
-export interface BrowseScrollPayload {
-  reason?: string;
-}
-
 export interface NoteOpenPayload {
   /** 独占评论任务的租约所有者；普通浏览省略。 */
   taskId?: string;
@@ -1384,18 +1371,6 @@ export interface CaptchaAssistClickResultPayload {
   inputMode?: 'click' | 'click_type';
   /** Honest type-report (change captcha-assist-text-answer). Never carries the answer itself. */
   typeReport?: CaptchaAssistTypeReportPayload;
-}
-
-/** 请求在浏览器中发布一篇帖子（cloud → edge）。 */
-export interface PublishRequestPayload {
-  /** 帖子标题（小红书标题） */
-  title: string;
-  /** 正文（200-500 字） */
-  content: string;
-  /** 话题标签（3-5 个） */
-  tags: string[];
-  /** 可选配图（本任务暂不实现） */
-  images?: string[];
 }
 
 /** 发布结果回传（edge → cloud）。 */
@@ -1972,8 +1947,6 @@ export interface PayloadMap {
   'action.result': ActionResultPayload;
   'note.content': NoteContentPayload;
   'note.ack': NoteAckPayload;
-  'browse.next': BrowseNextPayload;
-  'browse.scroll': BrowseScrollPayload;
   'note.open': NoteOpenPayload;
   'note.close': NoteClosePayload;
   'search.execute': SearchExecutePayload;
@@ -1999,7 +1972,6 @@ export interface PayloadMap {
   'edge.task.acquired': EdgeTaskAcquiredPayload;
   'edge.task.release': EdgeTaskReleasePayload;
   'edge.task.released': EdgeTaskReleasedPayload;
-  'publish.request': PublishRequestPayload;
   'publish.result': PublishResultPayload;
   'publish.command': PublishCommandPayload;
   'publish.command.result': PublishCommandResultPayload;
