@@ -393,6 +393,39 @@ export class PgRiskStore implements RiskStore, InteractionStore {
     );
   }
 
+  /**
+   * 按状态枚举只读列出风控状态行（change restricted-policy-global-config，扫描器输入）。
+   *
+   * 只回自动恢复判窗要的四列；**属主不在本表**（accounts.execution_target 是 api 域），
+   * 调用方 MUST 经归属端口逐账号问归属再决定是否动手，MUST NOT 在这里 join 过去
+   * （物理拆库后 automation 库里没有 accounts，saveState 曾因此整条炸掉）。
+   *
+   * 索引评估：risk_state 以 account_id 为主键、行数 = 账号量级（几十），status 过滤走顺序扫
+   * 的代价可忽略；为 5 分钟一次的后台扫描加 status 索引属过度设计，刻意不加。
+   */
+  async listByStatus(statuses: readonly RiskStatus[]): Promise<
+    Array<Pick<RiskState, 'accountId' | 'status' | 'lastSignalAt' | 'statusSince'>>
+  > {
+    if (statuses.length === 0) return [];
+    const { rows } = await this.pool.query<{
+      account_id: string;
+      status: RiskStatus;
+      last_signal_at: Date | null;
+      status_since: Date;
+    }>(
+      `SELECT account_id, status, last_signal_at, status_since
+         FROM risk_state WHERE status = ANY($1::text[])
+        ORDER BY account_id ASC`,
+      [statuses],
+    );
+    return rows.map((row) => ({
+      accountId: row.account_id,
+      status: row.status,
+      lastSignalAt: row.last_signal_at?.getTime() ?? null,
+      statusSince: row.status_since.getTime(),
+    }));
+  }
+
   async hasInteraction(accountId: string, noteId: string, action: InteractionAction): Promise<boolean> {
     const { rowCount } = await this.pool.query(
       `SELECT 1 FROM risk_interactions

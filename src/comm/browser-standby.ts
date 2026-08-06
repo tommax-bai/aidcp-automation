@@ -14,8 +14,9 @@ export const DEFAULT_BROWSER_STANDBY_WARMUP_MS = 90_000;
 /**
  * 「回访时刻」的默认跨度（change standby-covers-idle-waits）。
  *
- * 有一类停工**永远算不出恢复时刻**：风控 `frozen` / `restricted`（状态机里虽有恢复常量与 `recoverIfEligible`，
- * 但**全仓无人调用、也从不发出恢复信号**，唯一出口是运营手动改状态），以及周历整周全关（运营显式停号）。
+ * 有一类停工**永远算不出恢复时刻**：风控 `frozen`（自动恢复扫描器刻意不碰它，唯一出口是运营手动
+ * 改状态），以及周历整周全关（运营显式停号）。`restricted` 自 change restricted-policy-global-config
+ * 起**不再属于这一类**——自动恢复扫描器已接活，它有真实恢复时刻、走定时让位分支。
  *
  * 这类账号最该让出槽位，但 `wakeAt` **MUST NOT 伪造成「那时会恢复」**——没有任何代码会在那时恢复它。
  * 这里赋予的是**回访**语义：「多久之后回来再问一次」。它表达的是「边缘确实会在那时醒来」这一事实，而非
@@ -156,6 +157,19 @@ export function buildBrowserStandbyHint(
     const reason = decision.reason ?? '';
     // 冻结：等待无限期、解除不需要浏览器（唯一出口是运营在后台改状态）→ 最该让位的一类。
     if (reason === 'state:frozen') return revisit('risk_state:frozen', 'risk');
+    // 受限 + full_pause（change restricted-policy-global-config）：自动恢复接活后，restricted 是
+    // **有固定恢复时刻**的阻塞——按 explain 携带的剩余等待产出定时让位，MUST NOT 因不带 `quota:`
+    // 前缀落进下面的 hard_blocker（验证码一票否决已压在本函数最前，走到这里不会关掉待解弹窗的浏览器）。
+    if (reason === 'state:restricted') {
+      const waitMs = decision.retryAfterMs;
+      if (typeof waitMs !== 'number' || !Number.isFinite(waitMs)) {
+        // 算不出恢复时刻（防御分支，理论不可达）→ 让位 + 回访，绝不硬阻塞占着浏览器。
+        return revisit('risk_state:restricted', 'risk');
+      }
+      if (waitMs <= 0) return payload('no_wait', 0, false);
+      const eligible = waitMs >= config.minWaitMs;
+      return payload(eligible ? 'risk_state:restricted' : 'short_wait', waitMs, eligible, 'risk');
+    }
     // 需要浏览器才能解除的阻塞（验证码 / 登录 / 人工介入 / 未知）→ 绝不让位，保持既有诚实告警。
     if (!reason.startsWith('quota:')) return payload('hard_blocker', 0, false);
     return quotaHint();
@@ -169,6 +183,19 @@ export function buildBrowserStandbyHint(
     if (reason === 'not_ready') return payload('not_ready', 0, false);
     if (reason === 'risk_state') {
       const status = source.getState?.().status;
+      // 续场闸带真实恢复时刻（restricted，change restricted-policy-global-config）→ 定时让位；
+      // 带不出（frozen）→ 维持回访语义（wakeAt 只是「回来再问一次」，不是恢复承诺）。
+      if (typeof gate.resumeAt === 'number' && Number.isFinite(gate.resumeAt)) {
+        const waitMs = gate.resumeAt - generatedAt;
+        if (waitMs <= 0) return payload('no_wait', 0, false);
+        const eligible = waitMs >= config.minWaitMs;
+        return payload(
+          eligible ? `risk_state:${status ?? 'restricted'}` : 'short_wait',
+          waitMs,
+          eligible,
+          'risk',
+        );
+      }
       return revisit(status ? `risk_state:${status}` : 'risk_state', 'risk');
     }
     // 算不出恢复时刻（周历整周全关 = 运营显式停号）→ 同样让位 + 回访。

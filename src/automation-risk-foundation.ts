@@ -44,6 +44,7 @@ import { InteractionFeedStore } from './cache/interaction-feed-store.js';
 import { LikedNoteStore } from './cache/liked-note-store.js';
 import { ValuableCommentStore } from './cache/valuable-comment-store.js';
 import { PgRiskStore } from './risk/pg-risk-store.js';
+import type { RestrictedPolicyProvider } from './risk/restricted-policy.js';
 import { RiskControllerRegistry } from './risk/risk-controller-registry.js';
 import type { RiskController } from './risk/risk-controller.js';
 import type { AccountNurtureProvider, QuotaProvider } from './risk/types.js';
@@ -98,6 +99,12 @@ export interface AutomationRiskFoundationOptions {
   quotaProvider?: QuotaProvider;
   /** 养号事实。缺省 → 不叠冷启动 clamp（单体同款、明写的回落）。 */
   nurture?: AccountNurtureProvider;
+  /**
+   * 受限处置策略现读（change restricted-policy-global-config）。缺省 → 写死默认
+   * browse_only / 72h（明写的回落、零回归）——但缺席等于后台改的受限策略在判定侧
+   * 一个字不生效，所以缺席时本模块留一条具名 warn，装配方 MUST 显式接线。
+   */
+  restrictedPolicy?: RestrictedPolicyProvider;
   /**
    * 配置副本陈旧判定（批 C 装配）。**必填、无默认**：恒 false 的默认等于宣称副本永远新鲜。
    */
@@ -289,6 +296,12 @@ export async function createAutomationRiskFoundation(
         + '一个今天刚开始爬坡的账号会直接按满档跑；「运行方式」也判不出冷启动、恒回落底模式。',
     );
   }
+  if (!options.restrictedPolicy) {
+    logger.warn(
+      '[aidcp-automation] 受限处置策略未接线 —— 本进程按写死默认（browse_only / 72h）判定，'
+        + '后台受限策略页改的模式与恢复时长在这里一个都不生效（页面照常能改能存）。',
+    );
+  }
   if (options.quotaProvider && options.nurture) {
     logger.log(
       '[aidcp-automation] 配额判定输入已接线：限额配置 + 养号事实'
@@ -321,6 +334,7 @@ export async function createAutomationRiskFoundation(
       slowStartDisabled: options.slowStartDisabled ?? false,
       nurtureProvider: options.nurture,
       mirrorStale: options.mirrorStale,
+      restrictedPolicy: options.restrictedPolicy,
       // 写权丢失与记账断链**共用这一条现读通道**：闸设在全部自动路径的公共必经点上，
       // 覆盖是结构性的。新加一道独立闸必然漏接线。
       interactionBlockedProvider: interactionBlocked,

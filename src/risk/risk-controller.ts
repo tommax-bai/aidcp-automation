@@ -4,7 +4,8 @@
 import type { ConfigMirrorKey } from 'aidcp-kernel/kernel/config-mirror-bump-types.js';
 import { coldStartDailyCap } from './cold-start-planner.js';
 import { deriveWindowQuotas, deriveWindowQuotasFromDaily, minWindowQuotas, scaleWindowQuotas, zeroInteractionQuotas } from './quotas.js';
-import { createRiskState, RiskStateMachine } from './risk-state-machine.js';
+import type { RestrictedPolicyProvider } from './restricted-policy.js';
+import { createRiskState, recoveryAtMs, RiskStateMachine } from './risk-state-machine.js';
 import { SlidingWindowCounter, WINDOW_MS } from './sliding-window-counter.js';
 import { RISK_ACTIONS } from './types.js';
 import type { AccountNurtureProvider, QuotaProvider, RiskAction, RiskQuotaLevel, RiskSignal, RiskState, RiskStatus, RiskStore, RiskWindow, WindowQuotas } from './types.js';
@@ -75,6 +76,12 @@ export interface RiskControllerOptions {
    */
   interactionBlockedProvider?: (accountId: string) => boolean;
   /**
+   * 受限处置策略的现读来源（change restricted-policy-global-config）。
+   * 缺省（不注入）→ 写死默认 browse_only / 72h，行为与配置化之前逐位一致（零回归）。
+   * 契约同 QuotaProvider：**同步、零 IO、永不抛**；每次判定现读，MUST NOT 构造期快照。
+   */
+  restrictedPolicy?: RestrictedPolicyProvider;
+  /**
    * `risk_state` 条件写被数据库拒绝（非属主，影响 0 行）时的唯一正确处理入口
    * （change risk-state-cross-process-integrity，design D3/D4）。
    *
@@ -142,8 +149,9 @@ export class RiskController {
   private readonly accountId: string;
   private readonly clock: () => number;
   private readonly counter: SlidingWindowCounter;
-  private readonly stateMachine = new RiskStateMachine();
+  private readonly stateMachine: RiskStateMachine;
   private readonly store?: RiskStore;
+  private readonly restrictedPolicy?: RestrictedPolicyProvider;
   private readonly minViewsForLikeRatio: number;
   private readonly quotaProvider?: QuotaProvider;
   private readonly mirrorStale?: (mirrorKey: ConfigMirrorKey) => boolean;
@@ -161,6 +169,10 @@ export class RiskController {
     this.accountId = options.accountId ?? '__unbound__';
     this.clock = options.clock ?? Date.now;
     this.store = options.store;
+    this.restrictedPolicy = options.restrictedPolicy;
+    // 恢复窗口注入（design D4）：状态机的 recoverIfEligible 与本类的 recoveryAt / explain
+    // 读的是同一个 provider，「恢复时刻」三处消费口径同源。
+    this.stateMachine = new RiskStateMachine(options.restrictedPolicy);
     this.state = options.initialState ?? createRiskState(this.accountId, now);
     this.state.quotaLevel = options.quotaLevel ?? this.state.quotaLevel;
     this.counter = new SlidingWindowCounter({ clock: this.clock });
@@ -198,6 +210,19 @@ export class RiskController {
     }
     if (this.state.status === 'frozen') return { allowed: false, reason: 'state:frozen' };
     if (this.state.status === 'restricted' && action !== 'view') return { allowed: false, reason: 'state:restricted' };
+    // 受限对 view 的判定按全局处置策略（change restricted-policy-global-config，design D2）：
+    // - browse_only（默认）：保持豁免（放行 view），零回归；
+    // - full_pause：浏览也暂停——拒绝并携带剩余等待时长（恢复时刻 − now，同源函数推导），
+    //   经既有浏览前闸 / 会话启动闸 / 待机提示三个消费点生效，不新增命令闸。
+    // 策略每次判定现读（热生效）；未注入 provider 恒回落 browse_only（绝不 brick）。
+    if (this.state.status === 'restricted' && this.restrictedPolicy?.mode() === 'full_pause') {
+      const recoverAt = this.recoveryAt();
+      return {
+        allowed: false,
+        reason: 'state:restricted',
+        ...(recoverAt !== null ? { retryAfterMs: Math.max(0, recoverAt - this.clock()) } : {}),
+      };
+    }
     if (this.state.status === 'warned' && action === 'publish') return { allowed: false, reason: 'state:warned_publish_paused' };
 
     const quotas = this.effectiveQuotas();
@@ -307,6 +332,16 @@ export class RiskController {
 
   getState(): RiskState {
     return { ...this.state };
+  }
+
+  /**
+   * 当前状态的自动恢复时刻（change restricted-policy-global-config，design D4）。
+   * 经同源函数 recoveryAtMs 推导：restricted = max(statusSince, lastSignalAt) + 策略窗口现读；
+   * warned = 基点 + 7d；normal / frozen → null（frozen 无自动恢复，MUST NOT 伪造时刻）。
+   * view 拒绝的 retryAfterMs、续场闸的 resumeAt、扫描器判窗三处 MUST 同源（本方法 / 同一免费函数）。
+   */
+  recoveryAt(): number | null {
+    return recoveryAtMs(this.state, this.stateMachine.restrictedWindowMs());
   }
 
   /**

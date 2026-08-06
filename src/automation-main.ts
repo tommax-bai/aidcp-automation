@@ -171,10 +171,13 @@ import { PgRiskCommandService } from './risk/risk-command-service.js';
 import { GroupRouteStore } from './cache/group-route-store.js';
 import { QuotaConfigStore } from './config/quota-config-store.js';
 import { PacingConfigStore } from './config/pacing-config-store.js';
+import { RestrictedPolicyStore } from './config/restricted-policy-store.js';
 import { createQuotaConfigPanel } from './config/quota-config-facade.js';
 import { createPacingConfigPanel } from './config/pacing-config-facade.js';
 import { createSessionLimitPanel } from './config/session-config-facade.js';
 import { createResumeConfigPanel } from './config/resume-config-facade.js';
+import { createRestrictedPolicyPanel } from './config/restricted-policy-facade.js';
+import { RiskRecoverySweeper } from './risk/risk-recovery-sweeper.js';
 import { createAutomationContentSchedulingPort } from './automation-content-scheduling.js';
 import type { Envelope } from './comm/protocol.js';
 import {
@@ -480,12 +483,13 @@ export async function runAutomationMain(
     executionTarget,
   });
   // 闭集合**手写**：本仓没有那张镜像注册表（它归接口域），所以抄不了「按属主过滤」那两行。
-  // 这四个就是注册表里属于本域的全部；写口传了不在集合里的键会当场抛，不会静默入队。
+  // 这五个就是注册表里属于本域的全部；写口传了不在集合里的键会当场抛，不会静默入队。
   const AUTOMATION_OWNED_MIRROR_KEYS = new Set<string>([
     'quota_config',
     'pacing_floor_config',
     'session_config_global',
     'resume_config_global',
+    'restricted_policy_config',
   ]);
   const configMirrorOutboxBumper = new OutboxMirrorVersionBumper({
     allowedMirrorKeys: AUTOMATION_OWNED_MIRROR_KEYS,
@@ -857,6 +861,18 @@ export async function runAutomationMain(
   });
   await quotaConfigStore.init();
 
+  // 受限处置策略（change restricted-policy-global-config）：同为风控判定的现读输入，
+  // 同理必须早于风控底座——底座把它接进每账号 controller（view 闸 + 状态机恢复窗口）。
+  const restrictedPolicyStore = new RestrictedPolicyStore({
+    pool: ownerPool,
+    mirrorVersionBumper: configMirrorOutboxBumper,
+  });
+  await restrictedPolicyStore.init();
+  // 顺带补上续场配置镜像的启动装载：resumeConfigStore 此前**从未 init()**——面板写路径照常，
+  // 但重启后库内已配置的行不会载入内存镜像，调度器静默按写死默认跑、面板回显 overridden=false。
+  // 与其余三个配置存储对齐：构造 + 启动期显式 init（schema 探测 fail-closed + 载入镜像）。
+  await resumeConfigStore.init();
+
   // ── 4. 风控底座（⚠️ 构造期抢写者锁，归还在 dispose） ───────────────────────
   const riskFoundation = await createAutomationRiskFoundation({
     ownerPool,
@@ -871,6 +887,8 @@ export async function runAutomationMain(
     // 与冷启动的逐日天花板整段不叠，一个今天刚开始爬坡的号直接按满档跑。
     quotaProvider: quotaConfigStore,
     nurture: createAutomationNurtureProvider(mirrors),
+    // 受限处置策略（change restricted-policy-global-config）：view 闸模式 + 恢复窗口的现读来源。
+    restrictedPolicy: restrictedPolicyStore,
     // 慢启动的两个闸**必须在判定所在的进程里可读**：只写在另一个进程的配置里，等于运营手上
     // 那个「秒级止血」的开关对真正在放行动作的这一侧无效。
     coldStartRampEnabled: env.AIDCP_COLDSTART_RAMP === 'true',
@@ -895,6 +913,18 @@ export async function runAutomationMain(
     logger,
   });
   accountingRef.set(riskAccounting);
+
+  // ── 5b. 风控自动恢复扫描器（change restricted-policy-global-config；定时器留到 start()） ────
+  // 受限满 N 小时（策略现读）→ 经每账号 controller 单写通道恢复到 warned；warned 满 7d → normal。
+  // 属主隔离经 api 归属端口逐账号问；frozen 永不被扫。首扫会把存量满窗账号成批恢复（有带数日志）。
+  const riskRecoverySweeper = new RiskRecoverySweeper({
+    store: riskFoundation.riskStore,
+    resolveController: (accountId) => riskFoundation.resolveController(accountId),
+    executionTarget,
+    ownership: apiClients.accountOwnership,
+    restrictedPolicy: restrictedPolicyStore,
+    logger,
+  });
 
   // ── 6. 配置面审计中继（定时器留到 start()） ────────────────────────────────
   const auditRelay = createAutomationConfigAuditRelay({
@@ -1725,6 +1755,7 @@ export async function runAutomationMain(
     pacing: createPacingConfigPanel({ store: pacingConfigStore }),
     session: createSessionLimitPanel({ store: sessionConfigStore }),
     resume: createResumeConfigPanel({ store: resumeConfigStore }),
+    restrictedPolicy: createRestrictedPolicyPanel({ store: restrictedPolicyStore }),
   });
   // 验证码人工协助 + 授权前置（change restore-panel-capability-wiring）。
   // 现场快照 / scoped-token 秘密 / edge 实时循环都在本进程；面板在接口进程，
@@ -1812,6 +1843,9 @@ export async function runAutomationMain(
       configMirrorBumpRelay.start();
       interaction.start();
       llmUsageBuffer.start();
+      // 风控自动恢复扫描：就绪闸放行之后才起（构造期起等于让一个未放行的进程写风控状态）。
+      // 首扫立即执行——部署当天观察「存量受限账号成批恢复」就看这一轮的带数日志。
+      riskRecoverySweeper.start();
       // 委托任务的执行泵：**就绪闸放行之后**才起。构造期起等于让一个还没放行的进程去认领任务，
       // 而认领是有租约的 —— 认了又不干活，那条任务要等租约过期才轮得到别人。
       // `start()` 自己会先收敛旧进程遗留的 planning/executing claim，再开放泵。
@@ -1826,6 +1860,7 @@ export async function runAutomationMain(
     },
     async stop() {
       // 逆序停。
+      riskRecoverySweeper.stop();
       delegatedTaskWorker?.stop();
       auditRelay.stop();
       // 单体那侧没有这一步（进程退出即止），但本进程的 stop() 在测试与优雅重启里会真被调，
@@ -1848,6 +1883,7 @@ export async function runAutomationMain(
       // 带 ownsPool 守卫的那一族：注入池时是空操作，安全。
       await sessionConfigStore.close();
       await resumeConfigStore.close();
+      await restrictedPolicyStore.close();
     },
   };
 

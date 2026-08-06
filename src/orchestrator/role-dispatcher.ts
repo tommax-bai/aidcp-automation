@@ -427,6 +427,13 @@ export interface RoleDispatcherOptions {
    * 由 server 接线为 `() => riskController.getState().status`。
    */
   getRiskStatus?: () => RiskStatus;
+  /**
+   * 读取当前账号的风控自动恢复时刻（change restricted-policy-global-config）。
+   * 由 server 接线为 `() => riskController.recoveryAt()`（同源函数推导，与 view 拒绝的
+   * retryAfterMs、扫描器判窗口径一致）。缺省 / 返回 null = 算不出（frozen 或旧装配），
+   * 续场闸裁决不带 resumeAt、待机提示回落回访语义。
+   */
+  riskRecoveryAt?: () => number | null;
   /** 读取当前账号配额档（运营后台可配）；用于生效 tempo（与风控状态取更慢者）。缺省 normal。 */
   getQuotaLevel?: () => RiskQuotaLevel;
   /** 后台节奏兜底配置 provider；用于内容阅读/feed 新卡阅读的云端时长计算。 */
@@ -773,6 +780,7 @@ export class RoleDispatcher {
   private readonly rawSendCommand: (command: EdgeCommand) => void;
   private readonly clock: () => number;
   private readonly getRiskStatus: () => RiskStatus;
+  private readonly riskRecoveryAt: () => number | null;
   private readonly getQuotaLevel: () => RiskQuotaLevel;
   /** 上次已推送给边缘的 tempo 档位（去抖基线）；构造期初始化为握手同源值，仅档位实变时经 pacing.update 补推。 */
   private lastPushedTempo = 1.0;
@@ -1047,6 +1055,7 @@ export class RoleDispatcher {
     this.edgeTaskLeases = options.edgeTaskLeases;
     this.clock = options.clock ?? Date.now;
     this.getRiskStatus = options.getRiskStatus ?? (() => 'normal');
+    this.riskRecoveryAt = options.riskRecoveryAt ?? (() => null);
     this.getQuotaLevel = options.getQuotaLevel ?? (() => 'normal');
     // 去抖基线 = 握手 welcome 快照同源的初始 tempo（读风控态 + 配额档取更慢者、异常回落 1.0）：会话初不冗余补推，仅后续档位实变才发。
     try {
@@ -3718,9 +3727,10 @@ export class RoleDispatcher {
    * 这是「停工」与「让出浏览器槽位」两套判断接上线的那根线：过去只有风控配额耗尽会让边缘关浏览器，
    * 而排期外 / 时长满 / 冻结这几类停工完全不产出待机提示——账号安静下来了，浏览器却一直开着占 700MB。
    *
-   * `resumeAt` 缺省 = **算不出恢复时刻**（当前有二：风控 restricted/frozen——全仓无人调用自动恢复、唯一出口是
-   * 运营手动；周历整周全关——运营显式停号）。调用方 MUST NOT 据此伪造一个恢复时刻，见 browser-standby.ts 的
-   * 「回访」语义。
+   * `resumeAt` 缺省 = **算不出恢复时刻**（当前有二：风控 frozen——无自动恢复、唯一出口是运营手动；
+   * 周历整周全关——运营显式停号）。restricted 自 change restricted-policy-global-config 起携带真实
+   * 恢复时刻（自动恢复扫描器已接活）。调用方 MUST NOT 对缺省者伪造一个恢复时刻，见 browser-standby.ts
+   * 的「回访」语义。
    *
    * `not_ready`（调度未开 / 人设未绑 / 无续场配置提供者）**不是「没活干」**，而是「还没准备好」——它 MUST NOT
    * 产出待机提示（人设绑定等动作可能要用到浏览器）。
@@ -3741,8 +3751,15 @@ export class RoleDispatcher {
         : { blocked: true, reason: 'week' };
     }
     const risk = this.getRiskStatus();
-    // 撞风控不续。无恢复时刻：状态机虽有恢复常量与 recoverIfEligible，但全仓无人调用、也从不发恢复信号。
-    if (risk === 'restricted' || risk === 'frozen') return { blocked: true, reason: 'risk_state' };
+    // 撞风控不续。restricted 携带真实恢复时刻（change restricted-policy-global-config：自动恢复
+    // 扫描器已接活，恢复时刻经同源函数推导）；frozen 维持缺省（无自动恢复，MUST NOT 伪造时刻）。
+    if (risk === 'restricted') {
+      const resumeAt = this.riskRecoveryAt();
+      return typeof resumeAt === 'number' && Number.isFinite(resumeAt)
+        ? { blocked: true, reason: 'risk_state', resumeAt }
+        : { blocked: true, reason: 'risk_state' };
+    }
+    if (risk === 'frozen') return { blocked: true, reason: 'risk_state' };
     if (!this.resumeConfigProvider) return { blocked: true, reason: 'not_ready' }; // 无提供者 = 特性关
     const win = this.resumeConfigProvider.activeWindow();
     if (!isWithinActiveWindow(this.minuteOfDay(now), win)) {

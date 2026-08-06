@@ -2,7 +2,7 @@
  * automation-owned panel configuration facades over internal HTTP.
  *
  * The owner keeps validation, writes, mirror-version bumps, and write-after-read
- * truth. The api process only holds these kernel ports and never opens the four
+ * truth. The api process only holds these kernel ports and never opens the five
  * automation tables.
  */
 import type {
@@ -11,11 +11,15 @@ import type {
   PacingConfigSetResult,
   PanelPacingConfig,
   PanelQuotaConfig,
+  PanelRestrictedPolicy,
   PanelResumeConfig,
   PanelSessionLimits,
   QuotaConfigCatalogView,
   QuotaConfigPatchInput,
   QuotaConfigSetResult,
+  RestrictedPolicyPatchInput,
+  RestrictedPolicySetResult,
+  RestrictedPolicyView,
   ResumeConfigPatchInput,
   ResumeConfigSetResult,
   ResumeConfigView,
@@ -34,6 +38,8 @@ export const PANEL_CONFIG_ROUTES = {
   sessionSet: 'session-limits/set',
   resumeGetView: 'resume-config/get-view',
   resumeSet: 'resume-config/set',
+  restrictedPolicyGetView: 'restricted-policy/get-view',
+  restrictedPolicySet: 'restricted-policy/set',
 } as const;
 
 export interface PanelConfigOwnerPorts {
@@ -41,6 +47,12 @@ export interface PanelConfigOwnerPorts {
   pacing: PanelPacingConfig;
   session: PanelSessionLimits;
   resume: PanelResumeConfig;
+  /**
+   * Restricted-account disposal policy (change restricted-policy-global-config).
+   * Required, not optional: a missing wire must fail the owner's typecheck, not
+   * silently 404 the panel route.
+   */
+  restrictedPolicy: PanelRestrictedPolicy;
 }
 
 /** Register owner facades without duplicating validation or view construction. */
@@ -67,6 +79,13 @@ export function registerPanelConfigRoutes(
   server.register(PANEL_CONFIG_ROUTES.resumeSet, (args) => {
     const a = args as { patch: ResumeConfigPatchInput; updatedBy: string };
     return local.resume.set(a.patch, a.updatedBy);
+  });
+  server.register(PANEL_CONFIG_ROUTES.restrictedPolicyGetView, () =>
+    local.restrictedPolicy.getView(),
+  );
+  server.register(PANEL_CONFIG_ROUTES.restrictedPolicySet, (args) => {
+    const a = args as { patch: RestrictedPolicyPatchInput; updatedBy: string };
+    return local.restrictedPolicy.set(a.patch, a.updatedBy);
   });
 }
 
@@ -115,5 +134,20 @@ export class PanelResumeConfigHttpClient implements PanelResumeConfig {
 
   set(patch: ResumeConfigPatchInput, updatedBy: string): Promise<ResumeConfigSetResult> {
     return this.http.call<ResumeConfigSetResult>(PANEL_CONFIG_ROUTES.resumeSet, { patch, updatedBy });
+  }
+}
+
+export class PanelRestrictedPolicyHttpClient implements PanelRestrictedPolicy {
+  constructor(private readonly http: InternalHttpClient) {}
+
+  getView(): Promise<RestrictedPolicyView> {
+    return this.http.call<RestrictedPolicyView>(PANEL_CONFIG_ROUTES.restrictedPolicyGetView, {});
+  }
+
+  set(patch: RestrictedPolicyPatchInput, updatedBy: string): Promise<RestrictedPolicySetResult> {
+    return this.http.call<RestrictedPolicySetResult>(PANEL_CONFIG_ROUTES.restrictedPolicySet, {
+      patch,
+      updatedBy,
+    });
   }
 }

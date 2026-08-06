@@ -4,15 +4,18 @@ import type {
   PacingConfigCatalogView,
   PanelPacingConfig,
   PanelQuotaConfig,
+  PanelRestrictedPolicy,
   PanelResumeConfig,
   PanelSessionLimits,
   QuotaConfigCatalogView,
+  RestrictedPolicyView,
   ResumeConfigView,
   SessionLimitView,
 } from 'aidcp-kernel/kernel/config-panel-ports.js';
 import {
   PanelPacingConfigHttpClient,
   PanelQuotaConfigHttpClient,
+  PanelRestrictedPolicyHttpClient,
   PanelResumeConfigHttpClient,
   PanelSessionLimitsHttpClient,
   registerPanelConfigRoutes,
@@ -75,6 +78,13 @@ const resumeView: ResumeConfigView = {
   updatedAt: null,
   updatedBy: null,
 };
+const restrictedPolicyView: RestrictedPolicyView = {
+  mode: 'full_pause',
+  recoveryHours: 24,
+  overridden: true,
+  updatedAt: '2026-08-06T00:00:00.000Z',
+  updatedBy: 'erin',
+};
 
 async function withServer(
   ports: {
@@ -82,6 +92,7 @@ async function withServer(
     pacing: PanelPacingConfig;
     session: PanelSessionLimits;
     resume: PanelResumeConfig;
+    restrictedPolicy: PanelRestrictedPolicy;
   },
   run: (http: InternalHttpClient) => Promise<void>,
 ): Promise<void> {
@@ -95,7 +106,7 @@ async function withServer(
   }
 }
 
-test('四个配置 facade 的八个方法逐字段往返，updatedBy 与写后 owner 真态不丢', async () => {
+test('五个配置 facade 的十个方法逐字段往返，updatedBy 与写后 owner 真态不丢', async () => {
   const calls: unknown[] = [];
   await withServer({
     quota: {
@@ -126,11 +137,19 @@ test('四个配置 facade 的八个方法逐字段往返，updatedBy 与写后 o
         return { ok: true, view: resumeView };
       },
     },
+    restrictedPolicy: {
+      getView: async () => restrictedPolicyView,
+      set: async (patch, updatedBy) => {
+        calls.push(['restrictedPolicy', patch, updatedBy]);
+        return { ok: true, view: restrictedPolicyView };
+      },
+    },
   }, async (http) => {
     const quota = new PanelQuotaConfigHttpClient(http);
     const pacing = new PanelPacingConfigHttpClient(http);
     const session = new PanelSessionLimitsHttpClient(http);
     const resume = new PanelResumeConfigHttpClient(http);
+    const restrictedPolicy = new PanelRestrictedPolicyHttpClient(http);
 
     assert.deepEqual(await quota.getCatalog(), quotaView);
     assert.deepEqual(
@@ -152,12 +171,18 @@ test('四个配置 facade 的八个方法逐字段往返，updatedBy 与写后 o
       await resume.set({ dailyMaxSessions: 0 }, 'dave'),
       { ok: true, view: resumeView },
     );
+    assert.deepEqual(await restrictedPolicy.getView(), restrictedPolicyView);
+    assert.deepEqual(
+      await restrictedPolicy.set({ mode: 'full_pause', recoveryHours: 24 }, 'erin'),
+      { ok: true, view: restrictedPolicyView },
+    );
   });
   assert.deepEqual(calls, [
     ['quota', { tier: 'normal', action: 'like', daily: 10 }, 'alice'],
     ['pacing', { operation: 'action', minMs: 2_000, maxMs: 5_000 }, 'bob'],
     ['session', { activeWeekMask: '0'.repeat(168) }, 'carol'],
     ['resume', { dailyMaxSessions: 0 }, 'dave'],
+    ['restrictedPolicy', { mode: 'full_pause', recoveryHours: 24 }, 'erin'],
   ]);
 });
 
@@ -179,6 +204,10 @@ test('owner 读取失败向客户端抛错，绝不回默认、陈旧值或空�
     },
     resume: {
       getView: async () => resumeView,
+      set: async () => ({ ok: false, reason: 'no_valid_fields' }),
+    },
+    restrictedPolicy: {
+      getView: async () => restrictedPolicyView,
       set: async () => ({ ok: false, reason: 'no_valid_fields' }),
     },
   }, async (http) => {

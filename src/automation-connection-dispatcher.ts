@@ -434,6 +434,9 @@ export function createAutomationDispatcherFactory(
         : {}),
       // 指令级节奏：喂该账号实时风控状态，驱动 dwellMs / thinkMs 的 tempo。
       getRiskStatus: () => ctx.controller.getState().status,
+      // 受限的自动恢复时刻（change restricted-policy-global-config）：续场闸裁决据此携带 resumeAt，
+      // 与 view 拒绝的 retryAfterMs、恢复扫描器判窗同源（controller 内的同一推导）。
+      riskRecoveryAt: () => ctx.controller.recoveryAt(),
       getQuotaLevel: () => ctx.controller.getState().quotaLevel,
       pacingFloors: deps.pacingFloors,
       // 互动 / 浏览前风控闸：按该连接真实账号的 controller 判定，被拒诚实跳过。

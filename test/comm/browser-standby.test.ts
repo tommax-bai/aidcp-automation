@@ -286,3 +286,81 @@ test('browser-standby: 拿不到续场闸裁决（边缘离线）→ 退化为�
   assert.equal(hint.eligible, false);
   assert.equal(hint.reason, 'no_wait');
 });
+
+// ─── 受限定时让位（change restricted-policy-global-config）────────────────────────────────
+//
+// 自动恢复扫描器接活后，restricted 是**有固定恢复时刻**的阻塞：
+//  - full_pause：explain('view') 拒绝并带 retryAfterMs → 风控这一问就产出定时让位；
+//  - browse_only：view 放行、会话自然结束后续场闸拦停并带 resumeAt → 续场闸那一问产出定时让位。
+// frozen 维持回访；验证码一票否决仍压在所有来源之前（上面 needsBrowserToUnblock 那几条）。
+
+test('browser-standby: full_pause 受限 → 按 retryAfterMs 定时让位，MUST NOT 落 hard_blocker', () => {
+  const now = 1_000_000;
+  const retryAfterMs = 20 * 3_600_000; // 距恢复还有 20h
+  const hint = buildBrowserStandbyHint(
+    source({ allowed: false, reason: 'state:restricted', retryAfterMs, status: 'restricted' }),
+    { now, config: CFG },
+  );
+  assert.equal(hint.eligible, true);
+  assert.equal(hint.reason, 'risk_state:restricted');
+  assert.equal(hint.source, 'risk');
+  assert.equal(hint.waitMs, retryAfterMs);
+  assert.equal(hint.wakeAt, now + retryAfterMs, 'wakeAt = 恢复时刻（真实承诺，非回访）');
+});
+
+test('browser-standby: full_pause 受限但距恢复不足门槛 → short_wait 不让位', () => {
+  const hint = buildBrowserStandbyHint(
+    source({ allowed: false, reason: 'state:restricted', retryAfterMs: 2 * 60_000, status: 'restricted' }),
+    { now: 1_000, config: CFG },
+  );
+  assert.equal(hint.eligible, false);
+  assert.equal(hint.reason, 'short_wait');
+  assert.equal(hint.waitMs, 2 * 60_000);
+});
+
+test('browser-standby: browse_only 受限会话结束后 → 续场闸带 resumeAt，定时让位而非回访', () => {
+  const now = 1_000_000;
+  const resumeAt = now + 30 * 3_600_000;
+  const hint = buildBrowserStandbyHint(source({ allowed: true, status: 'restricted' }), {
+    now,
+    config: CFG,
+    resumeGate: { blocked: true, reason: 'risk_state', resumeAt },
+  });
+  assert.equal(hint.eligible, true);
+  assert.equal(hint.reason, 'risk_state:restricted');
+  assert.equal(hint.source, 'risk');
+  assert.equal(hint.wakeAt, resumeAt, 'wakeAt = 续场闸携带的真实恢复时刻');
+});
+
+test('browser-standby: 受限 + 验证码暂停中 → 一票否决仍压过定时让位', () => {
+  const hint = buildBrowserStandbyHint(
+    source({ allowed: false, reason: 'state:restricted', retryAfterMs: 20 * 3_600_000, status: 'restricted' }),
+    { now: 1_000, config: CFG, needsBrowserToUnblock: true },
+  );
+  assert.equal(hint.eligible, false, '绝不能关掉运维正要去解弹窗的浏览器');
+  assert.equal(hint.reason, 'hard_blocker');
+});
+
+test('browser-standby: frozen 维持回访语义（续场闸无 resumeAt，扫描器刻意不碰 frozen）', () => {
+  const hint = buildBrowserStandbyHint(source({ allowed: true, status: 'frozen' }), {
+    now: 1_000,
+    config: CFG,
+    resumeGate: { blocked: true, reason: 'risk_state' },
+  });
+  assert.equal(hint.eligible, true);
+  assert.equal(hint.reason, 'risk_state:frozen');
+  assert.ok(hint.waitMs >= 5 * 60_000, '回访跨度必须跨过门槛');
+});
+
+test('browser-standby: ui.snapshot 待机载荷字段零增减（本 change 不改协议）', () => {
+  const timed = buildBrowserStandbyHint(
+    source({ allowed: false, reason: 'state:restricted', retryAfterMs: 20 * 3_600_000, status: 'restricted' }),
+    { now: 1_000, config: CFG },
+  );
+  const legacy = buildBrowserStandbyHint(source({ waits: { hour: 42 * 60_000 } }), { now: 1_000, config: CFG });
+  const expectedKeys = [
+    'enabled', 'eligible', 'reason', 'waitMs', 'wakeAt', 'generatedAt', 'source', 'minWaitMs', 'warmupMs',
+  ].sort();
+  assert.deepEqual(Object.keys(timed).sort(), expectedKeys, '受限定时让位不得增删载荷字段');
+  assert.deepEqual(Object.keys(legacy).sort(), expectedKeys, '与既有配额路径字段集完全一致');
+});

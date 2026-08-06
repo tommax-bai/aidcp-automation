@@ -605,6 +605,16 @@
     "note": "§4.6.8：四类限频配置随消费方走"
   },
   {
+    "path": "src/config/restricted-policy-facade.ts",
+    "layer": "api",
+    "note": "change restricted-policy-global-config：面板外观，与 resume-config-facade 同形（api 面板层）"
+  },
+  {
+    "path": "src/config/restricted-policy-store.ts",
+    "layer": "automation",
+    "note": "change restricted-policy-global-config：受限处置策略配置随消费方（风控判定）走，与四类限频配置同形"
+  },
+  {
     "path": "src/config/resume-config-facade.ts",
     "layer": "api",
     "note": "§4.6.8：25 文件归 api，5 个限频配置文件例外"
@@ -965,6 +975,11 @@
     "note": "§4.7：RiskController 单写（19/19 automation）"
   },
   {
+    "path": "src/risk/restricted-policy.ts",
+    "layer": "automation",
+    "note": "change restricted-policy-global-config：受限处置策略消费侧接口（config→risk 单向，风控域）"
+  },
+  {
     "path": "src/risk/resume-limits.ts",
     "layer": "automation",
     "note": "§4.7：RiskController 单写（19/19 automation）"
@@ -998,6 +1013,11 @@
     "path": "src/risk/risk-counter-reconciler.ts",
     "layer": "automation",
     "note": "§4.7：RiskController 单写（19/19 automation）"
+  },
+  {
+    "path": "src/risk/risk-recovery-sweeper.ts",
+    "layer": "automation",
+    "note": "change restricted-policy-global-config：自动恢复扫描器，经 controller 单写通道（风控域）"
   },
   {
     "path": "src/risk/risk-state-machine.ts",
