@@ -154,6 +154,13 @@ import { registerPanelAutomationExtraRoutes } from './transport/panel-automation
 import { registerFacebookGroupOpsRoutes } from './transport/facebook-group-ops-http.js';
 import { registerClientEnvAutomationRoutes } from './transport/client-env-automation-http.js';
 import { PgClientEnvAutomationRead } from './interactions/client-env-automation-read.js';
+// **从本仓自己那份取**：本仓是 `src/transport/` 的属主，从共享包 import 传输原语会让同一进程里
+// 出现两个同名的错误类、`instanceof` 恒 false（闸在 test/acceptance/transport-single-copy）。
+// 两份拷贝的路由名不许漂 —— 那由 test/acceptance/offboard-transport-route-parity 逐条比对。
+import { registerOffboardMaterializationRoutes } from './transport/offboard-materialization-http.js';
+import { registerOffboardCleanupGrantRoutes } from './transport/offboard-cleanup-grant-http.js';
+import { PgOffboardMaterializationOps } from './interactions/offboard-write-adapter.js';
+import { PgOffboardCleanupGrantOps } from './interactions/offboard-cleanup-grant-ops.js';
 import {
   ConfigMirrorBumpRelay,
   OutboxMirrorVersionBumper,
@@ -1776,6 +1783,21 @@ export async function runAutomationMain(
   registerClientEnvAutomationRoutes(
     root.internalServer,
     new PgClientEnvAutomationRead({ pool: ownerPool }),
+  );
+  // 第九、十族：离场链上那两个**写**端口。读那族（第八族）补上之后，这两个还一直缺着，
+  // 而它们缺席的形态各不相同、都不是「某个字段为空」：
+  //   - 台账物化：接口进程侧调用点把异常收进 try/catch ⇒ 每一次删环境都退成「已受理、等对账」。
+  //     那条降级路径本身是设计好的（对账循环会捡回去），所以它**不报错也不告警**，
+  //     只是永远慢一拍、且只要对账没跑到就一直停在「已受理」。
+  //   - 清理授权签发 / 烧票：调用点没有兜底 ⇒ 直接 500，客户端拿不到清理票。
+  // 两个实现都自开事务、跑本进程的属主池（kernel 端口的硬约束：**不接调用方事务句柄**）。
+  registerOffboardMaterializationRoutes(
+    root.internalServer,
+    new PgOffboardMaterializationOps({ pool: ownerPool }),
+  );
+  registerOffboardCleanupGrantRoutes(
+    root.internalServer,
+    new PgOffboardCleanupGrantOps({ pool: ownerPool }),
   );
 
   // ── 16. 启动外壳 ────────────────────────────────────────────────────────

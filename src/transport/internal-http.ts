@@ -38,6 +38,26 @@ export const INTERNAL_HTTP_MAX_BODY_BYTES = 8 * 1024 * 1024;
 /** 路由处理器：入参与返回都是可 JSON 化的纯数据。 */
 export type RouteHandler = (args: unknown) => Promise<unknown>;
 
+/**
+ * 「挂得上一条路由」的最小面 —— 注册函数收它，**不收具体的服务器类**。
+ *
+ * 为什么必须是结构面：同一个传输骨架在共享包与各属主仓里各有一份运行时拷贝（本仓的常态），
+ * 而 {@link InternalHttpServer} 带私有字段 ⇒ 两份拷贝在类型上**互不兼容**
+ * （`Types have separate declarations of a private property`）。收具体类的后果不是编译期报个错就完了：
+ * 上一次遇到它的解法是把整个传输文件在属主仓再拷一份，于是路由名有了第二处手抄来源 ——
+ * 抄歪的表现是跨进程 404，只有两个进程一起跑起来才看得见。
+ *
+ * 收结构面则两份拷贝都满足，路由名照旧只有一处。
+ */
+export interface InternalRouteSink {
+  register(route: string, handler: RouteHandler): unknown;
+}
+
+/** 「发得出一次内部调用」的最小面。与 {@link InternalRouteSink} 同因：躲开跨拷贝的私有字段。 */
+export interface InternalCallSink {
+  call<T>(route: string, args: unknown): Promise<T>;
+}
+
 interface RegisteredRoute {
   handler: RouteHandler;
   bearerToken?: string;

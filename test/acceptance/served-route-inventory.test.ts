@@ -48,6 +48,8 @@ import { PANEL_CONFIG_ROUTES } from '../../src/transport/panel-config-http.js';
 import { PANEL_AUTOMATION_EXTRA_ROUTES } from '../../src/transport/panel-automation-extra-http.js';
 import { FACEBOOK_GROUP_OPS_ROUTES } from '../../src/transport/facebook-group-ops-http.js';
 import { CLIENT_ENV_AUTOMATION_ROUTES } from '../../src/transport/client-env-automation-http.js';
+import { OFFBOARD_MATERIALIZATION_ROUTES } from '../../src/transport/offboard-materialization-http.js';
+import { OFFBOARD_CLEANUP_GRANT_ROUTES } from '../../src/transport/offboard-cleanup-grant-http.js';
 
 /** 启动装配的两个文件：组装根 + 手写 main。路由只可能注册在这两处。 */
 const ASSEMBLY_FILES = ['../../src/automation-composition-root.ts', '../../src/automation-main.ts'];
@@ -108,6 +110,14 @@ const SERVED_FAMILIES: ReadonlyArray<{
   // 第八族：同因同果。缺它的表现是管理后台的环境页整页 500 —— 因为调用方那个端口
   // 是「未注入即当场抛」，不是「缺一个字段」。
   { registerFn: 'registerClientEnvAutomationRoutes', routes: CLIENT_ENV_AUTOMATION_ROUTES },
+  // 第九、十族：离场链上的两个写端口，与第八族同批补。缺席形态各不相同，都不是「少个字段」：
+  // 台账物化缺席时被调用方兜成「已受理、等对账」（不报错、不告警，只是每次删环境都慢一拍）；
+  // 清理授权那两条缺席时调用点没有兜底，客户端直接 500、拿不到清理票。
+  {
+    registerFn: 'registerOffboardMaterializationRoutes',
+    routes: OFFBOARD_MATERIALIZATION_ROUTES,
+  },
+  { registerFn: 'registerOffboardCleanupGrantRoutes', routes: OFFBOARD_CLEANUP_GRANT_ROUTES },
 ];
 
 async function assemblySource(): Promise<string> {
