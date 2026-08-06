@@ -57,6 +57,7 @@ import { CommentApprovalGate, type CommentApprovalNoticeInput, type CommentAppro
 import { ProfileOpener } from '../agents/profile-opener.js';
 import { ProfileBrowser } from '../agents/profile-browser.js';
 import { NicknameEnricher } from '../agents/nickname-enricher.js';
+import { StateObservationChannel, type StateObservationOutcome } from '../comm/state-observation.js';
 import { FollowAgent, FOLLOW_MIN_FANS_ENGAGEMENT_RATIO } from '../agents/follow-agent.js';
 import { SearchScroller, SEARCH_HOME_RETURN_AFTER } from '../agents/search-scroller.js';
 import { SearchEvaluator } from '../agents/search-evaluator.js';
@@ -713,7 +714,7 @@ export interface RoleDispatcherOptions {
 }
 
 export interface EdgeCommand {
-  action: 'scroll' | 'refresh' | 'open_note' | 'close_note' | 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'search' | 'back' | 'browse_images' | 'scroll_comments' | 'profile_open' | 'identity_read_current' | 'identity_read_self_profile' | 'open_notifications' | 'browse_notification_comments' | 'browse_notification_likes' | 'browse_notification_follows' | 'notification_back_home' | 'pacing_update' | 'session.end';
+  action: 'scroll' | 'refresh' | 'open_note' | 'close_note' | 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'search' | 'back' | 'browse_images' | 'scroll_comments' | 'profile_open' | 'identity_read_current' | 'identity_read_self_profile' | 'state_read' | 'open_notifications' | 'browse_notification_comments' | 'browse_notification_likes' | 'browse_notification_follows' | 'notification_back_home' | 'pacing_update' | 'session.end';
   params?: Record<string, unknown>;
   reason?: string;
 }
@@ -953,6 +954,8 @@ export class RoleDispatcher {
    * 但只由完整浏览器启动后的首批 page.cards{startupId} 触发，不由 hello/session_start 触发。
    */
   private nicknameEnricher?: NicknameEnricher;
+  /** 观察命令「问现状」的通道（change add-state-observation-command）：只落通道，何时问＝阶段四。 */
+  private stateObservation?: StateObservationChannel;
   /** 已下发占坑、待回执释放的互动键（按动作）：action.completed 据此 complete / releaseFailed。 */
   private readonly pendingInteractionKeys = new Map<GuardAction, string>();
   /**
@@ -2032,6 +2035,10 @@ export class RoleDispatcher {
 
   private isQuotaSleepBypass(command: EdgeCommand): boolean {
     return command.action === 'session.end'
+      // 观察命令「问现状」（change add-state-observation-command）：纯读探针、不占配额、不留痕。
+      // 它的用途正是恢复链——配额休眠 / 软暂停 / 评论支线在途时恰恰是最需要问真相的时刻，
+      // 被这些闸扣住等于把三段对账第③段在云端侧堵死。
+      || command.action === 'state_read'
       || this.isExcursionCommand(command.action)
       || (this.sessionContext.selfCaptureInFlight
         && (command.action === 'identity_read_current' || command.action === 'identity_read_self_profile'));
@@ -2081,6 +2088,18 @@ export class RoleDispatcher {
     const params = command.params ?? {};
     if (params.purpose === 'navigate') return true;
     return params.surface !== 'feed';
+  }
+
+  /**
+   * 问一次边缘现状（change add-state-observation-command）：下发 state.read 并有界等待 state.report。
+   * 结局三态诚实：reported（内容自表两态）/ timeout（边缘静默，绝不伪造成 unconfirmed 观察）/
+   * not_sent（出口未投递）。**本方法只提供能力，不含任何触发策略**——何时问、问完怎么改航向
+   * ＝阶段四（观测决策上移）。
+   */
+  askEdgeState(): Promise<StateObservationOutcome> {
+    const channel = this.stateObservation;
+    if (!channel) return Promise.resolve({ kind: 'not_sent' });
+    return channel.ask();
   }
 
   private sendCommand(command: EdgeCommand): boolean {
@@ -2996,6 +3015,20 @@ export class RoleDispatcher {
       clearTimeoutFn: this.clearTimeoutFn,
     });
     this.nicknameEnricher.subscribe();
+
+    // 观察命令「问现状」的云端通道（change add-state-observation-command）：pending 表按 captureId
+    // 关联（照 identity.read_current 的既有形态），应答另带边缘回填的信封 id。**只落通道**——
+    // 何时问、问完怎么改航向＝阶段四（观测决策上移），本类不含任何触发策略。
+    // 订阅与 nicknameEnricher 同为永久监听（会话拆除不影响通道可用性——恢复链问真相恰恰发生在
+    // 会话异常时）。
+    this.stateObservation = new StateObservationChannel({
+      sendStateRead: (captureId) => this.sendCommand({ action: 'state_read', params: { captureId } }),
+      setTimeoutFn: this.setTimeoutFn,
+      clearTimeoutFn: this.clearTimeoutFn,
+    });
+    this.eventBus.on('state.report.arrived', (p) =>
+      this.stateObservation?.onReport(p.report, p.envelopeId),
+    );
 
     // 角色订阅 / 指令翻译 / Edge 事件接线**推迟到会话激活**（startSession / restartSession）才进行——
     // 多租户（multi-account-node-support）：setup() 仅构造角色 + 注册「边缘 hello → 启动闸」入口监听，

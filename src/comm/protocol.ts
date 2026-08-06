@@ -122,6 +122,9 @@ export type MessageType =
   | 'profile.detail'       // Edge 上报个人主页数据
   | 'identity.observed'    // Edge 上报与采集命令关联的本人身份观察
   | 'action.completed'     // Edge 确认 action 执行完成
+  // —— 观察命令「问现状」（change add-state-observation-command，蓝图批 3；观察族、无平台段）——
+  | 'state.read'           // cloud → edge：主动询问浏览器现场（当前面 + 登录身份 + 采集时刻）；纯读
+  | 'state.report'         // edge → cloud：问现状应答；按信封 id 关联回请求，面与身份各自两态诚实
   // —— Persona 生成（edge → cloud 请求 / cloud → edge 响应，建号关键词驱动，客户自助 onboarding）——
   | 'persona.generate'        // edge → cloud：按关键词选择请求生成 persona
   | 'persona.generate.result' // cloud → edge：返回 soul.yaml/身份摘要或失败原因
@@ -1643,6 +1646,82 @@ export interface IdentityObservedPayload {
   pageEffect: 'none' | 'navigated_self_profile';
 }
 
+// —— 观察命令「问现状」（change add-state-observation-command，蓝图批 3）——
+//
+// 三段对账的第③段：云端对当前页的推定是开环的，报错之后需要一条能主动问真相的观察命令。
+// 观察族、无平台段（`域.动作`）：它询问的是「环境→账号」翻译层的现场事实，不以页面账号名义动作。
+
+/**
+ * cloud → edge：主动询问浏览器现场。纯读——执行 MUST NOT 触发任何导航、点击或滚动。
+ * `captureId` 由云端生成并要求原样回传（照 identity.read_current 的关联模式）；
+ * 应答另按信封 id 关联（state.report 的 envelope.id = 本请求的 envelope.id）。
+ */
+export interface StateReadPayload {
+  captureId: string;
+}
+
+/**
+ * 「问现状」应答里当前执行面的结构化取值（穷举，MUST NOT 裸字符串）。
+ * 与 Native 引擎现役页面分类词表同源（两平台分片都归一到这一张表）；每个平台只会产出其中一个
+ * 子集（如 XHS 无 group/reels 概念；FB 分类器今天归不进本表的面——Reels / 群组页——如实走
+ * 「没能确认 page_unrecognized」，MUST NOT 伪装成任何具体面）。
+ */
+export const STATE_SURFACE_KINDS = [
+  'home',
+  'explore',
+  'search',
+  'note_detail',
+  'profile',
+  'notification',
+  'publish',
+  'login',
+  'captcha',
+  'error',
+] as const;
+export type StateSurfaceKind = (typeof STATE_SURFACE_KINDS)[number];
+
+/**
+ * 面「没能确认」的具名原因（与「确认到在某面」两态分开，端到端保留，MUST NOT 压成一态）。
+ * - `browser_unavailable`：浏览器缺席（冷待机收起 / 尚未启动）。观察 MUST NOT 为此唤醒浏览器。
+ * - `executor_busy`：引擎执行权此刻在独占任务手里，读不到页面（非结构性，稍后重问可能不同）。
+ * - `probe_failed`：引擎读取失败（CDP 不健康 / 页面卡死 / 引擎退出）。
+ * - `page_unrecognized`：读到了页面但归不进任何已知面（含平台分类器未覆盖的面）。
+ */
+export type StateSurfaceUnconfirmedReason =
+  | 'browser_unavailable'
+  | 'executor_busy'
+  | 'probe_failed'
+  | 'page_unrecognized';
+
+/** 面观察两态：读得出 ⇒ confirmed + 穷举面；读不出 ⇒ unconfirmed + 具名原因。 */
+export type StateSurfaceObservation =
+  | { outcome: 'confirmed'; kind: StateSurfaceKind }
+  | { outcome: 'unconfirmed'; reason: StateSurfaceUnconfirmedReason };
+
+/** 身份「没能确认」的具名原因；`read_failed` = 就地身份读取失败（未登录 / 读不出稳定 id）。 */
+export type StateIdentityUnconfirmedReason =
+  | 'browser_unavailable'
+  | 'executor_busy'
+  | 'read_failed';
+
+/** 身份观察两态；confirmed 复用既有身份载荷口径（IdentityObservedPayload 的 accountId/nickname）。 */
+export type StateIdentityObservation =
+  | { outcome: 'confirmed'; accountId: string; nickname?: string }
+  | { outcome: 'unconfirmed'; reason: StateIdentityUnconfirmedReason };
+
+/**
+ * edge → cloud：「问现状」应答。一次带回当前面 + 当前登录身份观察 + 采集时刻。
+ * 按信封 id 关联回请求方，MUST NOT 靠事后回执顺带；面与身份各自两态，
+ * MUST NOT 把读不出来伪装成任何具体面 / 任何身份，也 MUST NOT 静默不答。
+ */
+export interface StateReportPayload {
+  captureId: string;
+  surface: StateSurfaceObservation;
+  identity: StateIdentityObservation;
+  /** 采集时刻（epoch ms，边缘时钟）。 */
+  observedAt: number;
+}
+
 // —— Edge 上报 Payload（edge → cloud）——
 
 export interface PageCardsPayload {
@@ -1997,6 +2076,9 @@ export interface PayloadMap {
   'profile.detail': ProfileDetailPayload;
   'identity.observed': IdentityObservedPayload;
   'action.completed': ActionCompletedPayload;
+  // 观察命令「问现状」（change add-state-observation-command）
+  'state.read': StateReadPayload;
+  'state.report': StateReportPayload;
   'notification.open': NotificationOpenPayload;
   'notification.browse_comments': NotificationBrowseCommentsPayload;
   'notification.browse_likes': NotificationBrowseLikesPayload;

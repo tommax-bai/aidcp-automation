@@ -8,6 +8,7 @@ import type {
   IdentityObservedPayload,
   NotificationItem,
   BrowserState,
+  StateReportPayload,
 } from '../comm/protocol.js';
 import type { MandatoryCommentApproval, MandatoryInteractionAction } from 'aidcp-kernel/kernel/soul-types.js';
 // NoteDetailData / ConceptPool 已抬入 kernel（change cloud-coupling-phase5）：两者都是 content 侧角色
@@ -174,6 +175,9 @@ export interface EventMap {
   'note.image_snapshot.arrived': { detail: NoteDetailData; accountId?: string; ts: number; noteIdKind?: 'permalink' | 'content_ref' };
   'profile.detail.arrived': { detail: ProfileDetailData; accountId?: string; ts: number };
   'identity.observed.arrived': { observation: IdentityObservedPayload; accountId?: string; ts: number };
+  // 观察命令「问现状」应答（change add-state-observation-command）：envelopeId = 边缘回填的请求信封 id
+  // （信封关联的事实证据）；payload 内另有 captureId 供角色层 pending 表关联（照 identity 采集形态）。
+  'state.report.arrived': { report: StateReportPayload; accountId?: string; envelopeId: string; ts: number };
   // noteId/observation（change platform-browse-protocol）：边缘从被点 article 派生的规范 id + 独立见证包（现读被点卡）。
   // 归账仲裁（handler.ts）与迁移落地确认 / observedSurface 审计（dispatcher）消费；缺省=今天行为（回落 currentNoteId）。
   'action.completed': {

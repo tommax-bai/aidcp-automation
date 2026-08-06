@@ -37,6 +37,8 @@ import {
   type PageCardsPayload,
   type HelloPayload,
   type BrowserStatusPayload,
+  type StateReadPayload,
+  type StateReportPayload,
 } from '../../src/comm/protocol.js';
 
 /**
@@ -70,6 +72,7 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'navigation.back': true, 'note.browse_images': true, 'note.scroll_comments': true, 'profile.open': true,
   'identity.read_current': true, 'identity.read_self_profile': true,
   'page.cards': true, 'note.detail': true, 'profile.detail': true, 'identity.observed': true, 'action.completed': true,
+  'state.read': true, 'state.report': true,
   'notification.open': true, 'notification.browse_comments': true, 'notification.browse_likes': true,
   'notification.browse_follows': true, 'notification.back_home': true,
   'notification.detected': true, 'notification.home': true, 'notification.items': true,
@@ -92,8 +95,8 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal(PROTOCOL_VERSION, 2);
   });
 
-  it('AC-PROTO-02 消息类型总数为 93（增删消息须同步冻结契约 + 本断言）', () => {
-    assert.equal(ALL_TYPES.length, 93);
+  it('AC-PROTO-02 消息类型总数为 95（增删消息须同步冻结契约 + 本断言）', () => {
+    assert.equal(ALL_TYPES.length, 95);
   });
 
   it('AC-PROTO-03 每个消息类型都能构造合法信封且版本一致', () => {
@@ -201,6 +204,44 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     const payload: InteractionCommentPayload = { noteId: 'n1', text: '评论正文', fastReturnToFeed: true };
     const back = parseEnvelope(JSON.stringify(makeEnvelope('interaction.comment', 'c-feed', 1700000000000, payload)));
     assert.equal((back!.payload as InteractionCommentPayload).fastReturnToFeed, true);
+  });
+
+  it('AC-PROTO-08C 问现状载荷往返存活：面两态 + 身份两态 + 采集时刻（change add-state-observation-command）', () => {
+    // typecheck 的 MessageType 穷举抓不到载荷字段漂移；面/身份的两态判别式（confirmed vs
+    // unconfirmed+原因）是本命令的核心契约，压成一态即静默假成功/假失败，故此往返断言兜底。
+    const read: StateReadPayload = { captureId: 'cap-1' };
+    const readBack = parseEnvelope(JSON.stringify(makeEnvelope('state.read', 'sr-1', 1700000000000, read)));
+    assert.equal((readBack!.payload as StateReadPayload).captureId, 'cap-1');
+
+    const confirmed: StateReportPayload = {
+      captureId: 'cap-1',
+      surface: { outcome: 'confirmed', kind: 'note_detail' },
+      identity: { outcome: 'confirmed', accountId: 'acc-1', nickname: '昵称' },
+      observedAt: 1700000000123,
+    };
+    const confirmedBack = parseEnvelope(JSON.stringify(makeEnvelope('state.report', 'sr-1', 1700000000123, confirmed)));
+    assert.deepEqual((confirmedBack!.payload as StateReportPayload).surface, { outcome: 'confirmed', kind: 'note_detail' });
+    assert.deepEqual(
+      (confirmedBack!.payload as StateReportPayload).identity,
+      { outcome: 'confirmed', accountId: 'acc-1', nickname: '昵称' },
+    );
+    assert.equal((confirmedBack!.payload as StateReportPayload).observedAt, 1700000000123);
+
+    const unconfirmed: StateReportPayload = {
+      captureId: 'cap-2',
+      surface: { outcome: 'unconfirmed', reason: 'page_unrecognized' },
+      identity: { outcome: 'unconfirmed', reason: 'read_failed' },
+      observedAt: 1700000000456,
+    };
+    const unconfirmedBack = parseEnvelope(JSON.stringify(makeEnvelope('state.report', 'sr-2', 1700000000456, unconfirmed)));
+    assert.deepEqual(
+      (unconfirmedBack!.payload as StateReportPayload).surface,
+      { outcome: 'unconfirmed', reason: 'page_unrecognized' },
+    );
+    assert.deepEqual(
+      (unconfirmedBack!.payload as StateReportPayload).identity,
+      { outcome: 'unconfirmed', reason: 'read_failed' },
+    );
   });
 
   it('AC-PROTO-09 persona 生成载荷可选字段往返存活（防两端静默漂移）', () => {

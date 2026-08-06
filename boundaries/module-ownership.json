@@ -490,6 +490,11 @@
     "note": "§4.7：Edge Gateway、协议、租约、验证码协助（15/15 automation）；protocol.ts 归属见 §10.9"
   },
   {
+    "path": "src/comm/state-observation.ts",
+    "layer": "automation",
+    "note": "change add-state-observation-command 登记现状（非重新裁决）：观察命令「问现状」的云端通道（pending 表 + 超时），src/comm/ 目录规则 newFile=inherit 本应由 boundaries:refresh 重放，但生成器因根目录未裁定文件拒跑（见 automation-content-scheduling.ts 条目注），按既有先例直接登记 automation"
+  },
+  {
     "path": "src/comm/ui-snapshot.ts",
     "layer": "automation",
     "note": "§4.7：Edge Gateway、协议、租约、验证码协助（15/15 automation）；protocol.ts 归属见 §10.9"
