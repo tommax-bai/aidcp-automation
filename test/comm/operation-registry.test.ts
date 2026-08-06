@@ -21,22 +21,20 @@ test('every registered Cloud push uses automation WebSocket and unknown active o
   assert.equal(automationOperationDescriptorFor('future.unclassified' as MessageType), null);
 });
 
-test('identity read commands are dispatchable — the edge identity-rescue allowlist needs them', () => {
-  // 边缘 src/client/identity-command-gate.ts 把这两条放进身份救援放行清单：运行期身份落到
-  // 「不知道浏览器里登着谁」的终局时，只有它们能问出当前登录身份、解开该终局。云端漏登记 ⇒
-  // 出口闸判 operation_unclassified 静默拒发（投递数 0）⇒ 该自救通道结构上不成立。
+test('identity read commands are dispatchable as page observation', () => {
+  // 运行期身份落到「不知道浏览器里登着谁」的终局时，只有这两条能问出当前登录身份、解开该终局。
+  // 云端漏登记 ⇒ 出口闸判 operation_unclassified 静默拒发（投递数 0）⇒ 自救通道结构上不成立。
   //
-  // 期望值**按引用取自本表里已知正确的同类命令**，不另抄一份字面量：抄一份就是第二实现，
-  // 它只能证明「我抄的和我抄的一样」，描述符字段真改了它照样绿。
-  const peer = automationOperationDescriptorFor('profile.open');
-  assert.notEqual(peer, null, 'profile.open 是本断言的参照锚点，它自己不能是 null');
-  for (const type of ['identity.read_current', 'identity.read_self_profile'] as MessageType[]) {
-    assert.deepEqual(
-      automationOperationDescriptorFor(type),
-      peer,
-      `${type} 必须可从云端下发，且分类与同类页面自动化命令一致`,
-    );
-  }
+  // recategorize-nonpage-commands 后它们不再与页面动作同类：类别是 page_observation
+  //（翻译层观察，identity=local_environment——身份未落定时 MUST 可用，这正是它们存在的意义）。
+  // 期望值按引用互为参照（两条必须同描述符），并锚定关键三维，不整抄 page 动作。
+  const a = automationOperationDescriptorFor('identity.read_current');
+  const b = automationOperationDescriptorFor('identity.read_self_profile');
+  assert.notEqual(a, null, 'identity.read_current 必须已登记（否则出口闸静默拒发）');
+  assert.deepEqual(a, b, '两条身份读取必须同描述符');
+  assert.equal(a?.category, 'page_observation');
+  assert.equal(a?.identity, 'local_environment');
+  assert.equal(a?.browser, 'required');
 });
 
 /**

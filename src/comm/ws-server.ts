@@ -24,6 +24,10 @@ import {
   type BrowserState,
 } from './protocol.js';
 import { automationOperationDescriptorFor } from './operation-registry.js';
+import { normalizePlatformId } from '../platform/index.js';
+
+/** 平台段枚举（与代码平台标识一致；词汇批 4 起命令名顶层段取值于此，与边缘入口闸同源同值）。 */
+const PLATFORM_SEGMENTS: ReadonlySet<string> = new Set(['xiaohongshu', 'facebook', 'wechat_channels']);
 
 /** 单条边缘连接的会话上下文 */
 export interface EdgeSession {
@@ -330,6 +334,25 @@ export class EdgeCloudServer implements EdgePusher {
 
   /** EdgePusher：把命令推给已上线边缘 */
   pushToEdges(env: Envelope, edgeId?: string): number {
+    // 平台段出口闸（edge-command-grammar「平台能力命令 MUST 以平台为顶层命名空间」的出口半边，
+    // change recategorize-nonpage-commands）：命令名首段 ∈ 平台枚举 ⇒ 必须等于目标边缘的平台。
+    // 本闸对现役词汇零命中（无平台段命令），置于未登记检查之前——发错平台的未来命令拿到精确拒因
+    // 而非 unclassified，且闸的活性今天即可被测试驱动（与边缘入口闸同序）。
+    {
+      const head = env.type.split('.')[0];
+      if (PLATFORM_SEGMENTS.has(head)) {
+        const target = edgeId
+          ? [...this.edges.values()].find((c) => c.session.edgeId === edgeId)
+          : undefined;
+        const targetPlatform = normalizePlatformId(target?.session.platform ?? '');
+        if (head !== targetPlatform) {
+          console.warn(
+            `[ws-server] platform_mismatch（type=${env.type} targetPlatform=${targetPlatform || 'unknown'}）：拒发（命中 0）`,
+          );
+          return 0;
+        }
+      }
+    }
     const operation = automationOperationDescriptorFor(env.type);
     if (!operation) {
       console.warn(`[ws-server] operation_unclassified（type=${env.type}）：拒绝下发到自动化通道`);

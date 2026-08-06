@@ -4,7 +4,13 @@ export type AutomationOperationClass =
   | 'automation_control'
   | 'platform_api_automation'
   | 'browser_lifecycle'
-  | 'page_automation';
+  | 'page_automation'
+  /**
+   * 类别按「在编址什么」裁决，不按「怎么执行」（edge-command-grammar 规则一；判例四的根治，
+   * change recategorize-nonpage-commands）。两类都需要浏览器，但**不以页面账号名义动作**。
+   */
+  | 'page_observation'
+  | 'environment_assist';
 
 /**
  * 平台留痕维（platform footprint）——「判错了会不会在平台上留痕」这条尺子的机读形态。
@@ -24,7 +30,7 @@ export type PlatformFootprint = 'account_visible' | 'none';
 export interface AutomationOperationDescriptor {
   category: AutomationOperationClass;
   transport: 'automation_ws';
-  identity: 'none' | 'bound_account' | 'page_account';
+  identity: 'none' | 'local_environment' | 'bound_account' | 'page_account';
   browser: 'forbidden' | 'on_demand' | 'required';
   platformFootprint: PlatformFootprint;
 }
@@ -51,6 +57,14 @@ const pageAutomation = (
   platformFootprint: PlatformFootprint = 'account_visible',
 ): AutomationOperationDescriptor => ({
   category: 'page_automation', transport: 'automation_ws', identity: 'page_account', browser: 'required', platformFootprint,
+});
+// 观察与处置：需要浏览器，但 identity 是 local_environment——不代表账号做任何事，
+// 身份未落定时也 MUST 可用（正是解开该终局的探针 / 通道）。取值与边缘逐字一致。
+const pageObservation = (): AutomationOperationDescriptor => ({
+  category: 'page_observation', transport: 'automation_ws', identity: 'local_environment', browser: 'required', platformFootprint: 'none',
+});
+const environmentAssist = (): AutomationOperationDescriptor => ({
+  category: 'environment_assist', transport: 'automation_ws', identity: 'local_environment', browser: 'required', platformFootprint: 'none',
 });
 
 /**
@@ -82,7 +96,7 @@ export const AUTOMATION_OPERATION_REGISTRY = {
 
   // v1 兼容路径：PlanStep 的 op 含 click / input，可承载点赞 / 评论等写手势 ⇒ 按最坏一档。
   'plan.response': pageAutomation(),
-  'session.end': pageAutomation('none'),
+  'session.end': automationControl('local_environment', 'none'),
   'note.open': pageAutomation('none'),
   'note.close': pageAutomation('none'),
   // 搜索只产生账号自见的隐式行为记录，不产生平台上可归因的新对象。
@@ -104,8 +118,8 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   // 登着谁」的终局时，节点拒绝一切代表该账号的动作，只放行读 / 收尾 / 救援命令，而这两条是**唯一**
   // 能问出当前登录身份、从而解开该终局的事实来源。云端这一侧漏登记 ⇒ 出口闸判 operation_unclassified
   // 静默拒发、投递数返回 0 ⇒ 那条自救通道结构上不成立。位置与边缘那份逐行对齐，便于人工比对。
-  'identity.read_current': pageAutomation('none'),
-  'identity.read_self_profile': pageAutomation('none'),
+  'identity.read_current': pageObservation(),
+  'identity.read_self_profile': pageObservation(),
   'notification.open': pageAutomation('none'),
   'notification.browse_comments': pageAutomation('none'),
   'notification.browse_likes': pageAutomation('none'),
@@ -116,10 +130,10 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   'publish.command': pageAutomation(),
   // 租约属准入不属留痕：acquire 不产生对象但身份未落定照拦（本维不决定放行的常驻反例）。
   'edge.task.acquire': pageAutomation('none'),
-  'edge.task.release': pageAutomation('none'),
-  'captcha.assist.capture': pageAutomation('none'),
+  'edge.task.release': automationControl('local_environment', 'none'),
+  'captcha.assist.capture': environmentAssist(),
   // 人工点位只作用于验证码浮层，解开阻断不产生该账号名下的新对象。
-  'captcha.assist.click': pageAutomation('none'),
+  'captcha.assist.click': environmentAssist(),
 } as const satisfies Partial<Record<MessageType, AutomationOperationDescriptor>>;
 
 export function automationOperationDescriptorFor(type: MessageType): AutomationOperationDescriptor | null {

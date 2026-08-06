@@ -28,16 +28,17 @@ const helloHandler: MessageHandler = {
       session.edgeId = p.edgeId;
       session.accountId = p.accountId;
       session.capabilities = p.capabilities;
+      session.platform = p.platform;
       return makeEnvelope('welcome', env.id, 0, { sessionId: session.sessionId, serverVersion: 't' });
     }
     return makeEnvelope('pong', env.id, 0, {});
   },
 };
 
-async function connectEdge(port: number, edgeId: string, accountId?: string, capabilities?: string[]): Promise<WebSocket> {
+async function connectEdge(port: number, edgeId: string, accountId?: string, capabilities?: string[], platform?: string): Promise<WebSocket> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
   await once(ws, 'open');
-  ws.send(JSON.stringify(makeEnvelope('hello', `h-${edgeId}`, 0, { edgeId, accountId, capabilities })));
+  ws.send(JSON.stringify(makeEnvelope('hello', `h-${edgeId}`, 0, { edgeId, accountId, capabilities, platform })));
   await once(ws, 'message'); // welcome：此时 edges 已登记
   return ws;
 }
@@ -282,4 +283,35 @@ test('带目标 edgeId 只命中目标那一台，其余在线 edge 不被误投
   wsA.close();
   wsB.close();
   await s.close();
+});
+
+
+/**
+ * 平台段出口闸活性证明（change recategorize-nonpage-commands）：现役词汇无平台段命令、闸休眠，
+ * 本用例是它活着的唯一证明——词汇批 4 改名后第一条真实平台段命令下发时，闸已经在了。
+ * 闸置于未登记检查之前（与边缘入口闸同序）：平台错配拿精确拒因，平台匹配的未登记名照走 unclassified。
+ */
+test('平台段出口闸：错配拒发（platform_mismatch）、匹配的未登记名走 unclassified——两道闸各答各的', async () => {
+  const server = new EdgeCloudServer({ port: 0, handler: helloHandler, clock: () => 0 });
+  await server.start();
+  const port = server.address()!;
+  const ws = await connectEdge(port, 'edge-pm', 'acc-1', undefined, 'xiaohongshu');
+  const warns: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warns.push(args.map(String).join(' ')); };
+  try {
+    const hitsMismatch = server.pushToEdges(makeEnvelope('facebook.fake.cmd' as never, 'pm-1', 0, {} as never), 'edge-pm');
+    assert.equal(hitsMismatch, 0, '发往 xiaohongshu 边缘的 facebook.* 必须命中 0');
+    assert.ok(warns.some((w) => w.includes('platform_mismatch') && w.includes('facebook.fake.cmd')),
+      '拒因必须是 platform_mismatch（精确拒因），而非 operation_unclassified');
+
+    const hitsUnreg = server.pushToEdges(makeEnvelope('xiaohongshu.fake.cmd' as never, 'pm-2', 0, {} as never), 'edge-pm');
+    assert.equal(hitsUnreg, 0, '平台对了但未登记，必须命中 0');
+    assert.ok(warns.some((w) => w.includes('operation_unclassified') && w.includes('xiaohongshu.fake.cmd')),
+      '平台匹配后落到未登记检查——两道闸各答各的问题');
+  } finally {
+    console.warn = origWarn;
+    ws.close();
+    await server.close();
+  }
 });
