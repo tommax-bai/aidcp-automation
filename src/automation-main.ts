@@ -863,15 +863,39 @@ export async function runAutomationMain(
 
   // 受限处置策略（change restricted-policy-global-config）：同为风控判定的现读输入，
   // 同理必须早于风控底座——底座把它接进每账号 controller（view 闸 + 状态机恢复窗口）。
+  //
+  // ⚠️ **init 失败降级、不拦启动（与 quota/pacing 刻意不同）**：迁移 0116 在 dev/ol 共库账本上
+  // 一执行就武装一次 OL 停机（OL 在跑构建 KNOWN_MAX < 0116，账本超前 → OL 下次重启拒启且重启前
+  // 零症状，先例=0115/簇150）。在 OL 构建追上之前，本表走「惰性态」：代码先上、迁移后执行。
+  // 缺表期间判定层按写死默认跑（browse_only / 72h，逐位等于配置化之前），面板写会响亮失败；
+  // 表建好后重启即满血。**MUST NOT 因这张 additive 配置表把整个自动化进程拦在门外**（spec：绝不 brick）。
   const restrictedPolicyStore = new RestrictedPolicyStore({
     pool: ownerPool,
     mirrorVersionBumper: configMirrorOutboxBumper,
   });
-  await restrictedPolicyStore.init();
+  try {
+    await restrictedPolicyStore.init();
+  } catch (err) {
+    logger.warn(
+      '[aidcp-automation] restricted_policy_config 探测失败（迁移 0116 未执行？）—— 受限处置策略'
+        + `按写死默认跑（browse_only / 72h），后台该项读写会失败；执行迁移后重启生效: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+    );
+  }
   // 顺带补上续场配置镜像的启动装载：resumeConfigStore 此前**从未 init()**——面板写路径照常，
   // 但重启后库内已配置的行不会载入内存镜像，调度器静默按写死默认跑、面板回显 overridden=false。
-  // 与其余三个配置存储对齐：构造 + 启动期显式 init（schema 探测 fail-closed + 载入镜像）。
-  await resumeConfigStore.init();
+  // 表自迁移 0020/0022 起存在于两环境，探测按理必过；这里仍只警不拦——为一张已存在多年的
+  // 配置表新增一条「探不到就不启动」的路径，是把补装载做成了新风险。
+  try {
+    await resumeConfigStore.init();
+  } catch (err) {
+    logger.warn(
+      `[aidcp-automation] resume_config_global 启动装载失败 —— 续场配置按写死默认跑，与本次修复前行为一致: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 
   // ── 4. 风控底座（⚠️ 构造期抢写者锁，归还在 dispose） ───────────────────────
   const riskFoundation = await createAutomationRiskFoundation({

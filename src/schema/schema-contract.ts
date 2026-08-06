@@ -244,8 +244,9 @@ export const REQUIRED_SCHEMA_VERSION = '0113_panel_hardening_indexes_content';
 /*
  * 注：`0116_restricted_policy_config`（change restricted-policy-global-config）同为纯扩张：
  * 新建受限处置策略的全局单行配置表，不碰任何既有对象。**只抬 KNOWN_MAX、不抬 REQUIRED**——
- * 缺表时该配置 store 的 init 按能力探测 fail-closed 报具名错误，而风控判定层的 provider
- * 逐项回落写死默认（browse_only / 72h），与配置化之前逐位一致。
+ * 缺表时该配置 store 的 init 在组装根具名警告并降级（判定层 provider 逐项回落写死默认
+ * browse_only / 72h，与配置化之前逐位一致；面板读写响亮失败），MUST NOT 拦启动——
+ * 迁移在共库账本上执行的时机受 OL 构建版本约束（0115/簇150 同款惰性态）。
  */
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
 // start-up contract is narrowed to its own scope. 原为 scripts/sync-split-repos 每次同步机器派生；
