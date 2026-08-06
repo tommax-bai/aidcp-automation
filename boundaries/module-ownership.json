@@ -1040,6 +1040,11 @@
     "note": "【待定稿裁决】同上：只被 src/schema/ 内部、scripts/ 与测试导入，不产生跨层边。请求回写 §4.7 见 docpatch R4"
   },
   {
+    "path": "src/schema/migration-apply.ts",
+    "layer": "automation",
+    "note": "【待定稿裁决】change restore-derived-migration-executability 新增：单条迁移的施加动作（执行范围内发 SQL、范围外只写账本行）。层随 src/schema/ 目录规则判 automation：唯一写的表是每个库都有的账本表 schema_migrations，不产生跨属主写。只被 scripts/migrate.ts 与测试导入，不产生跨层边。请求回写 §4.7 见 docpatch R4"
+  },
+  {
     "path": "src/schema/migration-files.ts",
     "layer": "automation",
     "note": "【待定稿裁决】同上：只被 src/schema/ 内部、scripts/ 与测试导入，不产生跨层边。请求回写 §4.7 见 docpatch R4"
