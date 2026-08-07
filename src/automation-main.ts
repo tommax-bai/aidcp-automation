@@ -1732,7 +1732,7 @@ export async function runAutomationMain(
       return {
         delivered: edgeAccessRef.get().server.pushToEdges(
           makeEnvelope(
-            'interaction.runtime.controls',
+            'wechat_channels.inbox.runtime.controls',
             `runtime-controls-${accountId}-${version}`,
             Date.now(),
             payload,

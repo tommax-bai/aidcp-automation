@@ -266,7 +266,7 @@ export class InteractionSendOrchestrator {
     let sent: number;
     try {
       sent = this.deps.pusher.pushToEdges(
-        makeEnvelope('interaction.reply.send', created.attempt.id, now, payload), edgeId,
+        makeEnvelope('wechat_channels.inbox.reply.send', created.attempt.id, now, payload), edgeId,
       );
     } catch {
       await this.deps.store.markDispatchAmbiguous(input.accountId, input.envKey, created.attempt.id,
@@ -298,7 +298,7 @@ export class InteractionSendOrchestrator {
     for (const ref of refs) byEnv.set(ref.envKey, [...(byEnv.get(ref.envKey) ?? []), ref]);
     for (const [envKey, scoped] of byEnv) {
       const reconcileId = randomUUID();
-      const sent = this.deps.pusher.pushToEdges(makeEnvelope('interaction.reply.reconcile', reconcileId, this.clock(), {
+      const sent = this.deps.pusher.pushToEdges(makeEnvelope('wechat_channels.inbox.reply.reconcile', reconcileId, this.clock(), {
         reconcileId, envKey, accountId, platform: INTERACTION_PLATFORM,
         attempts: scoped.map((ref) => ({ cloudStatus: ref.status, command: ref.command })),
         requestedAt: this.clock(),
@@ -335,7 +335,7 @@ export class InteractionSendOrchestrator {
     if (!edgeId) throw new InteractionError('INTERACTION_UPSTREAM_UNAVAILABLE', '账号当前没有在线 Edge。', 503, true);
     const payload: InteractionSyncRequestPayload = { ...input, requestId, platform: INTERACTION_PLATFORM, requestedAt: this.clock() };
     await options?.beforeDispatch?.();
-    if (this.deps.pusher.pushToEdges(makeEnvelope('interaction.sync.request', requestId, this.clock(), payload), edgeId) !== 1) {
+    if (this.deps.pusher.pushToEdges(makeEnvelope('wechat_channels.inbox.sync.request', requestId, this.clock(), payload), edgeId) !== 1) {
       throw new InteractionError('INTERACTION_UPSTREAM_UNAVAILABLE', '同步请求未送达唯一 Edge。', 503, true);
     }
     return requestId;
@@ -351,7 +351,7 @@ export class InteractionSendOrchestrator {
     const edgeId = this.deps.pusher.resolveEdgeIdForAccount?.(input.accountId) ?? null;
     if (!edgeId) throw new InteractionError('INTERACTION_UPSTREAM_UNAVAILABLE', '账号当前没有在线 Edge。', 503, true);
     const payload: InteractionAuthReopenPayload = { ...input, requestId, platform: INTERACTION_PLATFORM, requestedAt: this.clock() };
-    if (this.deps.pusher.pushToEdges(makeEnvelope('interaction.auth.reopen', requestId, this.clock(), payload), edgeId) !== 1) {
+    if (this.deps.pusher.pushToEdges(makeEnvelope('wechat_channels.inbox.auth.reopen', requestId, this.clock(), payload), edgeId) !== 1) {
       throw new InteractionError('INTERACTION_UPSTREAM_UNAVAILABLE', '登录重开请求未送达唯一 Edge。', 503, true);
     }
     return requestId;
@@ -379,7 +379,7 @@ export class InteractionSendOrchestrator {
       platform: INTERACTION_PLATFORM,
       requestedAt: this.clock(),
     };
-    if (this.deps.pusher.pushToEdges(makeEnvelope('interaction.browser.control', requestId, this.clock(), payload), edgeId) !== 1) {
+    if (this.deps.pusher.pushToEdges(makeEnvelope('wechat_channels.inbox.browser.control', requestId, this.clock(), payload), edgeId) !== 1) {
       throw new InteractionError('INTERACTION_UPSTREAM_UNAVAILABLE', '浏览器控制请求未送达唯一 Edge。', 503, true);
     }
     return requestId;

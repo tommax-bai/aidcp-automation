@@ -75,24 +75,24 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   // —— 控制与心跳：只动边缘本地投影 / 节奏 / outbox 确认，不触任何平台对象 ——
   'ui.push_snapshot': automationControl('bound_account', 'none'),
   'pacing.update': automationControl('bound_account', 'none'),
-  'interaction.sync.ack': automationControl('bound_account', 'none'),
-  'interaction.reply.result.ack': automationControl('bound_account', 'none'),
-  'interaction.offboard.ack': automationControl('bound_account', 'none'),
-  'interaction.runtime.controls': automationControl('bound_account', 'none'),
+  'wechat_channels.inbox.sync.ack': automationControl('bound_account', 'none'),
+  'wechat_channels.inbox.reply.result.ack': automationControl('bound_account', 'none'),
+  'wechat_channels.inbox.offboard.ack': automationControl('bound_account', 'none'),
+  'wechat_channels.inbox.runtime.controls': automationControl('bound_account', 'none'),
   ping: automationControl('none', 'none'),
   pong: automationControl('none', 'none'),
 
   // 拉取同步：边缘全部端点为 observed_read_only，纯读不写平台。
-  'interaction.sync.request': platformApiAutomation('none'),
+  'wechat_channels.inbox.sync.request': platformApiAutomation('none'),
   // 真发出私信——唯一的 API 直写留痕命令（且不经页面身份闸，缺口已在 change 里登记待议）。
-  'interaction.reply.send': platformApiAutomation(),
+  'wechat_channels.inbox.reply.send': platformApiAutomation(),
   // 协议注释：只核验既有 attempt，绝不发起新平台写。
-  'interaction.reply.reconcile': platformApiAutomation('none'),
+  'wechat_channels.inbox.reply.reconcile': platformApiAutomation('none'),
   // 撤权后清理边缘本地加密会话；协议注释：结果可重放。
-  'interaction.offboard.command': platformApiAutomation('none'),
+  'wechat_channels.inbox.offboard.command': platformApiAutomation('none'),
 
-  'interaction.auth.reopen': browserLifecycle('none'),
-  'interaction.browser.control': browserLifecycle('none'),
+  'wechat_channels.inbox.auth.reopen': browserLifecycle('none'),
+  'wechat_channels.inbox.browser.control': browserLifecycle('none'),
 
   // v1 兼容路径：PlanStep 的 op 含 click / input，可承载点赞 / 评论等写手势 ⇒ 按最坏一档。
   'plan.response': pageAutomation(),

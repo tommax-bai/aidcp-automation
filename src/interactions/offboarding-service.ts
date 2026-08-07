@@ -17,7 +17,7 @@ export class InteractionOffboardingService {
     let sentCount = 0;
     for (const item of pending) {
       const now = (this.deps.clock ?? Date.now)();
-      const sent = this.deps.pusher.pushToEdges(makeEnvelope('interaction.offboard.command', item.offboardId, now, {
+      const sent = this.deps.pusher.pushToEdges(makeEnvelope('wechat_channels.inbox.offboard.command', item.offboardId, now, {
         offboardId: item.offboardId, envKey: item.envKey, accountId: item.accountId,
         platform: INTERACTION_PLATFORM, reason: item.reason, requestedAt: item.requestedAt,
         expiresAt: item.purgeDueAt,

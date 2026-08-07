@@ -83,7 +83,7 @@ test('确定态 blocked 一律不放行，且**不记**「因陈旧的拒绝」�
 test('blocked 下删除相关的两类必须穿透，否则 tombstone 前会被环境删除闸自锁', () => {
   const { gate } = gateFixture('blocked');
   assert.equal(gate(envelopeOf('session.end'), 'ads-1'), true);
-  assert.equal(gate(envelopeOf('interaction.offboard.command'), 'ads-1'), true);
+  assert.equal(gate(envelopeOf('wechat_channels.inbox.offboard.command'), 'ads-1'), true);
 });
 
 test('结构断言：unknown 档的放行判定只许有一份（取 kernel 那一份，不许本仓再写）', () => {

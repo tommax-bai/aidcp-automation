@@ -144,21 +144,21 @@ export type MessageType =
   | 'persona.persist'         // edge → cloud：请求持久化确认后的 soul.yaml
   | 'persona.persist.result'  // cloud → edge：持久化结果
   // —— 入站互动管理（视频号 v1；双方确认 interaction_inbox_v1 后启用）——
-  | 'interaction.auth.status' // edge → cloud：auth/browser/capability/identity 真态
-  | 'interaction.sync.batch' // edge → cloud：可重放的增量同步批次
-  | 'interaction.sync.ack' // cloud → edge：整批 accepted/duplicate/rejected
-  | 'interaction.reply.result' // edge → cloud：confirmed/failed/ambiguous 发送真态
-  | 'interaction.reply.result.ack' // cloud → edge：持久结果确认；ack 后才清 Edge outbox
-  | 'interaction.reply.reconcile' // cloud → edge：只核验既有 attempt，绝不发起新平台写
-  | 'interaction.reply.reconcile.result' // edge → cloud：重放/缺失/绑定冲突观察
-  | 'interaction.sync.request' // cloud → edge：触发按 channel/scope 同步
-  | 'interaction.reply.send' // cloud → edge：带稳定幂等键的文本回复
-  | 'interaction.auth.reopen' // cloud → edge：请求原环境重开登录 sidecar
-  | 'interaction.browser.control' // cloud → edge：授权有效时打开可见 sidecar / 转回 API-only
-  | 'interaction.runtime.controls' // cloud → edge：按账号下发版本化有效能力
-  | 'interaction.offboard.command' // cloud → edge：撤权后清理所属加密会话
-  | 'interaction.offboard.result' // edge → cloud：可重放的凭证清理结果
-  | 'interaction.offboard.ack' // cloud → edge：结果持久化确认；ack 后清 Edge outbox
+  | 'wechat_channels.inbox.auth.status' // edge → cloud：auth/browser/capability/identity 真态
+  | 'wechat_channels.inbox.sync.batch' // edge → cloud：可重放的增量同步批次
+  | 'wechat_channels.inbox.sync.ack' // cloud → edge：整批 accepted/duplicate/rejected
+  | 'wechat_channels.inbox.reply.result' // edge → cloud：confirmed/failed/ambiguous 发送真态
+  | 'wechat_channels.inbox.reply.result.ack' // cloud → edge：持久结果确认；ack 后才清 Edge outbox
+  | 'wechat_channels.inbox.reply.reconcile' // cloud → edge：只核验既有 attempt，绝不发起新平台写
+  | 'wechat_channels.inbox.reply.reconcile.result' // edge → cloud：重放/缺失/绑定冲突观察
+  | 'wechat_channels.inbox.sync.request' // cloud → edge：触发按 channel/scope 同步
+  | 'wechat_channels.inbox.reply.send' // cloud → edge：带稳定幂等键的文本回复
+  | 'wechat_channels.inbox.auth.reopen' // cloud → edge：请求原环境重开登录 sidecar
+  | 'wechat_channels.inbox.browser.control' // cloud → edge：授权有效时打开可见 sidecar / 转回 API-only
+  | 'wechat_channels.inbox.runtime.controls' // cloud → edge：按账号下发版本化有效能力
+  | 'wechat_channels.inbox.offboard.command' // cloud → edge：撤权后清理所属加密会话
+  | 'wechat_channels.inbox.offboard.result' // edge → cloud：可重放的凭证清理结果
+  | 'wechat_channels.inbox.offboard.ack' // cloud → edge：结果持久化确认；ack 后清 Edge outbox
   // —— 通用 ——
   | 'error' // 任一方 → 对方：错误信息
   | 'ping'
@@ -2164,21 +2164,21 @@ export interface PayloadMap {
   'persona.generate.result': PersonaGenerateResultPayload;
   'persona.persist': PersonaPersistPayload;
   'persona.persist.result': PersonaPersistResultPayload;
-  'interaction.auth.status': InteractionAuthStatusPayload;
-  'interaction.sync.batch': InteractionSyncBatchPayload;
-  'interaction.sync.ack': InteractionSyncAckPayload;
-  'interaction.reply.result': InteractionReplyResultPayload;
-  'interaction.reply.result.ack': InteractionReplyResultAckPayload;
-  'interaction.reply.reconcile': InteractionReplyReconcilePayload;
-  'interaction.reply.reconcile.result': InteractionReplyReconcileResultPayload;
-  'interaction.sync.request': InteractionSyncRequestPayload;
-  'interaction.reply.send': InteractionReplySendPayload;
-  'interaction.auth.reopen': InteractionAuthReopenPayload;
-  'interaction.browser.control': InteractionBrowserControlPayload;
-  'interaction.runtime.controls': InteractionRuntimeControlsPayload;
-  'interaction.offboard.command': InteractionOffboardCommandPayload;
-  'interaction.offboard.result': InteractionOffboardResultPayload;
-  'interaction.offboard.ack': InteractionOffboardAckPayload;
+  'wechat_channels.inbox.auth.status': InteractionAuthStatusPayload;
+  'wechat_channels.inbox.sync.batch': InteractionSyncBatchPayload;
+  'wechat_channels.inbox.sync.ack': InteractionSyncAckPayload;
+  'wechat_channels.inbox.reply.result': InteractionReplyResultPayload;
+  'wechat_channels.inbox.reply.result.ack': InteractionReplyResultAckPayload;
+  'wechat_channels.inbox.reply.reconcile': InteractionReplyReconcilePayload;
+  'wechat_channels.inbox.reply.reconcile.result': InteractionReplyReconcileResultPayload;
+  'wechat_channels.inbox.sync.request': InteractionSyncRequestPayload;
+  'wechat_channels.inbox.reply.send': InteractionReplySendPayload;
+  'wechat_channels.inbox.auth.reopen': InteractionAuthReopenPayload;
+  'wechat_channels.inbox.browser.control': InteractionBrowserControlPayload;
+  'wechat_channels.inbox.runtime.controls': InteractionRuntimeControlsPayload;
+  'wechat_channels.inbox.offboard.command': InteractionOffboardCommandPayload;
+  'wechat_channels.inbox.offboard.result': InteractionOffboardResultPayload;
+  'wechat_channels.inbox.offboard.ack': InteractionOffboardAckPayload;
   error: ErrorPayload;
   ping: Record<string, never>;
   pong: Record<string, never>;

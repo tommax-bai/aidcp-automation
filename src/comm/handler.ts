@@ -621,15 +621,15 @@ export class DefaultMessageHandler implements MessageHandler {
       }
       case 'ping':
         return makeEnvelope('pong', env.id, this.clock(), {});
-      case 'interaction.auth.status':
+      case 'wechat_channels.inbox.auth.status':
         return this.onInteractionAuthStatus(env, session);
-      case 'interaction.sync.batch':
+      case 'wechat_channels.inbox.sync.batch':
         return this.onInteractionSyncBatch(env, session);
-      case 'interaction.reply.result':
+      case 'wechat_channels.inbox.reply.result':
         return this.onInteractionReplyResult(env, session);
-      case 'interaction.reply.reconcile.result':
+      case 'wechat_channels.inbox.reply.reconcile.result':
         return this.onInteractionReplyReconcileResult(env, session);
-      case 'interaction.offboard.result':
+      case 'wechat_channels.inbox.offboard.result':
         return this.onInteractionOffboardResult(env, session);
       case 'plan.request':
         return this.onPlan(env, pusher);
@@ -1227,7 +1227,7 @@ export class DefaultMessageHandler implements MessageHandler {
     }
     const payload = parseAuthStatusPayload(env.payload);
     if (!payload) return makeEnvelope('error', env.id, this.clock(), {
-      code: 'INTERACTION_VALIDATION_FAILED', message: 'interaction.auth.status payload 不合法。',
+      code: 'INTERACTION_VALIDATION_FAILED', message: 'wechat_channels.inbox.auth.status payload 不合法。',
     });
     if (!this.interactionScopeMatches(session, payload.accountId)) {
       return makeEnvelope('error', env.id, this.clock(), {
@@ -1239,14 +1239,14 @@ export class DefaultMessageHandler implements MessageHandler {
       return null;
     } catch (error) {
       const code = error instanceof InteractionError ? error.code : 'INTERACTION_INTERNAL_ERROR';
-      return makeEnvelope('error', env.id, this.clock(), { code, message: 'interaction.auth.status 未持久化。' });
+      return makeEnvelope('error', env.id, this.clock(), { code, message: 'wechat_channels.inbox.auth.status 未持久化。' });
     }
   }
 
   private async onInteractionSyncBatch(env: Envelope, session: EdgeSession): Promise<Envelope> {
     const raw = env.payload && typeof env.payload === 'object' ? env.payload as Record<string, unknown> : {};
     const rejected = (code: InteractionSyncAckPayload['errorCode']): Envelope => makeEnvelope(
-      'interaction.sync.ack', env.id, this.clock(), {
+      'wechat_channels.inbox.sync.ack', env.id, this.clock(), {
         batchId: typeof raw.batchId === 'string' && raw.batchId ? raw.batchId : 'invalid',
         envKey: typeof raw.envKey === 'string' && raw.envKey ? raw.envKey : 'invalid',
         accountId: typeof raw.accountId === 'string' && raw.accountId ? raw.accountId : 'invalid',
@@ -1263,7 +1263,7 @@ export class DefaultMessageHandler implements MessageHandler {
     if (!this.interactionScopeMatches(session, payload.accountId)) return rejected('INTERACTION_SCOPE_MISMATCH');
     try {
       const ack = await this.deps.interactionInbox!.onSyncBatch(payload);
-      return makeEnvelope('interaction.sync.ack', env.id, this.clock(), ack);
+      return makeEnvelope('wechat_channels.inbox.sync.ack', env.id, this.clock(), ack);
     } catch (error) {
       return rejected(error instanceof InteractionError ? error.code : 'INTERACTION_INTERNAL_ERROR');
     }
@@ -1275,11 +1275,11 @@ export class DefaultMessageHandler implements MessageHandler {
     });
     const payload = parseReplyResultPayload(env.payload);
     if (!payload) return makeEnvelope('error', env.id, this.clock(), {
-      code: 'INTERACTION_VALIDATION_FAILED', message: 'interaction.reply.result payload 不合法。',
+      code: 'INTERACTION_VALIDATION_FAILED', message: 'wechat_channels.inbox.reply.result payload 不合法。',
     });
     const recovery = this.interactionExtensionAvailable(session, INTERACTION_REPLY_RECOVERY_CAPABILITY);
     const ack = (status: InteractionReplyResultAckPayload['status'], errorCode: InteractionReplyResultAckPayload['errorCode']): Envelope =>
-      makeEnvelope('interaction.reply.result.ack', env.id, this.clock(), {
+      makeEnvelope('wechat_channels.inbox.reply.result.ack', env.id, this.clock(), {
         jobId: payload.jobId, attemptId: payload.attemptId, idempotencyKey: payload.idempotencyKey,
         envKey: payload.envKey, accountId: payload.accountId, platform: INTERACTION_PLATFORM,
         status, errorCode, receivedAt: this.clock(),
@@ -1295,7 +1295,7 @@ export class DefaultMessageHandler implements MessageHandler {
     } catch (error) {
       const code = error instanceof InteractionError ? error.code : 'INTERACTION_INTERNAL_ERROR';
       return recovery ? ack('rejected', code) :
-        makeEnvelope('error', env.id, this.clock(), { code, message: 'interaction.reply.result 未接收。' });
+        makeEnvelope('error', env.id, this.clock(), { code, message: 'wechat_channels.inbox.reply.result 未接收。' });
     }
   }
 
@@ -1307,7 +1307,7 @@ export class DefaultMessageHandler implements MessageHandler {
     }
     const payload = parseReplyReconcileResultPayload(env.payload);
     if (!payload) return makeEnvelope('error', env.id, this.clock(), {
-      code: 'INTERACTION_VALIDATION_FAILED', message: 'interaction.reply.reconcile.result payload 不合法。',
+      code: 'INTERACTION_VALIDATION_FAILED', message: 'wechat_channels.inbox.reply.reconcile.result payload 不合法。',
     });
     if (!this.interactionScopeMatches(session, payload.accountId)) return makeEnvelope('error', env.id, this.clock(), {
       code: 'INTERACTION_SCOPE_MISMATCH', message: '连接账号/平台与恢复 payload 不匹配。',
@@ -1330,10 +1330,10 @@ export class DefaultMessageHandler implements MessageHandler {
     }
     const payload = parseOffboardResultPayload(raw);
     if (!payload) return makeEnvelope('error', env.id, this.clock(), {
-      code: 'INTERACTION_VALIDATION_FAILED', message: 'interaction.offboard.result payload 不合法。',
+      code: 'INTERACTION_VALIDATION_FAILED', message: 'wechat_channels.inbox.offboard.result payload 不合法。',
     });
     const ack = (status: InteractionOffboardAckPayload['status'], errorCode: InteractionOffboardAckPayload['errorCode']): Envelope =>
-      makeEnvelope('interaction.offboard.ack', env.id, this.clock(), {
+      makeEnvelope('wechat_channels.inbox.offboard.ack', env.id, this.clock(), {
         offboardId: payload.offboardId, envKey: payload.envKey, accountId: payload.accountId,
         platform: INTERACTION_PLATFORM, status, errorCode, receivedAt: this.clock(),
       });

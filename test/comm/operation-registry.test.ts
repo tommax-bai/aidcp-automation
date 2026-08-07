@@ -8,9 +8,9 @@ test('Cloud automation channel classifies control, API-only automation, browser 
     category: 'automation_control', transport: 'automation_ws', identity: 'bound_account', browser: 'forbidden',
     platformFootprint: 'none',
   });
-  assert.equal(automationOperationDescriptorFor('interaction.reply.send')?.category, 'platform_api_automation');
-  assert.equal(automationOperationDescriptorFor('interaction.reply.send')?.browser, 'forbidden');
-  assert.equal(automationOperationDescriptorFor('interaction.auth.reopen')?.category, 'browser_lifecycle');
+  assert.equal(automationOperationDescriptorFor('wechat_channels.inbox.reply.send')?.category, 'platform_api_automation');
+  assert.equal(automationOperationDescriptorFor('wechat_channels.inbox.reply.send')?.browser, 'forbidden');
+  assert.equal(automationOperationDescriptorFor('wechat_channels.inbox.auth.reopen')?.category, 'browser_lifecycle');
   assert.equal(automationOperationDescriptorFor('xiaohongshu.feed.scroll')?.browser, 'required');
 });
 
@@ -75,7 +75,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
     );
   }
   // API 族里唯一的直写：真发出私信。
-  assert.equal(automationOperationDescriptorFor('interaction.reply.send')?.platformFootprint, write?.platformFootprint);
+  assert.equal(automationOperationDescriptorFor('wechat_channels.inbox.reply.send')?.platformFootprint, write?.platformFootprint);
 
   // 浏览 / 读 / 收尾 / 租约 / 验证码协助：与 note.close 同侧。
   for (const type of [
@@ -94,19 +94,19 @@ test('platform-footprint keeps direct write commands and browse-only commands on
   }
   // 纯拉取 / 只核验 / 本地清理：协议注释明写「绝不发起新平台写」「结果可重放」。
   for (const type of [
-    'interaction.sync.request', 'interaction.reply.reconcile', 'interaction.offboard.command',
+    'wechat_channels.inbox.sync.request', 'wechat_channels.inbox.reply.reconcile', 'wechat_channels.inbox.offboard.command',
   ] as MessageType[]) {
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
       browse?.platformFootprint,
-      `${type} 不发起新平台写，必须与 note.close 同侧（与 interaction.reply.send 分侧）`,
+      `${type} 不发起新平台写，必须与 note.close 同侧（与 wechat_channels.inbox.reply.send 分侧）`,
     );
   }
   // 控制与心跳。
   for (const type of [
-    'ui.push_snapshot', 'pacing.update', 'interaction.sync.ack', 'interaction.reply.result.ack',
-    'interaction.offboard.ack', 'interaction.runtime.controls', 'ping', 'pong',
-    'interaction.auth.reopen', 'interaction.browser.control',
+    'ui.push_snapshot', 'pacing.update', 'wechat_channels.inbox.sync.ack', 'wechat_channels.inbox.reply.result.ack',
+    'wechat_channels.inbox.offboard.ack', 'wechat_channels.inbox.runtime.controls', 'ping', 'pong',
+    'wechat_channels.inbox.auth.reopen', 'wechat_channels.inbox.browser.control',
   ] as MessageType[]) {
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,

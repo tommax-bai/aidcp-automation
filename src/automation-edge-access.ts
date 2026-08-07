@@ -313,7 +313,7 @@ export function createAutomationEdgeTransportGate(
 ): (envelope: Envelope, edgeId: string) => boolean {
   return (envelope, edgeId) => {
     // 删除本身不经 WS；这两类必须穿透，避免 tombstone 前被环境删除闸自锁。
-    if (envelope.type === 'session.end' || envelope.type.startsWith('interaction.offboard.')) {
+    if (envelope.type === 'session.end' || envelope.type.startsWith('wechat_channels.inbox.offboard.')) {
       return true;
     }
     const gate = options.mirrors.automationGateForEdgeId(edgeId);

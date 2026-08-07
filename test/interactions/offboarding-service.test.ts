@@ -27,7 +27,7 @@ test('offboarding dispatch is scope-bound, body-free and remains pending while E
   online = true;
   assert.equal(await service.dispatchPending('acct-1', 'edge-1'), 1);
   assert.deepEqual(marked, ['offboard-1']);
-  assert.equal(pushed[0].type, 'interaction.offboard.command');
+  assert.equal(pushed[0].type, 'wechat_channels.inbox.offboard.command');
   assert.deepEqual(pushed[0].payload, { offboardId: 'offboard-1', envKey: 'env-1', accountId: 'acct-1',
     platform: 'wechat_channels', reason: 'environment_unbind', requestedAt: 10, expiresAt: 20 });
   assert.doesNotMatch(JSON.stringify(pushed[0]), /content|cookie|credential|template/i);
@@ -64,6 +64,6 @@ test('offboarding retry resolves only the account-bound Edge and replays the sam
     } as EdgePusher });
   assert.equal(await service.retryPending(), 1);
   assert.equal(pushed[0].edgeId, 'edge-1');
-  assert.equal(pushed[0].envelope.type, 'interaction.offboard.command');
+  assert.equal(pushed[0].envelope.type, 'wechat_channels.inbox.offboard.command');
   assert.equal((pushed[0].envelope.payload as { offboardId: string }).offboardId, 'offboard-retry-1');
 });
