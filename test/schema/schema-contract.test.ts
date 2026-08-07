@@ -116,6 +116,39 @@ test('warn 与 enforce 的判定结论逐字一致，模式只决定拒不拒绝
   const decision = gate([...KNOWN, '0011_future']);
   const conclusion = formatGateConclusion(decision);
   assert.match(conclusion, /超前版本：0011_future/);
-  assert.match(conclusion, /回滚场景/);
+  assert.match(conclusion, /回滚或收缩超前场景/);
   assert.equal(formatGateConclusion(gate([...KNOWN, '0011_future'])), conclusion);
+});
+
+test('超前分类：全 expand 放行；含 contract 或 kind 缺失拒绝并点名', () => {
+  const pass = gate([...KNOWN, '0011_future', '0012_further'], {
+    ledgerKinds: { '0011_future': 'expand', '0012_further': 'expand' },
+  });
+  assert.equal(pass.status, 'ahead');
+  assert.equal(pass.aheadExpandOnly, true);
+  assert.equal(pass.pass, true);
+  assert.equal(pass.waived, false, '机制放行 MUST NOT 冒充人工放行');
+  assert.match(pass.message, /全部为扩张类/);
+
+  const withContract = gate([...KNOWN, '0011_future', '0012_further'], {
+    ledgerKinds: { '0011_future': 'expand', '0012_further': 'contract' },
+  });
+  assert.equal(withContract.pass, false, '含收缩类超前 MUST 拒绝');
+  assert.equal(withContract.aheadExpandOnly, false);
+  assert.deepEqual(withContract.aheadBlocking, [{ version: '0012_further', kind: 'contract' }]);
+  assert.match(formatGateConclusion(withContract), /0012_further\(kind=contract\)/);
+
+  const missingKind = gate([...KNOWN, '0011_future'], { ledgerKinds: {} });
+  assert.equal(missingKind.pass, false, '分类失败 MUST NOT 成为放行理由');
+  assert.deepEqual(missingKind.aheadBlocking, [{ version: '0011_future', kind: 'unknown' }]);
+});
+
+test('人工放行兜底：含 contract 超前仍可按具体版本放行，且与机制放行可区分', () => {
+  const waived = gate([...KNOWN, '0011_future'], {
+    ledgerKinds: { '0011_future': 'contract' },
+    allowAheadRaw: '0011_future',
+  });
+  assert.equal(waived.pass, true);
+  assert.equal(waived.waived, true);
+  assert.equal(waived.aheadExpandOnly, false);
 });

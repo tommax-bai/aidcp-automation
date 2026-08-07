@@ -64,6 +64,7 @@ import {
 const { Client } = pg;
 
 const UNDEFINED_TABLE = '42P01';
+const UNDEFINED_COLUMN = '42703';
 
 export interface LedgerQueryable {
   query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
@@ -107,16 +108,44 @@ function readEnvString(name: string): string | undefined {
   return value && value.trim() ? value : undefined;
 }
 
-async function readLedgerVersions(
-  client: LedgerQueryable,
-): Promise<{ versions: string[]; error?: string }> {
+interface LedgerRows {
+  versions: string[];
+  /** version → 账本 kind（'expand' | 'contract'）；kind 列缺席或行值为 NULL 时该条为 undefined */
+  kinds: Record<string, string | undefined>;
+  error?: string;
+}
+
+function toLedgerRows(rows: Record<string, unknown>[]): LedgerRows {
+  const versions: string[] = [];
+  const kinds: Record<string, string | undefined> = {};
+  for (const r of rows) {
+    const version = String(r.version);
+    versions.push(version);
+    kinds[version] = r.kind == null ? undefined : String(r.kind);
+  }
+  return { versions, kinds };
+}
+
+async function readLedgerVersions(client: LedgerQueryable): Promise<LedgerRows> {
   try {
-    const res = await client.query('SELECT version FROM schema_migrations');
-    return { versions: res.rows.map((r) => String(r.version)) };
+    const res = await client.query('SELECT version, kind FROM schema_migrations');
+    return toLedgerRows(res.rows);
   } catch (err) {
+    if ((err as { code?: string }).code === UNDEFINED_COLUMN) {
+      // 旧账本（kind 列尚未由 0064 加上）：回退只读版本，kind 全未知 ⇒ ahead 判定与引入分类前
+      // 逐字一致（全部拒绝）。加列读取 MUST NOT 成为新的失败面，更 MUST NOT 成为放行理由。
+      try {
+        const res = await client.query('SELECT version FROM schema_migrations');
+        return toLedgerRows(res.rows);
+      } catch (fallbackErr) {
+        err = fallbackErr;
+      }
+    }
     const code = (err as { code?: string }).code;
-    if (code === UNDEFINED_TABLE) return { versions: [], error: '账本表 schema_migrations 不存在' };
-    return { versions: [], error: err instanceof Error ? err.message : String(err) };
+    if (code === UNDEFINED_TABLE) {
+      return { versions: [], kinds: {}, error: '账本表 schema_migrations 不存在' };
+    }
+    return { versions: [], kinds: {}, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -156,6 +185,7 @@ export async function evaluateSchemaGateWithLedger(
   const ledger = await readLedgerVersions(client);
   return evaluateSchemaGate({
     ledgerVersions: ledger.versions,
+    ledgerKinds: ledger.kinds,
     ledgerError: ledger.error,
     knownVersions: known,
     required: overrides?.required ?? REQUIRED_SCHEMA_VERSION,
@@ -226,14 +256,14 @@ function buildGroups(
 }
 
 /** 该组的账本行；连不上库时返回 error（与「账本表不存在」走同一条 fail-closed 判定）。 */
-async function readGroupLedger(group: LedgerGroup): Promise<{ versions: string[]; error?: string }> {
+async function readGroupLedger(group: LedgerGroup): Promise<LedgerRows> {
   if (group.injected) return readLedgerVersions(group.injected);
-  if (!group.config) return { versions: [], error: '该属主组没有连接配置' };
+  if (!group.config) return { versions: [], kinds: {}, error: '该属主组没有连接配置' };
   const client = new Client(group.config);
   try {
     await client.connect();
   } catch (err) {
-    return { versions: [], error: err instanceof Error ? err.message : String(err) };
+    return { versions: [], kinds: {}, error: err instanceof Error ? err.message : String(err) };
   }
   try {
     return await readLedgerVersions(client as unknown as LedgerQueryable);
@@ -344,7 +374,7 @@ export async function runSchemaContractGate(options?: {
       );
     }
 
-    const byOwner = new Map<PgOwner, { versions: string[]; error?: string }>();
+    const byOwner = new Map<PgOwner, LedgerRows>();
     for (const group of groups) {
       const ledger = await readGroupLedger(group);
       for (const owner of group.owners) byOwner.set(owner, ledger);
@@ -352,9 +382,11 @@ export async function runSchemaContractGate(options?: {
 
     for (const owner of owners) {
       const scope = scopes[owner];
-      const ledger = byOwner.get(owner) ?? { versions: [], error: '本属主没有账本连接' };
+      const ledger = byOwner.get(owner) ?? { versions: [], kinds: {}, error: '本属主没有账本连接' };
       const decision = evaluateSchemaGate({
         ledgerVersions: ledger.error ? [] : ledgerForOwner(ledger.versions, scope, index.allVersions),
+        // kind 映射不随属主裁剪：判定层只按超前版本逐条查表，多余的键不参与判定。
+        ledgerKinds: ledger.error ? undefined : ledger.kinds,
         ledgerError: ledger.error,
         knownVersions: scope.known,
         required: scope.required,
@@ -373,9 +405,20 @@ export async function runSchemaContractGate(options?: {
   }
 
   const waived = results.filter((r) => r.decision.waived && r.decision.waivedUpTo);
-  if (waived.length > 0) {
-    const operator = readEnvString('AIDCP_MIGRATE_BY') ?? readEnvString('USER') ?? 'unknown';
-    const detail = `${waived.map((r) => `[${r.owner}] ${r.conclusion}`).join(' | ')}；放行者 applied_by=${operator}`;
+  // 扩张类机制放行同样必须响亮：放行 ≠ 没事，本构建已落后于库，人得知道并尽快部署新构建。
+  const expandPassed = results.filter((r) => r.decision.pass && r.decision.aheadExpandOnly);
+  if (waived.length > 0 || expandPassed.length > 0) {
+    const segments: string[] = [];
+    if (expandPassed.length > 0) {
+      segments.push(`扩张类超前放行：${expandPassed.map((r) => `[${r.owner}] ${r.conclusion}`).join(' | ')}`);
+    }
+    if (waived.length > 0) {
+      const operator = readEnvString('AIDCP_MIGRATE_BY') ?? readEnvString('USER') ?? 'unknown';
+      segments.push(
+        `人工放行：${waived.map((r) => `[${r.owner}] ${r.conclusion}`).join(' | ')}；放行者 applied_by=${operator}`,
+      );
+    }
+    const detail = segments.join('；');
     console.warn(`[${service}] schema 契约门（${mode}） 超前放行已生效：${detail}`);
     pendingWaiverAlert = { title: 'schema 契约门超前放行生效', detail };
   }

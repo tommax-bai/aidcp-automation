@@ -18,16 +18,20 @@ import {
   versionsForOwner,
 } from '../../src/schema/migration-owners.js';
 import { versionOf } from '../../src/schema/migration-plan.js';
-import { runSchemaContractGate } from '../../src/schema/schema-gate.js';
+import { runSchemaContractGate, takePendingSchemaGateAlert } from '../../src/schema/schema-gate.js';
 
-function ledgerStub(versions: string[]) {
+function ledgerStub(versions: string[], kinds?: Record<string, string>) {
   const queries: string[] = [];
   return {
     queries,
     client: {
       async query(text: string) {
         queries.push(text);
-        return { rows: versions.map((version) => ({ version })) };
+        return {
+          rows: versions.map((version) =>
+            kinds ? { version, kind: kinds[version] } : { version },
+          ),
+        };
       },
     },
   };
@@ -98,6 +102,75 @@ test('属主判据不可用 → 明确失败，绝不「查不到就当通过」
     },
   );
   assert.equal(stub.queries.length, 0, '判据不可用时 MUST NOT 连库「试一下」再放行');
+});
+
+/* ── change schema-gate-expand-ahead-pass：ahead 档按账本 kind 分类 ────────────────────
+ * 三条：① 全 expand 超前经真实属主裁剪路径放行、并进启动期告警缓存；② 含 contract 超前
+ * enforce 拒绝且点名收缩条目；③ 账本无 kind 列（42703）回退只读版本，行为与引入分类前一致。
+ */
+
+test('全 expand 超前：enforce 放行，结论说明扩张类，告警缓存收到', async () => {
+  const files = await loadMigrationFiles();
+  const all = files.map((f) => versionOf(f.name));
+  const kinds = Object.fromEntries(all.map((v) => [v, 'expand']));
+  const future = '9999_future_expand';
+  const stub = ledgerStub([...all, future], { ...kinds, [future]: 'expand' });
+  takePendingSchemaGateAlert();
+
+  const result = await runSchemaContractGate({ client: stub.client, mode: 'enforce' });
+
+  assert.equal(result.pass, true, '全扩张超前 MUST 放行启动');
+  const aheadOwners = result.owners.filter((o) => o.decision.status === 'ahead');
+  assert.ok(aheadOwners.length > 0, '本构建不认识的版本对每个属主都是超前信号');
+  for (const o of aheadOwners) {
+    assert.equal(o.decision.aheadExpandOnly, true, o.conclusion);
+    assert.equal(o.decision.waived, false, '机制放行 MUST NOT 记成人工放行');
+  }
+
+  const alert = takePendingSchemaGateAlert();
+  assert.ok(alert, '扩张类放行 MUST 进启动期告警缓存——放行不等于没事');
+  assert.match(alert.detail, /扩张类超前放行/);
+  assert.match(alert.detail, /9999_future_expand/);
+});
+
+test('含 contract 超前：enforce 拒绝，点名收缩条目', async () => {
+  const files = await loadMigrationFiles();
+  const all = files.map((f) => versionOf(f.name));
+  const kinds = Object.fromEntries(all.map((v) => [v, 'expand']));
+  const future = '9999_future_contract';
+  const stub = ledgerStub([...all, future], { ...kinds, [future]: 'contract' });
+
+  await assert.rejects(
+    () => runSchemaContractGate({ client: stub.client, mode: 'enforce' }),
+    (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      assert.match(message, /schema_ahead_of_code/);
+      assert.match(message, /9999_future_contract\(kind=contract\)/, '拒绝结论 MUST 点名收缩条目');
+      return true;
+    },
+  );
+});
+
+test('账本无 kind 列（42703）→ 回退只读版本，通过场景行为与引入分类前一致', async () => {
+  const files = await loadMigrationFiles();
+  const versions = files.map((f) => versionOf(f.name));
+  const queries: string[] = [];
+  const client = {
+    async query(text: string) {
+      queries.push(text);
+      if (text.includes('kind')) {
+        const err = new Error('column "kind" does not exist') as Error & { code: string };
+        err.code = '42703';
+        throw err;
+      }
+      return { rows: versions.map((version) => ({ version })) };
+    },
+  };
+
+  const result = await runSchemaContractGate({ client, mode: 'enforce' });
+
+  assert.equal(result.pass, true);
+  assert.equal(queries.length, 2, '42703 后 MUST 回退重查一次、MUST NOT 判 unreadable');
 });
 
 /* ── Block④ 三仓提取 · 批次 0：判定范围跟随「本进程连了哪些属主库」 ────────────────────

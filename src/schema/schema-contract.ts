@@ -7,6 +7,11 @@
  *
  * 这一层要堵的是回滚场景的静默假成功：库比代码新时，旧代码的存储会在启动期
  * 「发现表不在 → 建一张空表 → 开始往里写」，全程零告警。契约门把它变成一次显式的启动失败。
+ *
+ * ahead 档自 change schema-gate-expand-ahead-pass 起按账本 kind 分类：dev / OL 共库 + 异步部署下
+ * 「账本超前于旧构建」是常态运维、不是回滚证据，故全部超前条目声明为 expand ⇒ 放行启动并告警；
+ * 含 contract、或 kind 缺失 / 非法 / 读不到 ⇒ 照旧拒绝 —— 分类失败绝不成为放行理由。
+ * 人工放行通道（AIDCP_ALLOW_SCHEMA_AHEAD）语义不变，作含收缩超前时的兜底。
  */
 
 import { compareVersions } from './migration-plan.js';
@@ -271,6 +276,11 @@ export type SchemaGateCode =
 export interface SchemaGateInput {
   /** 账本里的全部版本 id；账本不可读时给空数组并设 ledgerError */
   ledgerVersions: string[];
+  /**
+   * 账本里各版本的 kind 声明（version → 'expand' | 'contract'，0064 起 NOT NULL + CHECK）。
+   * 只在 ahead 档参与判定；缺映射或缺条目 = kind 未知，按最危险类别（contract）对待。
+   */
+  ledgerKinds?: Readonly<Record<string, string | undefined>>;
   /** 账本读取本身失败（表不存在 / 连不上库）时的原因；设了它就一定是 unreadable 分支 */
   ledgerError?: string;
   /** unreadable 分支的错误码；缺省 `schema_ledger_unreadable`（判据不可用时传属主判据那一条） */
@@ -301,6 +311,10 @@ export interface SchemaGateDecision {
   holes: string[];
   /** ahead 分支：账本里高于 knownMax 的版本 */
   ahead: string[];
+  /** ahead 分支：全部超前条目在账本中声明为 expand、按分类机制放行时为 true（与人工放行 waived 互斥） */
+  aheadExpandOnly: boolean;
+  /** ahead 分支：kind 不是 expand 的超前条目（含 contract、缺失、非法；缺失/非法记为 'unknown'） */
+  aheadBlocking: { version: string; kind: string }[];
   /** 生效的放行版本 id（未放行为 undefined） */
   waivedUpTo?: string;
   /** 本次是否被显式放行（只对 ahead 分支有意义） */
@@ -350,6 +364,8 @@ export function evaluateSchemaGate(input: SchemaGateInput): SchemaGateDecision {
       missing: [],
       holes: [],
       ahead: [],
+      aheadExpandOnly: false,
+      aheadBlocking: [],
       waivedUpTo,
       waived: false,
       pass: false,
@@ -373,6 +389,8 @@ export function evaluateSchemaGate(input: SchemaGateInput): SchemaGateDecision {
       missing: holes,
       holes: [],
       ahead: [],
+      aheadExpandOnly: false,
+      aheadBlocking: [],
       waivedUpTo,
       waived: false,
       pass: false,
@@ -382,7 +400,15 @@ export function evaluateSchemaGate(input: SchemaGateInput): SchemaGateDecision {
 
   if (compareVersions(ledgerMax, knownMax) > 0) {
     const ahead = input.ledgerVersions.filter((v) => compareVersions(v, knownMax) > 0).sort(compareVersions);
-    const waived = waivedUpTo !== undefined && compareVersions(ledgerMax, waivedUpTo) <= 0;
+    // 分类判定：只有账本明确声明 kind=expand 的超前条目才算扩张；contract、缺失、非法一律按
+    // 最危险类别对待 —— 没有 kind 信息时本分支与引入分类前逐字一致（全部拒绝）。
+    const aheadBlocking = ahead
+      .filter((v) => input.ledgerKinds?.[v] !== 'expand')
+      .map((v) => ({ version: v, kind: input.ledgerKinds?.[v] ?? 'unknown' }));
+    const aheadExpandOnly = aheadBlocking.length === 0;
+    // 机制放行优先于人工放行：全扩张时不消费 waiver（waived 保持 false），两种放行在结论与告警里可区分。
+    const waived =
+      !aheadExpandOnly && waivedUpTo !== undefined && compareVersions(ledgerMax, waivedUpTo) <= 0;
     return {
       status: 'ahead',
       code: 'schema_ahead_of_code',
@@ -392,12 +418,16 @@ export function evaluateSchemaGate(input: SchemaGateInput): SchemaGateDecision {
       missing: [],
       holes,
       ahead,
+      aheadExpandOnly,
+      aheadBlocking,
       waivedUpTo,
       waived,
-      pass: waived,
-      message: waived
-        ? `账本最高版本 ${ledgerMax} 高于本构建认识的最高版本 ${knownMax}，已按放行版本 ${waivedUpTo} 逐次放行（超前 ${ahead.length} 条）。`
-        : `账本最高版本 ${ledgerMax} 高于本构建认识的最高版本 ${knownMax}（超前 ${ahead.length} 条）；这是回滚场景，继续启动会让旧代码静默重建空表。`,
+      pass: aheadExpandOnly || waived,
+      message: aheadExpandOnly
+        ? `账本最高版本 ${ledgerMax} 高于本构建认识的最高版本 ${knownMax}，超前 ${ahead.length} 条且全部为扩张类（expand），按分类放行启动；本构建落后于库，应尽快部署新构建。`
+        : waived
+          ? `账本最高版本 ${ledgerMax} 高于本构建认识的最高版本 ${knownMax}，已按放行版本 ${waivedUpTo} 逐次放行（超前 ${ahead.length} 条）。`
+          : `账本最高版本 ${ledgerMax} 高于本构建认识的最高版本 ${knownMax}（超前 ${ahead.length} 条，其中收缩类或类别不明 ${aheadBlocking.length} 条）；这是回滚或收缩超前场景，旧构建在其上运行不安全。`,
     };
   }
 
@@ -409,6 +439,8 @@ export function evaluateSchemaGate(input: SchemaGateInput): SchemaGateDecision {
     missing: [],
     holes,
     ahead: [],
+    aheadExpandOnly: false,
+    aheadBlocking: [],
     waivedUpTo,
     waived: false,
     pass: true,
@@ -451,6 +483,11 @@ export function formatGateConclusion(decision: SchemaGateDecision): string {
     parts.push(`账本空洞（最高版本够高但中间缺条目）：${head}${tail}`);
   }
   if (decision.ahead.length > 0) parts.push(`超前版本：${decision.ahead.join(', ')}`);
+  if (decision.aheadBlocking.length > 0) {
+    parts.push(
+      `收缩类或类别不明的超前：${decision.aheadBlocking.map((b) => `${b.version}(kind=${b.kind})`).join(', ')}`,
+    );
+  }
   if (decision.waived && decision.waivedUpTo) parts.push(`放行区间：(${decision.knownMax}, ${decision.waivedUpTo}]`);
   return parts.join('；');
 }
