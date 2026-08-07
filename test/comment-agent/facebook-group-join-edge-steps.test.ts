@@ -34,7 +34,7 @@ describe('buildFacebookGroupJoinEdgeSteps', () => {
   it('observeGroup: 下发 group.join click=false 并回传 observation', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'group.join') {
+      if (env.type === 'facebook.group.join') {
         bus.emit('action.completed', {
           action: 'join_group',
           ok: false,
@@ -50,14 +50,14 @@ describe('buildFacebookGroupJoinEdgeSteps', () => {
     assert.equal(r.ok, false);
     assert.equal(r.reason, 'observation_only');
     assert.equal(r.observation?.mainCtaText, 'Join group');
-    assert.equal(sent[0].type, 'group.join');
+    assert.equal(sent[0].type, 'facebook.group.join');
     assert.equal(sent[0].payload.click, false);
   });
 
   it('clickJoin: 下发 group.join click=true，ok 只来自 join_group 回执', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'group.join') {
+      if (env.type === 'facebook.group.join') {
         bus.emit('action.completed', {
           action: 'join_group',
           ok: true,

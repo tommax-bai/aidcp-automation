@@ -266,7 +266,7 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
           },
         ],
         timeout,
-        () => push(makeEnvelope('search.execute', activityId, Date.now(), {
+        () => push(makeEnvelope('facebook.search.execute', activityId, Date.now(), {
           activityId,
           purpose: 'task_targeting',
           scope: 'container',
@@ -329,7 +329,7 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
           },
         ],
         firstPostOpenTimeout,
-        () => push(makeEnvelope('note.open', randomUUID(), Date.now(), {
+        () => push(makeEnvelope('facebook.note.open', randomUUID(), Date.now(), {
           selection: 'first_commentable_group_post',
           container,
           ...(deps.taskId ? { taskId: deps.taskId } : {}),
@@ -381,7 +381,7 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
         // 开帖步专用上界：边端的详情水合窗（22 轮）+ 评论框催拉最坏 ≈30s > 固定 28s。用 28s 会把边端诚实的
         // open_failed 改判成 timeout（两者塌进同一 outcome、卡片无差别），故让边端先答。
         openTimeout,
-        () => push(makeEnvelope('note.open', randomUUID(), Date.now(), { url, ...(deps.taskId ? { taskId: deps.taskId } : {}) } as never)),
+        () => push(makeEnvelope('facebook.note.open', randomUUID(), Date.now(), { url, ...(deps.taskId ? { taskId: deps.taskId } : {}) } as never)),
       );
       if (outcome === null) {
         log.warn?.('[fb-edge-steps] open 超时/离线');

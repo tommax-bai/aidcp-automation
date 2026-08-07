@@ -42,13 +42,13 @@ function makeEnv(
       sent.push(env);
       if (opts.silent) return 1;
       // 同步模拟边端上报（订阅已先建立）。
-      if (env.type === 'search.execute') {
+      if (env.type === 'xiaohongshu.search.execute') {
         if (opts.searchFail) {
           bus.emit('action.completed', { action: 'search', ok: false, reason: opts.searchFail.reason, ts: Date.now() } as never);
         } else {
           bus.emit('page.cards.arrived', { cards: opts.cards ?? [], ts: Date.now() } as never);
         }
-      } else if (env.type === 'note.open') {
+      } else if (env.type === 'xiaohongshu.note.open') {
         const noteId = env.payload.noteId as string;
         if (opts.openFail) {
           bus.emit('action.completed', { action: 'open_note', ok: false, reason: opts.openFail.reason, ts: Date.now() } as never);
@@ -66,7 +66,7 @@ function makeEnv(
             ts: Date.now(),
           } as never);
         }
-      } else if (env.type === 'note.scroll_comments') {
+      } else if (env.type === 'xiaohongshu.note.scroll_comments') {
         bus.emit('action.completed', { action: 'scroll_comments', ok: opts.scrollOk ?? true, reason: opts.scrollReason, candidates: opts.comments ?? [], ts: Date.now() } as never);
       } else if (env.type === 'interaction.comment') {
         bus.emit('action.completed', { action: 'comment', ok: opts.postOk ?? true, reason: opts.postReason, ts: Date.now() } as never);
@@ -101,7 +101,7 @@ describe('buildEdgeCommentSteps', () => {
     });
     const steps = buildEdgeCommentSteps({ bus, pusher, edgeId: 'e1', dedup: makeDedup(), sort: 'most_collected', timeWindow: 'one_day' });
     const cards = await steps.searchAndHarvest('Agent');
-    assert.equal(sentTypes[0], 'search.execute');
+    assert.equal(sentTypes[0], 'xiaohongshu.search.execute');
     assert.equal(sent[0].payload.purpose, 'task_targeting');
     assert.equal(sent[0].payload.scope, 'global');
     assert.equal(sent[0].payload.activityId, sent[0].id);
@@ -184,7 +184,7 @@ describe('buildEdgeCommentSteps', () => {
     assert.equal(r!.note.noteId, 'a');
     assert.equal(r!.note.title, 'RAG 实战');
     assert.deepEqual(r!.comments.map((c) => c.text), ['学到了', '求教程']);
-    assert.deepEqual(sentTypes, ['note.open', 'note.scroll_comments']);
+    assert.deepEqual(sentTypes, ['xiaohongshu.note.open', 'xiaohongshu.note.scroll_comments']);
   });
 
   // change fix-interaction-and-comment-capture：采集失败(ok:false)但边端仍带回可见候选时，撰写仍拿到现场评论

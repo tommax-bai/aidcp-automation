@@ -11,7 +11,7 @@ test('Cloud automation channel classifies control, API-only automation, browser 
   assert.equal(automationOperationDescriptorFor('interaction.reply.send')?.category, 'platform_api_automation');
   assert.equal(automationOperationDescriptorFor('interaction.reply.send')?.browser, 'forbidden');
   assert.equal(automationOperationDescriptorFor('interaction.auth.reopen')?.category, 'browser_lifecycle');
-  assert.equal(automationOperationDescriptorFor('page.scroll')?.browser, 'required');
+  assert.equal(automationOperationDescriptorFor('xiaohongshu.feed.scroll')?.browser, 'required');
 });
 
 test('every registered Cloud push uses automation WebSocket and unknown active operations fail closed', () => {
@@ -52,7 +52,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
   // 两个参照锚点：interaction.comment 是「直接产生可归因新对象」最无争议的一条；
   // note.close 是「纯浏览、不产生对象」最无争议的一条。
   const write = automationOperationDescriptorFor('interaction.comment');
-  const browse = automationOperationDescriptorFor('note.close');
+  const browse = automationOperationDescriptorFor('xiaohongshu.note.close');
   assert.notEqual(write, null, 'interaction.comment 是参照锚点，它自己不能是 null');
   assert.notEqual(browse, null, 'note.close 是参照锚点，它自己不能是 null');
   assert.notEqual(
@@ -64,7 +64,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
   // 直接留痕（含按消息类型取最坏一档的 publish.* 与 plan.response）：与 interaction.comment 同侧。
   for (const type of [
     'interaction.like', 'interaction.collect', 'interaction.follow', 'interaction.like_comment',
-    'group.join', 'publish.command', 'plan.response',
+    'facebook.group.join', 'publish.command', 'plan.response',
   ] as MessageType[]) {
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
@@ -77,11 +77,11 @@ test('platform-footprint keeps direct write commands and browse-only commands on
 
   // 浏览 / 读 / 收尾 / 租约 / 验证码协助：与 note.close 同侧。
   for (const type of [
-    'session.end', 'note.open', 'search.execute', 'page.scroll',
-    'feed.refresh', 'navigation.back', 'note.browse_images', 'note.scroll_comments', 'profile.open',
+    'session.end', 'xiaohongshu.note.open', 'xiaohongshu.search.execute', 'xiaohongshu.feed.scroll',
+    'xiaohongshu.feed.refresh', 'navigation.back', 'xiaohongshu.note.browse_images', 'xiaohongshu.note.scroll_comments', 'xiaohongshu.profile.open',
     'identity.read_current', 'identity.read_self_profile',
-    'notification.open', 'notification.browse_comments', 'notification.browse_likes',
-    'notification.browse_follows', 'notification.back_home',
+    'xiaohongshu.notification.open', 'xiaohongshu.notification.browse_comments', 'xiaohongshu.notification.browse_likes',
+    'xiaohongshu.notification.browse_follows', 'xiaohongshu.notification.back_home',
     'edge.task.acquire', 'edge.task.release', 'captcha.assist.capture', 'captcha.assist.click',
   ] as MessageType[]) {
     assert.equal(

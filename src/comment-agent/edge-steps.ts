@@ -177,7 +177,7 @@ export function buildEdgeCommentSteps(deps: EdgeCommentStepsDeps): {
       'action.completed',
       (d) => d.action === 'scroll_comments',
       timeout,
-      () => push(makeEnvelope('note.scroll_comments', randomUUID(), Date.now(), { taskId, noteId, count: 2 })),
+      () => push(makeEnvelope('xiaohongshu.note.scroll_comments', randomUUID(), Date.now(), { taskId, noteId, count: 2 })),
     );
     const candidates = scrolled?.candidates ?? [];
     if (!scrolled) {
@@ -224,7 +224,7 @@ export function buildEdgeCommentSteps(deps: EdgeCommentStepsDeps): {
         timeout,
         () =>
           push(
-            makeEnvelope('search.execute', activityId, Date.now(), {
+            makeEnvelope('xiaohongshu.search.execute', activityId, Date.now(), {
               taskId,
               activityId,
               purpose: 'task_targeting',
@@ -311,7 +311,7 @@ export function buildEdgeCommentSteps(deps: EdgeCommentStepsDeps): {
           },
         ],
         timeout,
-        () => push(makeEnvelope('note.open', randomUUID(), Date.now(), { taskId, noteId })),
+        () => push(makeEnvelope('xiaohongshu.note.open', randomUUID(), Date.now(), { taskId, noteId })),
       );
       if (outcome === null) {
         // 措辞中性：步超时 race 无法区分「边端在跑/慢渲」与「真离线」——不断言离线（对齐 searchAndHarvest）。

@@ -45,6 +45,7 @@ import type {
 
 import type { AutomationDispatcherFactory } from './automation-connection-runtime.js';
 import type { DispatcherBuildContext } from './orchestrator/connection-runtime.js';
+import type { PlatformId } from './platform/registry.js';
 import {
   RoleDispatcher,
   type RoleDispatcherOptions,
@@ -291,7 +292,7 @@ export interface AutomationDispatcherDeps {
   sendCommand: RoleDispatcherOptions['sendCommand'] extends (
     command: infer C,
   ) => void
-    ? (command: C, edgeId: string | undefined, accountId: string) => void
+    ? (command: C, edgeId: string | undefined, accountId: string, platform?: PlatformId) => void
     : never;
   /** 每账号互动去重守卫（E-1 注册表按账号取）。 */
   interactionGuardFor: (
@@ -581,7 +582,7 @@ export function createAutomationDispatcherFactory(
       ) => deps.notifyComments(items, ctx.accountId),
       // 下行指令只发回**发起该决策的连接**（按 edgeId 定向，不广播 → 不串号）。
       sendCommand: (command: unknown) =>
-        deps.sendCommand(command as never, ctx.edgeId, ctx.accountId),
+        deps.sendCommand(command as never, ctx.edgeId, ctx.accountId, ctx.platform),
       edgeTaskLeases: deps.edgeTaskLeases,
       personaBinding: deps.personaBinding,
       onSessionRejected: (accountId: string, reason: unknown) =>

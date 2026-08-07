@@ -25,16 +25,19 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
+/** 词汇批 4：本文件断言命令**序列**（搜→开→评），平台段由 edge-steps/桥/契约测试钉死——此处剥前缀归一。 */
+const commandName = (type: string): string => type.replace(/^(?:xiaohongshu|facebook)\./, '');
+
 /** 假边端：按命令类型同步 emit 对应上报，跑通 happy path。 */
 function fakeEdge(bus: EventBus) {
   return {
     pushToEdges: (envelope: unknown): number => {
       const env = envelope as Envelope;
-      if (env.type === 'search.execute') {
+      if (commandName(env.type) === 'search.execute') {
         bus.emit('page.cards.arrived', { cards: [{ index: 0, title: 'RAG 实战', noteId: 'n1', collectCount: 900 }], ts: 0 } as never);
-      } else if (env.type === 'note.open') {
+      } else if (commandName(env.type) === 'note.open') {
         bus.emit('note.detail.arrived', { detail: { noteId: 'n1', title: 'RAG 实战', content: '正文', likeCount: 10, collectCount: 9 }, ts: 0 } as never);
-      } else if (env.type === 'note.scroll_comments') {
+      } else if (commandName(env.type) === 'note.scroll_comments') {
         bus.emit('action.completed', { action: 'scroll_comments', ok: true, candidates: [{ text: '学到了' }], ts: 0 } as never);
       } else if (env.type === 'interaction.comment') {
         bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
@@ -183,7 +186,7 @@ describe('CommentScheduler.triggerManual', () => {
         resolveConnection: () => ({ bus, edgeId: 'e1' }),
         pusher: {
           pushToEdges: (env: unknown) => {
-            if ((env as Envelope).type === 'search.execute') searchExecutes++;
+            if (commandName((env as Envelope).type) === 'search.execute') searchExecutes++;
             return fe.pushToEdges(env);
           },
         },
@@ -483,7 +486,7 @@ describe('CommentScheduler edge acquire failure', () => {
       baseDeps({
         pusher: {
           pushToEdges: (envelope: unknown) => {
-            if ((envelope as Envelope).type === 'search.execute') searchCommands++;
+            if (commandName((envelope as Envelope).type) === 'search.execute') searchCommands++;
             return 1;
           },
         },
@@ -517,7 +520,7 @@ describe('CommentScheduler edge acquire failure', () => {
       baseDeps({
         pusher: {
           pushToEdges: (envelope: unknown) => {
-            if ((envelope as Envelope).type === 'search.execute') searchCommands++;
+            if (commandName((envelope as Envelope).type) === 'search.execute') searchCommands++;
             return 1;
           },
         },
@@ -737,10 +740,10 @@ describe('CommentScheduler runFacebookTargetedTask (facebook shadow-first)', () 
       pusher: {
         pushToEdges: (env: unknown) => {
           const e = env as { type: string; payload?: Record<string, unknown> };
-          posted.push(e.type);
-          if (e.type === 'search.execute') {
+          posted.push(commandName(e.type));
+          if (commandName(e.type) === 'search.execute') {
             bus.emit('page.cards.arrived', { cards: [{ index: 0, noteId: 'https://fb.com/g/1/posts/9' }], ts: 0 } as never);
-          } else if (e.type === 'note.open') {
+          } else if (commandName(e.type) === 'note.open') {
             const payload = e.payload as { url?: string; selection?: string };
             bus.emit('note.detail.arrived', {
               detail: {
@@ -918,8 +921,8 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
       pushToEdges: (envelope: unknown): number => {
         const env = envelope as Envelope;
         envelopes.push(env);
-        posted.push(env.type);
-        if (env.type === 'search.execute') {
+        posted.push(commandName(env.type));
+        if (commandName(env.type) === 'search.execute') {
           if (cfg.searchFail) {
             bus.emit('action.completed', { action: 'search', ok: false, reason: cfg.searchFail, ts: 0 } as never);
           } else {
@@ -929,7 +932,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
               ts: 0,
             } as never);
           }
-        } else if (env.type === 'note.open') {
+        } else if (commandName(env.type) === 'note.open') {
           const payload = env.payload as { url?: string; selection?: string };
           const url = payload.selection === 'first_commentable_group_post'
             ? cfg.firstPostTarget ?? PERMALINK
@@ -1050,7 +1053,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     await tick();
     assert.equal(audits.at(-1)?.outcome, 'commented');
     assert.deepEqual(posted, ['note.open', 'interaction.comment']);
-    const open = envelopes.find((env) => env.type === 'note.open');
+    const open = envelopes.find((env) => commandName(env.type) === 'note.open');
     assert.equal(open?.payload.selection, 'first_commentable_group_post');
     assert.equal(open?.payload.container, 'https://www.facebook.com/groups/1');
     assert.equal(open?.payload.url, undefined);
@@ -1128,8 +1131,8 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     assert.equal(result.result.outcome, 'commented');
     assert.deepEqual(phases, ['target', 'dispatch']);
     assert.deepEqual(posted, ['note.open', 'interaction.comment']);
-    assert.equal(envelopes.some((env) => env.type === 'search.execute'), false);
-    const open = envelopes.find((env) => env.type === 'note.open');
+    assert.equal(envelopes.some((env) => commandName(env.type) === 'search.execute'), false);
+    const open = envelopes.find((env) => commandName(env.type) === 'note.open');
     assert.equal(open?.payload.selection, 'first_commentable_group_post');
     assert.equal(open?.payload.container, 'https://www.facebook.com/groups/historical-1');
     assert.equal(open?.payload.joinFirst, undefined);
@@ -1212,7 +1215,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     );
     assert.deepEqual(posted, ['note.open']);
     assert.equal(envelopes.some((env) => env.type === 'interaction.comment'), false);
-    assert.equal(envelopes.some((env) => env.type === 'search.execute'), false);
+    assert.equal(envelopes.some((env) => commandName(env.type) === 'search.execute'), false);
   });
 
   it('consumption mode re-reads the final risk gate after target selection and sends zero submit commands when it closes', async () => {
@@ -1282,7 +1285,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     assert.ok((leaseReqs[0].leaseMs ?? 0) > 180_000 + 90_000, `keep-open leaseMs 必须严格覆盖撰写+人审最坏耗时，实际=${leaseReqs[0].leaseMs}`);
     // 三条命令都带 lease taskId（否则边端持租约期把评论自己的命令也挡死 → 自锁）
     for (const t of ['search.execute', 'note.open', 'interaction.comment']) {
-      const env = base.envelopes.find((e) => e.type === t);
+      const env = base.envelopes.find((e) => commandName(e.type) === t);
       assert.ok(env, `应下发 ${t}`);
       assert.equal((env!.payload as { taskId?: string }).taskId, 'fb-task-1', `${t} 必须带 lease taskId`);
     }
@@ -1310,7 +1313,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     let searchCommands = 0;
     const deps: CommentSchedulerDeps = {
       ...base.deps,
-      pusher: { pushToEdges: (env: unknown) => { if ((env as Envelope).type === 'search.execute') searchCommands++; return 1; } },
+      pusher: { pushToEdges: (env: unknown) => { if (commandName((env as Envelope).type) === 'search.execute') searchCommands++; return 1; } },
       edgeTaskLeases: {
         withLease: async () => { throw new EdgeTaskLeaseError('acquire_timeout', 'edge task acquire timeout taskId=t edge=e-fb'); },
       },
@@ -1488,7 +1491,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     }).triggerManual('fb-1');
     await tick();
     assert.equal(audits.at(-1)?.outcome, 'commented');
-    assert.equal(envelopes.find((e) => e.type === 'search.execute')?.payload.container, 'https://www.facebook.com/groups/joined-1');
+    assert.equal(envelopes.find((e) => commandName(e.type) === 'search.execute')?.payload.container, 'https://www.facebook.com/groups/joined-1');
     assert.deepEqual(marked, [{ accountId: 'fb-1', groupUrl: 'https://www.facebook.com/groups/joined-1' }]);
   });
 
@@ -1812,7 +1815,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
       },
     }).triggerManual('fb-1', { joinFirst: true });
     await tick();
-    assert.equal(envelopes.find((e) => e.type === 'search.execute')?.payload.container, JOINED);
+    assert.equal(envelopes.find((e) => commandName(e.type) === 'search.execute')?.payload.container, JOINED);
     assert.equal(audits.at(-1)?.outcome, 'commented');
     assert.deepEqual(posted, ['search.execute', 'note.open', 'interaction.comment']);
     assert.equal(cards.at(-1)?.ok, true);
@@ -1935,7 +1938,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
     await tick();
     assert.equal(specificArg, URL, '加入的是指定群 url');
     assert.equal(newCalled, 0, '绝不回落到「下一个库内群」');
-    assert.equal(envelopes.find((e) => e.type === 'search.execute')?.payload.container, URL);
+    assert.equal(envelopes.find((e) => commandName(e.type) === 'search.execute')?.payload.container, URL);
     assert.equal(audits.at(-1)?.outcome, 'commented');
   });
 
@@ -1947,7 +1950,7 @@ describe('CommentScheduler runFacebookTargetedTask (facebook real send)', () => 
       facebookJoinSpecificGroup: async (_a, url) => ({ triggered: true, outcome: 'already_member', groupUrl: url }),
     }).triggerManual('fb-1', { joinFirst: true, joinGroupUrl: URL });
     await tick();
-    assert.equal(envelopes.find((e) => e.type === 'search.execute')?.payload.container, URL);
+    assert.equal(envelopes.find((e) => commandName(e.type) === 'search.execute')?.payload.container, URL);
     assert.equal(audits.at(-1)?.outcome, 'commented');
   });
 

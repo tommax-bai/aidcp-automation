@@ -46,7 +46,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('search：命中 page.cards → 候选 permalink；search.execute 带 container', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'search.execute') {
+      if (env.type === 'facebook.search.execute') {
         bus.emit('page.cards.arrived', { cards: [{ noteId: 'https://fb.com/g/1/posts/2' }, { noteId: 'https://fb.com/g/1/posts/3' }], ts: 0 } as never);
       }
     });
@@ -63,7 +63,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('search：诚实失败回执 action.completed{search} → ok:false + reason', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'search.execute') bus.emit('action.completed', { action: 'search', ok: false, reason: 'login_required', ts: 0 } as never);
+      if (env.type === 'facebook.search.execute') bus.emit('action.completed', { action: 'search', ok: false, reason: 'login_required', ts: 0 } as never);
     });
     const r = await steps(bus, pusher).searchInContainer('咖啡', 'https://www.facebook.com/groups/1');
     assert.equal(r.ok, false);
@@ -73,7 +73,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('search：明确 no_results 回执 → ok:true + 空候选，不等待超时', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'search.execute') {
+      if (env.type === 'facebook.search.execute') {
         bus.emit('action.completed', {
           action: 'search',
           ok: true,
@@ -108,7 +108,7 @@ describe('buildFacebookEdgeSteps', () => {
     const bus = new EventBus();
     const url = 'https://www.facebook.com/groups/1/posts/2';
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('note.detail.arrived', {
           detail: { noteId: 'https://www.facebook.com/permalink.php?story_fbid=2&id=99' },
           ts: 0,
@@ -125,7 +125,7 @@ describe('buildFacebookEdgeSteps', () => {
     const container = 'https://www.facebook.com/groups/1';
     const permalink = 'https://www.facebook.com/groups/1/posts/2';
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('note.detail.arrived', {
           detail: { noteId: permalink, content: '首帖正文', comments: ['首条评论'] },
           ts: 0,
@@ -139,7 +139,7 @@ describe('buildFacebookEdgeSteps', () => {
       postText: '首帖正文',
       comments: ['首条评论'],
     });
-    assert.deepEqual(sent.map((env) => env.type), ['note.open']);
+    assert.deepEqual(sent.map((env) => env.type), ['facebook.note.open']);
     assert.equal(sent[0].payload.selection, 'first_commentable_group_post');
     assert.equal(sent[0].payload.container, container);
     assert.equal(sent[0].payload.url, undefined);
@@ -149,7 +149,7 @@ describe('buildFacebookEdgeSteps', () => {
     const bus = new EventBus();
     const permalink = 'https://www.facebook.com/groups/1?multi_permalinks=2';
     const { pusher } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('note.detail.arrived', {
           detail: { noteId: permalink, content: '首帖正文' },
           ts: 0,
@@ -165,7 +165,7 @@ describe('buildFacebookEdgeSteps', () => {
     const bus = new EventBus();
     const targetRef = `aidcp:facebook-group-feed-post:v1:${'a1'.repeat(32)}`;
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('note.detail.arrived', {
           detail: { noteId: targetRef, content: '无 permalink 的首帖正文' },
           ts: 0,
@@ -189,7 +189,7 @@ describe('buildFacebookEdgeSteps', () => {
     const malformed = `aidcp:facebook-group-feed-post:v1:${'A1'.repeat(32)}`;
     const strict = `aidcp:facebook-group-feed-post:v1:${'b2'.repeat(32)}`;
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('note.detail.arrived', { detail: { noteId: malformed }, ts: 0 } as never);
       }
     });
@@ -207,7 +207,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('openFirstPost：透传 Native 有界探测的具体失败原因', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('action.completed', {
           action: 'open_note',
           ok: false,
@@ -223,7 +223,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('openFirstPost：边端回非群帖 permalink 不误认，最终诚实超时', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'note.open') {
+      if (env.type === 'facebook.note.open') {
         bus.emit('note.detail.arrived', {
           detail: { noteId: 'https://www.facebook.com/123/posts/2', content: '背景帖' },
           ts: 0,
@@ -238,7 +238,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('open：note.detail 的 noteId 不匹配 url → 不误认（超时）', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'note.open') bus.emit('note.detail.arrived', { detail: { noteId: 'OTHER' }, ts: 0 } as never);
+      if (env.type === 'facebook.note.open') bus.emit('note.detail.arrived', { detail: { noteId: 'OTHER' }, ts: 0 } as never);
     });
     const r = await steps(bus, pusher, 30).openPost('https://www.facebook.com/groups/1/posts/2');
     assert.equal(r.ok, false);
@@ -257,7 +257,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('open：诚实失败回执 action.completed{open_note} → ok:false + reason', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'note.open') bus.emit('action.completed', { action: 'open_note', ok: false, reason: 'editor_not_found', ts: 0 } as never);
+      if (env.type === 'facebook.note.open') bus.emit('action.completed', { action: 'open_note', ok: false, reason: 'editor_not_found', ts: 0 } as never);
     });
     const r = await steps(bus, pusher).openPost('https://www.facebook.com/groups/1/posts/2');
     assert.equal(r.ok, false);
@@ -325,15 +325,15 @@ describe('buildFacebookEdgeSteps — keep-open 租约 taskId 透传（change fac
     const bus = new EventBus();
     const target = 'https://www.facebook.com/groups/1/posts/2';
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'search.execute') bus.emit('page.cards.arrived', { cards: [{ noteId: target }], ts: 0 } as never);
-      else if (env.type === 'note.open') bus.emit('note.detail.arrived', { detail: { noteId: target, content: '正文' }, ts: 0 } as never);
+      if (env.type === 'facebook.search.execute') bus.emit('page.cards.arrived', { cards: [{ noteId: target }], ts: 0 } as never);
+      else if (env.type === 'facebook.note.open') bus.emit('note.detail.arrived', { detail: { noteId: target, content: '正文' }, ts: 0 } as never);
       else if (env.type === 'interaction.comment') bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
     });
     const s = buildFacebookEdgeSteps({ bus, pusher, edgeId: 'e-fb', taskId: 'task-xyz', stepTimeoutMs: 40, logger: { log: () => {}, warn: () => {} } });
     await s.searchInContainer('咖啡', 'https://www.facebook.com/groups/1');
     await s.openPost(target);
     await s.submitComment(target, '这篇不错');
-    for (const t of ['search.execute', 'note.open', 'interaction.comment']) {
+    for (const t of ['facebook.search.execute', 'facebook.note.open', 'interaction.comment']) {
       const env = sent.find((e) => e.type === t);
       assert.ok(env, `应下发 ${t}`);
       assert.equal(env!.payload.taskId, 'task-xyz', `${t} 必须带 lease taskId`);
@@ -343,10 +343,10 @@ describe('buildFacebookEdgeSteps — keep-open 租约 taskId 透传（change fac
   it('无 taskId（无租约旧构造）→ 命令不带 taskId 字段（零回归）', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'search.execute') bus.emit('page.cards.arrived', { cards: [{ noteId: 'p1' }], ts: 0 } as never);
+      if (env.type === 'facebook.search.execute') bus.emit('page.cards.arrived', { cards: [{ noteId: 'p1' }], ts: 0 } as never);
     });
     await steps(bus, pusher).searchInContainer('咖啡', 'https://www.facebook.com/groups/1');
-    const env = sent.find((e) => e.type === 'search.execute');
+    const env = sent.find((e) => e.type === 'facebook.search.execute');
     assert.ok(env);
     assert.equal('taskId' in env!.payload, false, '无租约构造不应带 taskId');
   });

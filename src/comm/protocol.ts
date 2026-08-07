@@ -60,9 +60,12 @@ export type MessageType =
   // —— 浏览会话编排（ManagerAgent 驱动）——
   | 'note.content' // edge → cloud：上报一条笔记的标题/摘要/指标，供评估与概念抽取
   | 'note.ack'    // cloud → edge：确认收到笔记，异步处理中
-  | 'note.open' // cloud → edge：打开一条笔记
-  | 'note.close' // cloud → edge：关闭当前笔记
-  | 'search.execute' // cloud → edge：执行一次关键词搜索
+  | 'xiaohongshu.note.open' // cloud → edge：打开一条笔记（小红书）
+  | 'facebook.note.open' // cloud → edge：打开一条帖子（Facebook；可 url 直达或群首帖 selection）
+  | 'xiaohongshu.note.close' // cloud → edge：关闭当前笔记（小红书；云端现役零发送点，分工批 6 裁）
+  | 'facebook.note.close' // cloud → edge：关闭当前帖子（Facebook；云端现役零发送点，分工批 6 裁）
+  | 'xiaohongshu.search.execute' // cloud → edge：执行一次关键词搜索（小红书）
+  | 'facebook.search.execute' // cloud → edge：执行一次搜索（Facebook 全站/容器 scope）
   | 'session.end' // cloud → edge：结束本次浏览会话
   // —— 风控预算与互动判定 ——
   | 'session.budget.request' // edge → cloud：请求本次 browse session 预算
@@ -93,26 +96,31 @@ export type MessageType =
   | 'publish.command' // cloud → edge：下发一条参数化发布原子指令（A 阶段1 指令驱动路径）
   | 'publish.command.result' // edge → cloud：回传单条发布指令的执行结果
   // —— 角色驱动指令（cloud → edge，RoleDispatcher 驱动）——
-  | 'page.scroll'          // 页面滚动
-  | 'feed.refresh'         // 主 feed 深度到阈值后点右下「刷新」回顶换新批（cloud → edge）
+  | 'xiaohongshu.feed.scroll'   // 信息流滚动（小红书）
+  | 'xiaohongshu.search.scroll' // 搜索结果页滚动（小红书）
+  | 'facebook.feed.scroll'      // 信息流滚动（Facebook）
+  | 'facebook.search.scroll'    // 搜索结果页滚动（Facebook）
+  | 'facebook.reels.scroll'     // Reels 面滚动/推进（Facebook；进入型 reason 先导航进 Reels）
+  | 'xiaohongshu.feed.refresh'  // 主 feed 深度到阈值后点右下「刷新」回顶换新批（小红书）
+  | 'facebook.feed.refresh'     // 主 feed 换批（Facebook：顶栏首页图标页内点击）
   | 'pacing.update'        // 会话中途风控档位变化推送新 tempo（cloud → edge，pacing-fallback-hardening）
   | 'interaction.like'     // 点赞
   | 'interaction.collect'  // 收藏
   | 'interaction.follow'   // 关注
   | 'interaction.comment'  // 发评论（浏览闭环写互动）
   | 'interaction.like_comment' // 给「别人的某条评论」点赞（详情页拟人微互动）
-  | 'group.join'           // Facebook 加群原子指令（独立 join 能力，绝不走 browse）
+  | 'facebook.group.join'  // Facebook 加群原子指令（独立 join 能力，绝不走 browse）
   | 'navigation.back'      // 返回上一页
-  | 'note.browse_images'   // 浏览笔记图片
-  | 'note.scroll_comments' // 滚动评论区
-  | 'profile.open'         // 进入作者主页（专用指令，取代 open_note{type:'profile'}）
+  | 'xiaohongshu.note.browse_images'   // 浏览笔记图片（仅小红书）
+  | 'xiaohongshu.note.scroll_comments' // 滚动评论区（仅小红书）
+  | 'xiaohongshu.profile.open'         // 进入作者主页（仅小红书；取代 open_note{type:'profile'}）
   | 'identity.read_current' // 运行期就地读取本人身份（禁止导航）
   | 'identity.read_self_profile' // 进入会话绑定账号本人主页读取身份
-  | 'notification.open'             // cloud → edge：导航到通知首页（仅导航，不再复合）
-  | 'notification.browse_comments'  // cloud → edge：进「评论和@」+ 滚动 + 抽取
-  | 'notification.browse_likes'     // cloud → edge：进「赞和收藏」（v1 看一眼清未读）
-  | 'notification.browse_follows'   // cloud → edge：进「新增关注」（v1 看一眼清未读）
-  | 'notification.back_home'        // cloud → edge：返回通知首页
+  | 'xiaohongshu.notification.open'             // cloud → edge：导航到通知首页（仅小红书；仅导航，不再复合）
+  | 'xiaohongshu.notification.browse_comments'  // cloud → edge：进「评论和@」+ 滚动 + 抽取（仅小红书）
+  | 'xiaohongshu.notification.browse_likes'     // cloud → edge：进「赞和收藏」（仅小红书；v1 看一眼清未读）
+  | 'xiaohongshu.notification.browse_follows'   // cloud → edge：进「新增关注」（仅小红书；v1 看一眼清未读）
+  | 'xiaohongshu.notification.back_home'        // cloud → edge：返回通知首页（仅小红书）
   // —— Edge 上报（edge → cloud，RoleDispatcher 消费）——
   | 'notification.detected' // edge → cloud：检测到「消息」有未读（仅信号）
   | 'notification.home'     // edge → cloud：通知首页各类未读快照
@@ -907,10 +915,10 @@ export interface NoteOpenPayload {
    * facebook-first-post-container-fallback）：从 `container` 群讨论流选择第一条可评论帖子。
    * 有 canonical permalink 时进入详情；无 permalink 但可唯一绑定同页帖子容器时，就地读取并用严格
    * `aidcp:facebook-group-feed-post:v1:<sha256>` targetRef 作为 note.detail.noteId。
-   * 这是只读选帖/开帖，不得伪装成 `search.execute`；缺省保持既有按 url/noteId/index 开帖语义。
+   * 这是只读选帖/开帖，不得伪装成 `facebook.search.execute`；缺省保持既有按 url/noteId/index 开帖语义。
    */
   selection?: 'first_commentable_group_post';
-  /** `selection='first_commentable_group_post'` 的 Facebook 群完整链接；其它 note.open 调用省略。 */
+  /** `selection='first_commentable_group_post'` 的 Facebook 群完整链接；其它笔记打开调用省略。 */
   container?: string;
   /**
    * 浏览读取所在界面（change platform-browse-protocol，可选）。'detail'=导航进详情页读取（今天默认）；
@@ -1557,9 +1565,8 @@ export interface NoteAckPayload {
 // 全部可选、向后兼容（旧端忽略）。边缘收到后叠加 lognormal 抖动再执行，缺失则走内置默认兜底。
 
 export interface PageScrollPayload {
-  reason?: string;  // feed_scroll | search_scroll
-  /** Unified Facebook browse reconciliation target; used with reason='resume_redrive'. */
-  targetSurface?: 'feed' | 'reels';
+  /** 意图/因由（节奏与诊断用；面维度不在此——面由命令名的面段声明，词汇批 4）。 */
+  reason?: string;
   /** feed 翻页停留时长中心值（毫秒，可选）：按本次新卡数算，返回未刷新时省略（feed-scroll-card-floor）。 */
   dwellMs?: number;
 }
@@ -1902,18 +1909,18 @@ export interface ActionCompletedPayload {
    * 信息流就地回执缺此则拒记账（不回落 currentNoteId）。
    */
   noteId?: string;
-  /** 仅 group.join 回执携带：目标群 URL。 */
+  /** 仅 facebook.group.join 回执携带：目标群 URL。 */
   groupUrl?: string;
   /**
-   * 结构化观测（action-discriminated，可选，类型保持 unknown、按 action 收窄）：group.join 携带点击前观测；
+   * 结构化观测（action-discriminated，可选，类型保持 unknown、按 action 收窄）：facebook.group.join 携带点击前观测；
    * note-scoped 互动（like/collect）回执携带独立见证包
    * {surface?;listKey?;author?;textPreviewHead?;reactionText?;articleIndex?}（现读被点 article），
-   * 供云端归账仲裁逐字段比对选中卡。勿在此处收窄类型（会破坏 group.join 的既有用法）。
+   * 供云端归账仲裁逐字段比对选中卡。勿在此处收窄类型（会破坏 facebook.group.join 的既有用法）。
    */
   observation?: unknown;
-  /** 仅 group.join 回执携带：点击后结构化观测。 */
+  /** 仅 facebook.group.join 回执携带：点击后结构化观测。 */
   postObservation?: unknown;
-  /** 仅 group.join 回执携带：本次 edge 是否真的点击过 Join。 */
+  /** 仅 facebook.group.join 回执携带：本次 edge 是否真的点击过 Join。 */
   clicked?: boolean;
   /** 仅 scroll_comments 回执携带：本次滚动终态视口抽到的候选评论清单（best-effort，可空） */
   candidates?: CommentCandidate[];
@@ -2074,9 +2081,12 @@ export interface PayloadMap {
   'action.result': ActionResultPayload;
   'note.content': NoteContentPayload;
   'note.ack': NoteAckPayload;
-  'note.open': NoteOpenPayload;
-  'note.close': NoteClosePayload;
-  'search.execute': SearchExecutePayload;
+  'xiaohongshu.note.open': NoteOpenPayload;
+  'facebook.note.open': NoteOpenPayload;
+  'xiaohongshu.note.close': NoteClosePayload;
+  'facebook.note.close': NoteClosePayload;
+  'xiaohongshu.search.execute': SearchExecutePayload;
+  'facebook.search.execute': SearchExecutePayload;
   'session.end': SessionEndPayload;
   'publish.approval_request': PublishApprovalRequestPayload;
   'publish.approval_action': PublishApprovalActionPayload;
@@ -2103,19 +2113,24 @@ export interface PayloadMap {
   'publish.command': PublishCommandPayload;
   'publish.command.result': PublishCommandResultPayload;
   // 角色驱动指令
-  'page.scroll': PageScrollPayload;
-  'feed.refresh': FeedRefreshPayload;
+  'xiaohongshu.feed.scroll': PageScrollPayload;
+  'xiaohongshu.search.scroll': PageScrollPayload;
+  'facebook.feed.scroll': PageScrollPayload;
+  'facebook.search.scroll': PageScrollPayload;
+  'facebook.reels.scroll': PageScrollPayload;
+  'xiaohongshu.feed.refresh': FeedRefreshPayload;
+  'facebook.feed.refresh': FeedRefreshPayload;
   'pacing.update': PacingUpdatePayload;
   'interaction.like': InteractionLikePayload;
   'interaction.collect': InteractionCollectPayload;
   'interaction.follow': InteractionFollowPayload;
   'interaction.comment': InteractionCommentPayload;
   'interaction.like_comment': InteractionLikeCommentPayload;
-  'group.join': GroupJoinPayload;
+  'facebook.group.join': GroupJoinPayload;
   'navigation.back': NavigationBackPayload;
-  'note.browse_images': NoteBrowseImagesPayload;
-  'note.scroll_comments': NoteScrollCommentsPayload;
-  'profile.open': ProfileOpenPayload;
+  'xiaohongshu.note.browse_images': NoteBrowseImagesPayload;
+  'xiaohongshu.note.scroll_comments': NoteScrollCommentsPayload;
+  'xiaohongshu.profile.open': ProfileOpenPayload;
   'identity.read_current': IdentityReadPayload;
   'identity.read_self_profile': IdentityReadPayload;
   // Edge 上报
@@ -2127,11 +2142,11 @@ export interface PayloadMap {
   // 观察命令「问现状」（change add-state-observation-command）
   'state.read': StateReadPayload;
   'state.report': StateReportPayload;
-  'notification.open': NotificationOpenPayload;
-  'notification.browse_comments': NotificationBrowseCommentsPayload;
-  'notification.browse_likes': NotificationBrowseLikesPayload;
-  'notification.browse_follows': NotificationBrowseFollowsPayload;
-  'notification.back_home': NotificationBackHomePayload;
+  'xiaohongshu.notification.open': NotificationOpenPayload;
+  'xiaohongshu.notification.browse_comments': NotificationBrowseCommentsPayload;
+  'xiaohongshu.notification.browse_likes': NotificationBrowseLikesPayload;
+  'xiaohongshu.notification.browse_follows': NotificationBrowseFollowsPayload;
+  'xiaohongshu.notification.back_home': NotificationBackHomePayload;
   'notification.detected': NotificationDetectedPayload;
   'notification.home': NotificationHomePayload;
   'notification.items': NotificationItemsPayload;

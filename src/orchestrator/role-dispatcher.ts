@@ -724,6 +724,12 @@ export interface EdgeCommand {
   action: 'scroll' | 'refresh' | 'open_note' | 'close_note' | 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'search' | 'back' | 'browse_images' | 'scroll_comments' | 'profile_open' | 'identity_read_current' | 'identity_read_self_profile' | 'state_read' | 'open_notifications' | 'browse_notification_comments' | 'browse_notification_likes' | 'browse_notification_follows' | 'notification_back_home' | 'pacing_update' | 'session.end';
   params?: Record<string, unknown>;
   reason?: string;
+  /**
+   * 滚动命令的目标面（词汇批 4：面进命令名，bridge 据此选 {platform}.{surface}.scroll）。
+   * 仅 action='scroll' 有意义；由 sendScrollCommand / sendBrowseRedrive 经单点解析器填充，
+   * 缺失时 bridge 响亮 throw——补空即决策，翻译层不代答。
+   */
+  surface?: 'feed' | 'search' | 'reels';
 }
 
 export interface VisibleCard {
@@ -857,6 +863,8 @@ export class RoleDispatcher {
   private pendingFeedFloorMs = 0;
   /** Facebook Reels 重驱只保留在途闸；可读 Reel 到达即清，不把历史成功冒充当前页面。 */
   private reelsRedrivePending = false;
+  /** 最近一批 page.cards 的列表形态（FB 专用）：滚动面单点解析的现场证据（词汇批 4）。 */
+  private lastFacebookListKind: 'feed' | 'reels' | null = null;
   /**
    * 本场主浏览入口钉定。会话外的惰性初值取「权威 feed」：所有读取点都先过平台闸，
    * 没有会话时它不会被任何一条浏览判断消费。
@@ -1626,7 +1634,7 @@ export class RoleDispatcher {
       });
       return;
     }
-    this.sendScrollCommand(reason);
+    this.sendScrollCommand(reason, 0, source === 'reels' ? 'reels' : 'feed');
   }
 
   private async attemptFacebookRuleLike(): Promise<void> {
@@ -2462,26 +2470,42 @@ export class RoleDispatcher {
     return false;
   }
 
-  private sendScrollCommand(reason: string, floorMs = 0): boolean {
+  /**
+   * 滚动面单点解析（词汇批 4：面进命令名，发令方把自己持有的推定显式化）。
+   * 搜索行程优先（页型权威 sourcePageType）；FB 按最近观察到的列表形态，
+   * 无观察时按本场钉住的主入口；其余默认 feed。边缘核对不符时按三态诚实回报。
+   */
+  private currentScrollSurface(): 'feed' | 'search' | 'reels' {
+    if (this.sessionContext.sourcePageType === 'search') return 'search';
+    if (this.accountPlatform === 'facebook') {
+      if (this.lastFacebookListKind) return this.lastFacebookListKind;
+      if (this.facebookPrimarySurfaceIsReels()) return 'reels';
+    }
+    return 'feed';
+  }
+
+  private sendScrollCommand(reason: string, floorMs = 0, surface?: 'feed' | 'search' | 'reels'): boolean {
     // 翻页也是一次「准备消费下一条内容」：统一在 scroll 出口现问 view 配额。旧路径只在
     // content.valuable/open_note 前检查，导致连续 content.no_valuable（Reels 外语/不匹配最常见）可以绕过
     // view 上限无限滚。已经处于休眠时仍让命令进入 sendCommand，由既有节流日志记录 suppressed 事实。
     if (!this.allowScrollForViewQuota()) return false;
     const params = this.scrollDwellParams(floorMs);
+    const resolved = surface ?? this.currentScrollSurface();
     return this.sendCommand(
       params
-        ? { action: 'scroll', reason, params }
-        : { action: 'scroll', reason },
+        ? { action: 'scroll', reason, surface: resolved, params }
+        : { action: 'scroll', reason, surface: resolved },
     );
   }
 
-  /** 所有主动恢复只走一个命令；目标来自本场钉住面或 Cloud 明确的 Feed→Reels 降级。 */
+  /** 所有主动恢复只走一个命令；目标来自本场钉住面或 Cloud 明确的 Feed→Reels 降级。
+   * 词汇批 4：目标面进命令名（bridge 选 {platform}.{surface}.scroll），targetSurface 载荷字段退役。 */
   private sendBrowseRedrive(targetSurface: 'feed' | 'reels'): boolean {
     if (!this.allowScrollForViewQuota()) return false;
     return this.sendCommand({
       action: 'scroll',
       reason: 'resume_redrive',
-      params: { targetSurface },
+      surface: targetSurface,
     });
   }
 
@@ -2530,7 +2554,7 @@ export class RoleDispatcher {
   /**
    * Facebook Feed 已无可继续浏览内容时，由 Cloud 单点授权切到 Reels。
    *
-   * 主入口与 Feed 降级都复用 `resume_redrive + targetSurface=reels`。只有命令真正下发后才置
+   * 主入口与 Feed 降级都复用 `resume_redrive`（面段=reels，词汇批 4）。只有命令真正下发后才置
    * 在途闸；若被软暂停/评论支线等抑制，后续诚实重报仍可重试。
    */
   private authorizeFacebookReelsFallback(source: 'empty_feed' | 'feed_exhausted' | 'present_unreportable'): boolean {
@@ -4604,6 +4628,9 @@ export class RoleDispatcher {
           this.resetFacebookReelsRedrive();
           console.log('[RoleDispatcher] Facebook Reels 可读卡已到达 → 清除在途重驱，不保存历史页面态');
         }
+        if (this.accountPlatform === 'facebook' && (payload.listKind === 'feed' || payload.listKind === 'reels')) {
+          this.lastFacebookListKind = payload.listKind;
+        }
         this.updateVisibleCards(payload.cards);
         this.maybeDispatchFacebookPresentedVideoLike(payload.cards, payload.listKind);
         this.maybeDispatchFacebookPresentedReelCadence(payload.cards, payload.listKind);
@@ -4789,7 +4816,7 @@ export class RoleDispatcher {
           console.log(
             `[RoleDispatcher] Facebook Reels 翻页终态 ${payload.reason} → 经正常配额与停留闸继续下一条`,
           );
-          this.sendScrollCommand(`continue_after_${payload.reason}`);
+          this.sendScrollCommand(`continue_after_${payload.reason}`, 0, 'reels');
           return;
         }
         if (payload.action === 'search' && this.hasSearchActivityReceipt()) {

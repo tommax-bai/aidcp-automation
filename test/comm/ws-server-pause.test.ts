@@ -41,7 +41,7 @@ test('暂停后普通指令被丢弃、session.end/ui.snapshot/captcha assist �
   assert.ok(port, '应分配到端口');
   const ws = await connectEdge(port!, 'edge-1');
 
-  const scroll = makeEnvelope('page.scroll', 'c1', 0, {});
+  const scroll = makeEnvelope('xiaohongshu.feed.scroll', 'c1', 0, {});
   const end = makeEnvelope('session.end', 'c2', 0, { reason: 'x' });
 
   // 暂停前：普通指令可达（定向下发，edge-command-target-guard 后须显式带目标 edgeId）

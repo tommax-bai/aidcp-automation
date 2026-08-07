@@ -1174,8 +1174,8 @@ export async function runAutomationMain(
     },
     isHardPaused: (edgeId?: string) =>
       edgeId ? edgeAccessRef.get().server.isEdgePaused(edgeId) : false,
-    sendCommand: (command, edgeId, accountId) => {
-      const envelope = edgeCommandToEnvelope(command);
+    sendCommand: (command, edgeId, accountId, platform) => {
+      const envelope = edgeCommandToEnvelope(command, platform);
       const sent = edgeAccessRef.get().server.pushToEdges(envelope, edgeId);
       logger.log(
         `[RoleDispatcher] sendCommand account=${accountId} edgeId=${edgeId ?? '-'}` +

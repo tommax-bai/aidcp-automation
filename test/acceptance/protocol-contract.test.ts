@@ -53,8 +53,9 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'anchor.get': true, 'anchor.get.result': true, 'anchor.report': true,
   'action.result': true,
   'note.content': true, 'note.ack': true,
-  'note.open': true, 'note.close': true,
-  'search.execute': true, 'session.end': true,
+  'xiaohongshu.note.open': true, 'facebook.note.open': true,
+  'xiaohongshu.note.close': true, 'facebook.note.close': true,
+  'xiaohongshu.search.execute': true, 'facebook.search.execute': true, 'session.end': true,
   'session.budget.request': true, 'session.budget': true,
   'risk.canDo': true, 'risk.canDo.result': true, 'risk.record': true, 'risk.record.result': true,
   'risk.captcha_detected': true, 'risk.captcha_cleared': true,
@@ -66,15 +67,18 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'publish.draft_image_remove': true, 'publish.draft_image_remove.result': true,
   'publish.result': true,
   'publish.command': true, 'publish.command.result': true,
-  'page.scroll': true, 'feed.refresh': true, 'pacing.update': true, 'interaction.like': true, 'interaction.collect': true, 'interaction.follow': true,
+  'xiaohongshu.feed.scroll': true, 'xiaohongshu.search.scroll': true,
+  'facebook.feed.scroll': true, 'facebook.search.scroll': true, 'facebook.reels.scroll': true,
+  'xiaohongshu.feed.refresh': true, 'facebook.feed.refresh': true,
+  'pacing.update': true, 'interaction.like': true, 'interaction.collect': true, 'interaction.follow': true,
   'interaction.comment': true, 'interaction.like_comment': true,
-  'group.join': true,
-  'navigation.back': true, 'note.browse_images': true, 'note.scroll_comments': true, 'profile.open': true,
+  'facebook.group.join': true,
+  'navigation.back': true, 'xiaohongshu.note.browse_images': true, 'xiaohongshu.note.scroll_comments': true, 'xiaohongshu.profile.open': true,
   'identity.read_current': true, 'identity.read_self_profile': true,
   'page.cards': true, 'note.detail': true, 'profile.detail': true, 'identity.observed': true, 'action.completed': true,
   'state.read': true, 'state.report': true,
-  'notification.open': true, 'notification.browse_comments': true, 'notification.browse_likes': true,
-  'notification.browse_follows': true, 'notification.back_home': true,
+  'xiaohongshu.notification.open': true, 'xiaohongshu.notification.browse_comments': true, 'xiaohongshu.notification.browse_likes': true,
+  'xiaohongshu.notification.browse_follows': true, 'xiaohongshu.notification.back_home': true,
   'notification.detected': true, 'notification.home': true, 'notification.items': true,
   'persona.generate': true, 'persona.generate.result': true,
   'persona.persist': true, 'persona.persist.result': true,
@@ -95,8 +99,8 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal(PROTOCOL_VERSION, 2);
   });
 
-  it('AC-PROTO-02 消息类型总数为 95（增删消息须同步冻结契约 + 本断言）', () => {
-    assert.equal(ALL_TYPES.length, 95);
+  it('AC-PROTO-02 消息类型总数为 103（增删消息须同步冻结契约 + 本断言）', () => {
+    assert.equal(ALL_TYPES.length, 103);
   });
 
   it('AC-PROTO-03 每个消息类型都能构造合法信封且版本一致', () => {
@@ -181,21 +185,21 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
       purpose: 'task_targeting',
       scope: 'container',
     };
-    const searchBack = parseEnvelope(JSON.stringify(makeEnvelope('search.execute', 's-1', 1700000000000, search)));
+    const searchBack = parseEnvelope(JSON.stringify(makeEnvelope('facebook.search.execute', 's-1', 1700000000000, search)));
     assert.equal((searchBack!.payload as SearchExecutePayload).container, 'https://www.facebook.com/groups/123456');
     assert.equal((searchBack!.payload as SearchExecutePayload).activityId, 'search-activity-1');
     assert.equal((searchBack!.payload as SearchExecutePayload).purpose, 'task_targeting');
     assert.equal((searchBack!.payload as SearchExecutePayload).scope, 'container');
 
     const open: NoteOpenPayload = { url: 'https://www.facebook.com/groups/123456/posts/999' };
-    const openBack = parseEnvelope(JSON.stringify(makeEnvelope('note.open', 'o-1', 1700000000000, open)));
+    const openBack = parseEnvelope(JSON.stringify(makeEnvelope('facebook.note.open', 'o-1', 1700000000000, open)));
     assert.equal((openBack!.payload as NoteOpenPayload).url, 'https://www.facebook.com/groups/123456/posts/999');
 
     const firstOpen: NoteOpenPayload = {
       selection: 'first_commentable_group_post',
       container: 'https://www.facebook.com/groups/123456',
     };
-    const firstOpenBack = parseEnvelope(JSON.stringify(makeEnvelope('note.open', 'o-2', 1700000000000, firstOpen)));
+    const firstOpenBack = parseEnvelope(JSON.stringify(makeEnvelope('facebook.note.open', 'o-2', 1700000000000, firstOpen)));
     assert.equal((firstOpenBack!.payload as NoteOpenPayload).selection, 'first_commentable_group_post');
     assert.equal((firstOpenBack!.payload as NoteOpenPayload).container, 'https://www.facebook.com/groups/123456');
   });

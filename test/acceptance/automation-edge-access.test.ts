@@ -69,7 +69,7 @@ test('副本陈旧时新的真实平台动作被拦下，且这一次拒绝有�
 test('副本陈旧时控制面照常放行（停手的边界是「新的真实平台动作」，不是一切）', () => {
   const { gate, refusals } = gateFixture('unknown');
   assert.equal(gate(envelopeOf('ui.snapshot'), 'ads-1'), true);
-  assert.equal(gate(envelopeOf('note.close'), 'ads-1'), true, '详情页收尾属自然结束路径');
+  assert.equal(gate(envelopeOf('xiaohongshu.note.close'), 'ads-1'), true, '详情页收尾属自然结束路径');
   assert.deepEqual(refusals, []);
 });
 

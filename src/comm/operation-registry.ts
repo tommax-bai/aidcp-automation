@@ -14,7 +14,7 @@ export type AutomationOperationClass =
 
 /**
  * 平台留痕维（platform footprint）——「判错了会不会在平台上留痕」这条尺子的机读形态。
- * 46 条取值与边缘 `aidcp-edge/src/client/operation-registry.ts` 逐字一致（跨仓对表闸
+ * 52 条取值与边缘 `aidcp-edge/src/client/operation-registry.ts` 逐字一致（跨仓对表闸
  * `scripts/operation-registry-parity` 守全部字段）。
  *
  * 判据：这条命令**执行成功后**，平台上是否**直接**出现一个可归因到该账号的新对象。
@@ -97,23 +97,31 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   // v1 兼容路径：PlanStep 的 op 含 click / input，可承载点赞 / 评论等写手势 ⇒ 按最坏一档。
   'plan.response': pageAutomation(),
   'session.end': automationControl('local_environment', 'none'),
-  'note.open': pageAutomation('none'),
-  'note.close': pageAutomation('none'),
+  'xiaohongshu.note.open': pageAutomation('none'),
+  'facebook.note.open': pageAutomation('none'),
+  'xiaohongshu.note.close': pageAutomation('none'),
+  'facebook.note.close': pageAutomation('none'),
   // 搜索只产生账号自见的隐式行为记录，不产生平台上可归因的新对象。
-  'search.execute': pageAutomation('none'),
-  'page.scroll': pageAutomation('none'),
-  'feed.refresh': pageAutomation('none'),
+  'xiaohongshu.search.execute': pageAutomation('none'),
+  'facebook.search.execute': pageAutomation('none'),
+  'xiaohongshu.feed.scroll': pageAutomation('none'),
+  'xiaohongshu.search.scroll': pageAutomation('none'),
+  'facebook.feed.scroll': pageAutomation('none'),
+  'facebook.search.scroll': pageAutomation('none'),
+  'facebook.reels.scroll': pageAutomation('none'),
+  'xiaohongshu.feed.refresh': pageAutomation('none'),
+  'facebook.feed.refresh': pageAutomation('none'),
   // —— 互动写：每条直接产生可归因到该账号的新对象 ——
   'interaction.like': pageAutomation(),
   'interaction.collect': pageAutomation(),
   'interaction.follow': pageAutomation(),
   'interaction.comment': pageAutomation(),
   'interaction.like_comment': pageAutomation(),
-  'group.join': pageAutomation(),
+  'facebook.group.join': pageAutomation(),
   'navigation.back': pageAutomation('none'),
-  'note.browse_images': pageAutomation('none'),
-  'note.scroll_comments': pageAutomation('none'),
-  'profile.open': pageAutomation('none'),
+  'xiaohongshu.note.browse_images': pageAutomation('none'),
+  'xiaohongshu.note.scroll_comments': pageAutomation('none'),
+  'xiaohongshu.profile.open': pageAutomation('none'),
   // 身份救援放行清单的两条成员（边缘 identity-command-gate.ts）：运行期身份落到「不知道浏览器里
   // 登着谁」的终局时，节点拒绝一切代表该账号的动作，只放行读 / 收尾 / 救援命令，而这两条是**唯一**
   // 能问出当前登录身份、从而解开该终局的事实来源。云端这一侧漏登记 ⇒ 出口闸判 operation_unclassified
@@ -122,11 +130,11 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   'identity.read_self_profile': pageObservation(),
   // 观察命令「问现状」（change add-state-observation-command）：纯读探针，一次带回当前面 + 登录身份。
   'state.read': pageObservation(),
-  'notification.open': pageAutomation('none'),
-  'notification.browse_comments': pageAutomation('none'),
-  'notification.browse_likes': pageAutomation('none'),
-  'notification.browse_follows': pageAutomation('none'),
-  'notification.back_home': pageAutomation('none'),
+  'xiaohongshu.notification.open': pageAutomation('none'),
+  'xiaohongshu.notification.browse_comments': pageAutomation('none'),
+  'xiaohongshu.notification.browse_likes': pageAutomation('none'),
+  'xiaohongshu.notification.browse_follows': pageAutomation('none'),
+  'xiaohongshu.notification.back_home': pageAutomation('none'),
   // 留痕维按消息类型语义判（发布 ⇒ 留痕）；publish.command 按最坏一档（多种原子里只有
   // 「点提交」真留痕，但本表按消息类型编址）。
   'publish.command': pageAutomation(),

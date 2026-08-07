@@ -89,7 +89,7 @@ export function buildFacebookGroupJoinEdgeSteps(deps: FacebookGroupJoinEdgeSteps
       timeout,
       () =>
         push(
-          makeEnvelope('group.join', randomUUID(), Date.now(), {
+          makeEnvelope('facebook.group.join', randomUUID(), Date.now(), {
             taskId: deps.taskId,
             groupUrl,
             click,

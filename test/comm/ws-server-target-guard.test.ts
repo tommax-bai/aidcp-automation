@@ -68,7 +68,7 @@ test('search.execute 真送达后按连接登记待决 activity，供终态关�
   const s = new EdgeCloudServer({ handler, port: 0, clock: () => 0 });
   await s.start();
   const ws = await connectEdge(s.address()!, 'edge-search', 'acc-search', [SEARCH_ACTIVITY_RECEIPT_CAPABILITY]);
-  const command = makeEnvelope('search.execute', 'search-env', 0, {
+  const command = makeEnvelope('xiaohongshu.search.execute', 'search-env', 0, {
     activityId: 'activity-search',
     purpose: 'task_targeting',
     scope: 'container',
@@ -132,7 +132,7 @@ test('缺目标 edgeId 绝不广播：多个在线 edge 时命中 0（诚实失�
   const wsA = await connectEdge(port, 'edge-a', 'acc-1');
   const wsB = await connectEdge(port, 'edge-b', 'acc-2');
 
-  const scroll = makeEnvelope('page.scroll', 'c1', 0, {});
+  const scroll = makeEnvelope('xiaohongshu.feed.scroll', 'c1', 0, {});
   // undefined 目标 → 不广播、命中 0
   assert.equal(s.pushToEdges(scroll), 0, 'undefined edgeId 不得广播');
   // 空串目标 → 同样不广播
@@ -153,12 +153,12 @@ test('删除生命周期同步闸抑制普通 WS 自动化，但不新增任何�
   });
   await s.start();
   const edge = await connectEdge(s.address()!, 'ads-profile-delete', 'acc-1');
-  assert.equal(s.pushToEdges(makeEnvelope('page.scroll', 'blocked-1', 0, {}), 'ads-profile-delete'), 0);
+  assert.equal(s.pushToEdges(makeEnvelope('xiaohongshu.feed.scroll', 'blocked-1', 0, {}), 'ads-profile-delete'), 0);
   assert.equal(s.pushToEdges(makeEnvelope('session.end', 'allowed-1', 0, { reason: 'environment_delete' }),
     'ads-profile-delete'), 1);
   const [data] = (await once(edge, 'message')) as [Buffer | string];
   assert.equal(JSON.parse(data.toString()).type, 'session.end');
-  assert.deepEqual(seen, ['ads-profile-delete:page.scroll', 'ads-profile-delete:session.end']);
+  assert.deepEqual(seen, ['ads-profile-delete:xiaohongshu.feed.scroll', 'ads-profile-delete:session.end']);
   edge.close();
   await s.close();
 });
@@ -263,19 +263,19 @@ test('带目标 edgeId 只命中目标那一台，其余在线 edge 不被误投
   const bFrames: string[] = [];
   wsB.on('message', (d) => bFrames.push(typeof d === 'string' ? d : d.toString()));
 
-  const scroll = makeEnvelope('page.scroll', 'c1', 0, {});
+  const scroll = makeEnvelope('xiaohongshu.feed.scroll', 'c1', 0, {});
   assert.equal(s.pushToEdges(scroll, 'edge-a'), 1, '定向 edge-a 只命中 1 台');
   // edge-a 应收到该帧（等一条消息，确认送达）。
   const [aData] = (await once(wsA, 'message')) as [Buffer | string];
   const aEnv = JSON.parse(typeof aData === 'string' ? aData : aData.toString()) as Envelope;
-  assert.equal(aEnv.type, 'page.scroll');
+  assert.equal(aEnv.type, 'xiaohongshu.feed.scroll');
 
   // 定向不存在的 edgeId → 命中 0（诚实失败，不回退广播）。
   assert.equal(s.pushToEdges(scroll, 'edge-zzz'), 0, '未知 edgeId 命中 0，不广播');
 
   // edge-b 全程不应收到任何 page.scroll。
   assert.equal(
-    bFrames.filter((f) => f.includes('page.scroll')).length,
+    bFrames.filter((f) => f.includes('xiaohongshu.feed.scroll')).length,
     0,
     'edge-b 不得收到定向 edge-a 的命令',
   );
@@ -312,6 +312,34 @@ test('平台段出口闸：错配拒发（platform_mismatch）、匹配的未登
   } finally {
     console.warn = origWarn;
     ws.close();
+    await server.close();
+  }
+});
+
+/** 词汇批 4 转正核验：真实平台段命令对正确平台放行、对错配平台精确拒发。 */
+test('平台段出口闸（真实新名）：facebook.feed.scroll 只进 facebook 会话', async () => {
+  const server = new EdgeCloudServer({ port: 0, handler: helloHandler, clock: () => 0 });
+  await server.start();
+  const port = server.address()!;
+  const wsXhs = await connectEdge(port, 'edge-xhs', 'acc-x', undefined, 'xiaohongshu');
+  const wsFb = await connectEdge(port, 'edge-fb', 'acc-f', undefined, 'facebook');
+  const warns: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warns.push(args.map(String).join(' ')); };
+  try {
+    const rejected = server.pushToEdges(makeEnvelope('facebook.feed.scroll', 'rn-1', 0, {} as never), 'edge-xhs');
+    assert.equal(rejected, 0, '发往 xiaohongshu 会话的 facebook.feed.scroll 必须命中 0');
+    assert.ok(warns.some((w) => w.includes('platform_mismatch') && w.includes('facebook.feed.scroll')));
+
+    const delivered = server.pushToEdges(makeEnvelope('facebook.feed.scroll', 'rn-2', 0, {} as never), 'edge-fb');
+    assert.equal(delivered, 1, '平台匹配且已登记的真实新名必须正常投递');
+
+    const deliveredXhs = server.pushToEdges(makeEnvelope('xiaohongshu.notification.open', 'rn-3', 0, {} as never), 'edge-xhs');
+    assert.equal(deliveredXhs, 1, 'xiaohongshu 专属命令对 xiaohongshu 会话必须正常投递');
+  } finally {
+    console.warn = origWarn;
+    wsXhs.close();
+    wsFb.close();
     await server.close();
   }
 });

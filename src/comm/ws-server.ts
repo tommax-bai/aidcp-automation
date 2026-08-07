@@ -401,7 +401,7 @@ export class EdgeCloudServer implements EdgePusher {
       if (!bypassPause && conn.session.edgeId && this.pausedEdges.has(conn.session.edgeId)) continue;
       if (conn.ws.readyState === WebSocket.OPEN) {
         conn.ws.send(frame);
-        if (outbound.type === 'search.execute' && (conn.session.capabilities ?? []).includes(SEARCH_ACTIVITY_RECEIPT_CAPABILITY)) {
+        if ((outbound.type === 'xiaohongshu.search.execute' || outbound.type === 'facebook.search.execute') && (conn.session.capabilities ?? []).includes(SEARCH_ACTIVITY_RECEIPT_CAPABILITY)) {
           const payload = outbound.payload as Record<string, unknown>;
           const activityId = typeof payload.activityId === 'string' && payload.activityId.trim()
             ? payload.activityId.trim()

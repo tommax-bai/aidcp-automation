@@ -270,7 +270,7 @@ describe('FacebookGroupJoinScheduler', () => {
   it('reconciles a dispatched mode join by exact-group no-click observation only', async () => {
     const h = makeHarness({
       edge: (env, bus) => {
-        assert.equal(env.type, 'group.join');
+        assert.equal(env.type, 'facebook.group.join');
         assert.equal(env.payload.groupUrl, GROUP);
         assert.equal(env.payload.click, false);
         bus.emit('action.completed', {
@@ -460,7 +460,7 @@ describe('FacebookGroupJoinScheduler', () => {
       const r = await h.scheduler.triggerScheduled('acc-fb');
       assert.equal(r.triggered, true);
       assert.equal(r.outcome, 'gated_skip');
-      assert.equal(h.sent[0].type, 'group.join');
+      assert.equal(h.sent[0].type, 'facebook.group.join');
     } finally {
       if (previousAuto === undefined) delete process.env.AIDCP_FB_GROUP_JOIN_AUTO;
       else process.env.AIDCP_FB_GROUP_JOIN_AUTO = previousAuto;
@@ -862,7 +862,7 @@ describe('FacebookGroupJoinScheduler', () => {
     assert.ok(h.targetCalls.includes(`ensure:${SPEC_URL}`), 'ensureTarget 被调用（enabled=false、不外泄成公共目标）');
     assert.ok(h.membershipCalls.includes(`claimSpecific:${SPEC_URL}`));
     assert.ok(h.membershipCalls.includes(`joined:${SPEC_URL}:member_signal`));
-    assert.equal(h.sent[0].type, 'group.join');
+    assert.equal(h.sent[0].type, 'facebook.group.join');
     assert.ok(h.auditRows.every((row) => row.triggerSource === 'manual_specific'));
   });
 
