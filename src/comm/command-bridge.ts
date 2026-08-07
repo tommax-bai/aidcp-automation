@@ -114,7 +114,10 @@ export function edgeCommandToEnvelope(command: EdgeCommand, platform?: PlatformI
     case 'close_note':
       return createEnvelope(platformScopedType('close_note', platform), command.params ?? {});
     case 'like': {
-      // 词汇批 5：对象由发令方声明（Reels/feed 视频路径标 video），缺省 note；
+      // 词汇批 5：对象由发令方声明。生产发令方（RoleDispatcher 的下发出口）已用
+      // `withResolvedLikeObject` 按目标身份把对象维补满——规范 Reel ⇒ video，其余 ⇒ note。
+      // 下面的 `?? 'note'` 只给直接构造 EdgeCommand 的调用方兜底，MUST NOT 被当成
+      // 「翻译层替发令方判断对象」：漏标一旦落到这里就是静默错标，正是收口修正的那个缺陷。
       // 不存在组合（xiaohongshu×video）响亮 throw——结构性不可达的后备，非第二道支持闸。
       if (!platform) {
         throw new Error('like requires a platform for translation, got none');

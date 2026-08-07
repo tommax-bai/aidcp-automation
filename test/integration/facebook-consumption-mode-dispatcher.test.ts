@@ -7,6 +7,7 @@ import type {
 } from '../../src/orchestrator/facebook-consumption-mode-types.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import { InteractionGuard } from '../../src/risk/interaction-guard.js';
+import { stableFacebookRuleContentKey } from '../../src/orchestrator/facebook-rule-mode.js';
 
 const soul: Soul = {
   identity: { name: 'Consumption Account', role: 'operator', background: 'test', tone: 'neutral' },
@@ -79,6 +80,8 @@ function makeDispatcher(input: {
   triggerCalls: FacebookConsumptionActionView[];
   supersedeCalls?: Array<{ accountId: string; policyRevision: number; mode: string }>;
   interactionGuard?: InteractionGuard;
+  /** 覆盖消费动作的点赞目标（缺省是普通帖）；Reels 主浏览入口的账号这里就是一条 `/reel/<id>`。 */
+  contentUrl?: string;
   settle?: (
     receipt: FacebookConsumptionActionReceiptInput,
   ) => Promise<
@@ -86,7 +89,14 @@ function makeDispatcher(input: {
     | { kind: 'settled'; action: FacebookConsumptionActionView; nextAction: FacebookConsumptionActionView | null }
   >;
 }): RoleDispatcher {
-  const created = likeAction();
+  const contentUrl = input.contentUrl ?? targetUrl;
+  // 目标身份键与目标地址必须一起改，否则 dispatcher 会判成「不在目标帖上」先发导航、根本走不到点赞。
+  const contentKey = input.contentUrl ? stableFacebookRuleContentKey(input.contentUrl) : null;
+  const retarget = (action: FacebookConsumptionActionView): FacebookConsumptionActionView =>
+    (action.actionType === 'like'
+      ? { ...action, target: { ...action.target, contentUrl, ...(contentKey ? { contentKey } : {}) } }
+      : action);
+  const created = retarget(likeAction());
   return new RoleDispatcher({
     soul,
     llm: { complete: async () => '{"verdict":"skip"}' },
@@ -101,33 +111,33 @@ function makeDispatcher(input: {
     applyFacebookConsumptionView: async () => ({ kind: 'action_created', action: created }),
     claimFacebookConsumptionAction: async () => ({
       kind: 'claimed',
-      action: likeAction({
+      action: retarget(likeAction({
         ownerId: 'role-owner',
         ownerExpiresAt: '2026-07-30T00:01:00.000Z',
         version: 2,
-      }),
+      })),
     }),
     markFacebookConsumptionActionDispatched: async () => ({
       kind: 'updated',
-      action: likeAction({
+      action: retarget(likeAction({
         state: 'dispatched',
         dispatchPhase: 'dispatched',
         ownerId: 'role-owner',
         ownerExpiresAt: '2026-07-30T00:01:00.000Z',
         version: 3,
         dispatchedAt: '2026-07-30T00:00:01.000Z',
-      }),
+      })),
     }),
     settleFacebookConsumptionAction: async (receipt) => {
       input.receipts.push(receipt);
       if (input.settle) return input.settle(receipt);
       return {
         kind: 'settled',
-        action: likeAction({
+        action: retarget(likeAction({
           state: 'terminal',
           dispatchPhase: 'settled',
           outcome: receipt.outcome,
-        }),
+        })),
         nextAction: null,
       };
     },
@@ -142,17 +152,62 @@ function makeDispatcher(input: {
   });
 }
 
-function emitConfirmedView(dispatcher: RoleDispatcher): void {
+function emitConfirmedView(
+  dispatcher: RoleDispatcher,
+  view: { noteId?: string; source?: 'detail' | 'reels' | 'feed_video' } = {},
+): void {
   dispatcher.bus.emit('facebook.rule.view.confirmed', {
     accountId: 'fb-consumption-1',
-    noteId: targetUrl,
+    noteId: view.noteId ?? targetUrl,
     sourceDedupeKey: 'view-5',
-    source: 'detail',
+    source: view.source ?? 'detail',
     occurredAt: Date.now(),
   });
 }
 
 describe('RoleDispatcher facebook consumption mode', () => {
+  // 词汇批 5 的对象维在批内只给两条随机点赞路径标了 video，消费链按「点赞恒在 feed」的假设
+  // 沿用缺省 note。主浏览入口钉为 Reels 的账号让这条假设失效：目标本身就是 Reel，`facebook.note.like`
+  // 撞上边缘的对象核对被整条拒收（object_mismatch_observed_reels，dev 上三小时 75 条全灭）。
+  it('declares the video object when the consumption like target is a Reel', async () => {
+    const reelUrl = 'https://www.facebook.com/reel/1353704306281645';
+    const commands: EdgeCommand[] = [];
+    const receipts: FacebookConsumptionActionReceiptInput[] = [];
+    const triggerCalls: FacebookConsumptionActionView[] = [];
+    const dispatcher = makeDispatcher({ commands, receipts, triggerCalls, contentUrl: reelUrl });
+    dispatcher.setCurrentAccountId('fb-consumption-1');
+    dispatcher.setup();
+    dispatcher.startSession();
+
+    emitConfirmedView(dispatcher, { noteId: reelUrl, source: 'reels' });
+    await waitForAsyncChain();
+
+    const like = commands.find((command) => command.action === 'like');
+    assert.equal(like?.params?.noteId, reelUrl);
+    assert.equal(like?.likeObject, 'video', 'a Reel target MUST be declared as the video object');
+    dispatcher.endSession();
+  });
+
+  // 对称面：普通帖仍是 note 对象。若此刻页面停在 Reels 面，那是真的目标/面不符，
+  // MUST 由边缘诚实拒收——云端 MUST NOT 靠改口对象把它掩盖成一次「就地点赞」。
+  it('keeps the note object for an ordinary post target', async () => {
+    const commands: EdgeCommand[] = [];
+    const receipts: FacebookConsumptionActionReceiptInput[] = [];
+    const triggerCalls: FacebookConsumptionActionView[] = [];
+    const dispatcher = makeDispatcher({ commands, receipts, triggerCalls });
+    dispatcher.setCurrentAccountId('fb-consumption-1');
+    dispatcher.setup();
+    dispatcher.startSession();
+
+    emitConfirmedView(dispatcher);
+    await waitForAsyncChain();
+
+    const like = commands.find((command) => command.action === 'like');
+    assert.equal(like?.params?.noteId, targetUrl);
+    assert.equal(like?.likeObject, 'note');
+    dispatcher.endSession();
+  });
+
   it('dispatches the exact trigger target and does not count already_liked as a new like', async () => {
     const commands: EdgeCommand[] = [];
     const receipts: FacebookConsumptionActionReceiptInput[] = [];

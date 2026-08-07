@@ -726,8 +726,8 @@ export interface EdgeCommand {
   reason?: string;
   /**
    * like 的对象（词汇批 5：按对象拆、不按位置拆，bridge 据此选 {p}.note.like / facebook.video.like）。
-   * 仅 action='like' 有意义；Reels 与 feed 视频帖两类发送点显式标 'video'，缺省 'note'。
-   * 关联键值不随对象变（回执恒 action='like'）。
+   * 仅 action='like' 有意义；发送点可显式声明，未声明的一律由 `withResolvedLikeObject` 按目标身份补齐
+   * （见该函数）。关联键值不随对象变（回执恒 action='like'）。
    */
   likeObject?: 'note' | 'video';
   /**
@@ -736,6 +736,25 @@ export interface EdgeCommand {
    * 缺失时 bridge 响亮 throw——补空即决策，翻译层不代答。
    */
   surface?: 'feed' | 'search' | 'reels';
+}
+
+/**
+ * like 命令的对象维补空（下发出口单点，词汇批 5 的收口修正）。
+ *
+ * **为什么补在这里而不是「让每个发送点自己记得标」**：批 5 只给两条随机点赞路径标了 `video`，
+ * 其余发送点按「消费/规则模式点赞恒在 feed」这条假设沿用缺省 `note`。这条假设对**主浏览入口
+ * 钉为 Reels 的账号**不成立——消费链选中的目标本身就是 Reel（`/reel/<id>`），于是每一条点赞
+ * 都以 `facebook.note.like` 发出，撞上边缘的对象核对被诚实拒收（`object_mismatch_observed_reels`），
+ * 实测三小时 75 条全灭。把「没声明」翻译成「声明了 note」正是红线里的静默错标，故收口到唯一出口。
+ *
+ * **对象是目标自身的属性，不是对现场的猜测**：规范 Reel 身份 ⇒ `video`，其余 ⇒ `note`。
+ * 显式声明恒优先。非 Reel 目标即便此刻页面停在 Reels 面也仍标 `note`——那是真的目标/面不符，
+ * MUST 由边缘诚实拒收，MUST NOT 在此掩盖。
+ */
+export function withResolvedLikeObject(command: EdgeCommand): EdgeCommand {
+  if (command.action !== 'like' || command.likeObject !== undefined) return command;
+  const noteId = typeof command.params?.noteId === 'string' ? command.params.noteId : undefined;
+  return { ...command, likeObject: isCanonicalFacebookReelNoteId(noteId) ? 'video' : 'note' };
 }
 
 export interface VisibleCard {
@@ -1968,10 +1987,13 @@ export class RoleDispatcher {
         const queued = this.pendingNotificationCommands;
         this.pendingNotificationCommands = [];
         for (const command of queued) {
-          this.rawSendCommand({
+          // 排队重放绕过了 sendCommand 尾部的对象维补空（入队时就已 return），故在此原样补一次：
+          // 队里当前只装巡视命令、结构上不含 like，补空对它们是 no-op——但这样「凡进 rawSendCommand
+          // 的 like 必带已解析对象」才是构造上成立的，而不是靠读入队条件推出来的。
+          this.rawSendCommand(withResolvedLikeObject({
             ...command,
             params: { ...(command.params ?? {}), taskId: lease.taskId },
-          });
+          }));
         }
       })
       .catch((err) => {
@@ -2230,6 +2252,7 @@ export class RoleDispatcher {
       }
       if (key) this.pendingInteractionKeys.set(command.action, key);
     }
+    command = withResolvedLikeObject(command);
     this.rawSendCommand(command);
     return true;
   }
