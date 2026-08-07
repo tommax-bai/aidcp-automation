@@ -41,7 +41,7 @@ test('ui-snapshot: hello 快照带昵称 + 最近发布，定向到该 edge', as
   await service.pushHelloSnapshot('acc-1', 'edge-1');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].edgeId, 'edge-1');
-  assert.equal(sent[0].env.type, 'ui.snapshot');
+  assert.equal(sent[0].env.type, 'ui.push_snapshot');
   assert.deepEqual(sent[0].env.payload.account, { id: 'acc-1', nickname: '晚风手作' });
   assert.deepEqual(sent[0].env.payload.lastPublish, { title: '上一篇笔记', at: 1730000000000 });
   assert.equal(sent[0].env.payload.publish, undefined);

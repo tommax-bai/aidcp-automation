@@ -122,7 +122,7 @@ test('browser-standby: 未知的非配额阻塞 MUST NOT 让位（兜底：不�
 // ─── 验证码：真正可达的那条路（change standby-captcha-must-not-yield）──────────────────────
 //
 // 验证码上报 → 云端信号升为 confirmed → 状态机 normal → **restricted** → 续场闸判停工 → 待机判定说「该让位」。
-// 而 ui.snapshot **有意豁免**验证码暂停闸（它是界面数据、不是页面命令），提示照样送到那个卡着验证码的边缘。
+// 而 ui.push_snapshot **有意豁免**验证码暂停闸（它是界面数据、不是页面命令），提示照样送到那个卡着验证码的边缘。
 // 于是浏览器会在运维正被要求去解验证码时被关掉。这是 standby-covers-idle-waits 引入的可达回归。
 
 test('browser-standby: 边缘卡在验证码上 → MUST NOT 让位（哪怕 restricted 已判停工）', () => {
@@ -352,7 +352,7 @@ test('browser-standby: frozen 维持回访语义（续场闸无 resumeAt，扫�
   assert.ok(hint.waitMs >= 5 * 60_000, '回访跨度必须跨过门槛');
 });
 
-test('browser-standby: ui.snapshot 待机载荷字段零增减（本 change 不改协议）', () => {
+test('browser-standby: ui.push_snapshot 待机载荷字段零增减（本 change 不改协议）', () => {
   const timed = buildBrowserStandbyHint(
     source({ allowed: false, reason: 'state:restricted', retryAfterMs: 20 * 3_600_000, status: 'restricted' }),
     { now: 1_000, config: CFG },

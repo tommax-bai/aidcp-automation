@@ -145,7 +145,7 @@ export function edgeCommandToEnvelope(command: EdgeCommand, platform?: PlatformI
     case 'profile_open':
       return createEnvelope(platformScopedType('profile_open', platform), command.params ?? {});
     case 'identity_read_current':
-      return createEnvelope('identity.read_current', command.params ?? {});
+      return createEnvelope('identity.read_current_page', command.params ?? {});
     case 'identity_read_self_profile':
       return createEnvelope('identity.read_self_profile', command.params ?? {});
     case 'state_read':

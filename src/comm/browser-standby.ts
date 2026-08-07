@@ -22,7 +22,7 @@ export const DEFAULT_BROWSER_STANDBY_WARMUP_MS = 90_000;
  * 这里赋予的是**回访**语义：「多久之后回来再问一次」。它表达的是「边缘确实会在那时醒来」这一事实，而非
  * 对恢复的承诺。
  *
- * 主唤醒路径其实是 `ui.snapshot` 那条约 60s 的周期链（冷待机期间核心进程与云端连接不断、链继续）：账号一恢复，
+ * 主唤醒路径其实是 `ui.push_snapshot` 那条约 60s 的周期链（冷待机期间核心进程与云端连接不断、链继续）：账号一恢复，
  * 下一跳提示即 `eligible=false`，边缘据此唤醒。周期链健在时每跳都会把回访时刻顺延，**回访因而只在周期链断掉时
  * 才真正触发——它是一道死人开关，不是常规路径**。
  */
@@ -129,7 +129,7 @@ export function buildBrowserStandbyHint(
 
   /**
    * 无恢复时刻的阻塞 → 让位 + 回访。`wakeAt` 在此是「多久之后回来再问一次」，**不是恢复承诺**。
-   * 唤醒主路径是 ui.snapshot 的 ~60s 周期链（每跳都会把回访时刻顺延）；回访只在周期链断掉时才真正触发。
+   * 唤醒主路径是 ui.push_snapshot 的 ~60s 周期链（每跳都会把回访时刻顺延）；回访只在周期链断掉时才真正触发。
    */
   const revisit = (reason: string, hintSource: UiBrowserStandbyPayload['source']) =>
     payload(reason, Math.max(config.revisitMs ?? DEFAULT_BROWSER_STANDBY_REVISIT_MS, config.minWaitMs), true, hintSource);
@@ -142,7 +142,7 @@ export function buildBrowserStandbyHint(
   // 「解除这个阻塞需不需要浏览器」，却漏了把「需要」这一半接上输入——于是判据只剩下半边，谁都当成「不需要」。
   //
   // 后果是可达且严重的（对抗评审逐环坐实）：验证码上报 → 云端把风控信号升为 confirmed → 状态机 normal
-  // → **restricted** → 续场闸判停工 → 本模块判「该让位」→ 而 `ui.snapshot` 是**有意豁免验证码暂停闸**的
+  // → **restricted** → 续场闸判停工 → 本模块判「该让位」→ 而 `ui.push_snapshot` 是**有意豁免验证码暂停闸**的
   //（它是界面数据、不是页面命令），提示照样送达 → **把运维正要去解验证码的那个浏览器关掉**。
   // 边缘那道 overlayBlocked 闸挡不住：它会被「浏览循环结束」或任意统计更新清掉。
   //

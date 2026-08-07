@@ -38,7 +38,7 @@ import {
   type HelloPayload,
   type BrowserStatusPayload,
   type StateReadPayload,
-  type StateReportPayload,
+  type StateObservedPayload,
 } from '../../src/comm/protocol.js';
 
 /**
@@ -47,7 +47,7 @@ import {
  */
 const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   hello: true, welcome: true, 'browser.status': true, 'standby.decision': true,
-  'ui.snapshot': true,
+  'ui.push_snapshot': true,
   'plan.request': true, 'plan.response': true,
   'select.request': true, 'select.response': true,
   'anchor.get': true, 'anchor.get.result': true, 'anchor.report': true,
@@ -58,7 +58,7 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'xiaohongshu.search.execute': true, 'facebook.search.execute': true, 'session.end': true,
   'session.budget.request': true, 'session.budget': true,
   'risk.canDo': true, 'risk.canDo.result': true, 'risk.record': true, 'risk.record.result': true,
-  'risk.captcha_detected': true, 'risk.captcha_cleared': true,
+  'captcha.detected': true, 'captcha.cleared': true,
   'captcha.assist.capture': true, 'captcha.assist.snapshot': true,
   'captcha.assist.click': true, 'captcha.assist.click_result': true,
   'edge.task.acquire': true, 'edge.task.acquired': true,
@@ -76,9 +76,9 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'xiaohongshu.note.comment': true, 'facebook.note.comment': true, 'xiaohongshu.comment.like': true,
   'facebook.group.join': true,
   'navigation.back': true, 'xiaohongshu.note.browse_images': true, 'xiaohongshu.note.scroll_comments': true, 'xiaohongshu.profile.open': true,
-  'identity.read_current': true, 'identity.read_self_profile': true,
+  'identity.read_current_page': true, 'identity.read_self_profile': true,
   'page.cards': true, 'note.detail': true, 'profile.detail': true, 'identity.observed': true, 'action.completed': true,
-  'state.read': true, 'state.report': true,
+  'state.read': true, 'state.observed': true,
   'xiaohongshu.notification.open': true, 'xiaohongshu.notification.browse_comments': true, 'xiaohongshu.notification.browse_likes': true,
   'xiaohongshu.notification.browse_follows': true, 'xiaohongshu.notification.back_home': true,
   'notification.detected': true, 'notification.home': true, 'notification.items': true,
@@ -219,33 +219,33 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     const readBack = parseEnvelope(JSON.stringify(makeEnvelope('state.read', 'sr-1', 1700000000000, read)));
     assert.equal((readBack!.payload as StateReadPayload).captureId, 'cap-1');
 
-    const confirmed: StateReportPayload = {
+    const confirmed: StateObservedPayload = {
       captureId: 'cap-1',
       surface: { outcome: 'confirmed', kind: 'note_detail' },
       identity: { outcome: 'confirmed', accountId: 'acc-1', nickname: '昵称' },
       observedAt: 1700000000123,
     };
-    const confirmedBack = parseEnvelope(JSON.stringify(makeEnvelope('state.report', 'sr-1', 1700000000123, confirmed)));
-    assert.deepEqual((confirmedBack!.payload as StateReportPayload).surface, { outcome: 'confirmed', kind: 'note_detail' });
+    const confirmedBack = parseEnvelope(JSON.stringify(makeEnvelope('state.observed', 'sr-1', 1700000000123, confirmed)));
+    assert.deepEqual((confirmedBack!.payload as StateObservedPayload).surface, { outcome: 'confirmed', kind: 'note_detail' });
     assert.deepEqual(
-      (confirmedBack!.payload as StateReportPayload).identity,
+      (confirmedBack!.payload as StateObservedPayload).identity,
       { outcome: 'confirmed', accountId: 'acc-1', nickname: '昵称' },
     );
-    assert.equal((confirmedBack!.payload as StateReportPayload).observedAt, 1700000000123);
+    assert.equal((confirmedBack!.payload as StateObservedPayload).observedAt, 1700000000123);
 
-    const unconfirmed: StateReportPayload = {
+    const unconfirmed: StateObservedPayload = {
       captureId: 'cap-2',
       surface: { outcome: 'unconfirmed', reason: 'page_unrecognized' },
       identity: { outcome: 'unconfirmed', reason: 'read_failed' },
       observedAt: 1700000000456,
     };
-    const unconfirmedBack = parseEnvelope(JSON.stringify(makeEnvelope('state.report', 'sr-2', 1700000000456, unconfirmed)));
+    const unconfirmedBack = parseEnvelope(JSON.stringify(makeEnvelope('state.observed', 'sr-2', 1700000000456, unconfirmed)));
     assert.deepEqual(
-      (unconfirmedBack!.payload as StateReportPayload).surface,
+      (unconfirmedBack!.payload as StateObservedPayload).surface,
       { outcome: 'unconfirmed', reason: 'page_unrecognized' },
     );
     assert.deepEqual(
-      (unconfirmedBack!.payload as StateReportPayload).identity,
+      (unconfirmedBack!.payload as StateObservedPayload).identity,
       { outcome: 'unconfirmed', reason: 'read_failed' },
     );
   });
@@ -265,15 +265,15 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal((resBack!.payload as PersonaGenerateResultPayload).identitySummary, '美妆达人');
   });
 
-  it('AC-PROTO-10 ui.snapshot personaBound 可选字段往返存活（change persona-wizard-onboarding-fixes）', () => {
+  it('AC-PROTO-10 ui.push_snapshot personaBound 可选字段往返存活（change persona-wizard-onboarding-fixes）', () => {
     // 加可选 personaBound（无新增 MessageType、计数随审批动作协议为 67）；typecheck 抓不到可选字段漂移，往返断言兜底。
     const snap: UiSnapshotPayload = { account: { id: 'acc-1' }, personaBound: true, personaWritingLanguage: 'vi' };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 's-1', 1700000000000, snap)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 's-1', 1700000000000, snap)));
     assert.equal((back!.payload as UiSnapshotPayload).personaBound, true);
     assert.equal((back!.payload as UiSnapshotPayload).personaWritingLanguage, 'vi');
   });
 
-  it('AC-PROTO-11 ui.snapshot 稿件预览字段往返存活', () => {
+  it('AC-PROTO-11 ui.push_snapshot 稿件预览字段往返存活', () => {
     const snap: UiSnapshotPayload = {
       publishPreview: {
         recordId: 89,
@@ -287,11 +287,11 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
         updatedAt: 1730000000000,
       },
     };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 's-2', 1700000000000, snap)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 's-2', 1700000000000, snap)));
     assert.deepEqual((back!.payload as UiSnapshotPayload).publishPreview, snap.publishPreview);
   });
 
-  it('AC-PROTO-12 ui.snapshot browserStandby 可选字段往返存活（change browser-cold-standby-next-action）', () => {
+  it('AC-PROTO-12 ui.push_snapshot browserStandby 可选字段往返存活（change browser-cold-standby-next-action）', () => {
     const snap: UiSnapshotPayload = {
       browserStandby: {
         enabled: true,
@@ -305,13 +305,13 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
         warmupMs: 90_000,
       },
     };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 's-1', 1700000000000, snap)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 's-1', 1700000000000, snap)));
     assert.deepEqual((back!.payload as UiSnapshotPayload).browserStandby, snap.browserStandby);
   });
 
-  it('AC-PROTO-13 ui.snapshot submitted 表示页面已提交但链接待确认', () => {
+  it('AC-PROTO-13 ui.push_snapshot submitted 表示页面已提交但链接待确认', () => {
     const snap: UiSnapshotPayload = { publish: { state: 'submitted', title: '待链接确认的帖子', code: '#89' } };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 's-3', 1700000000000, snap)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 's-3', 1700000000000, snap)));
     assert.deepEqual((back!.payload as UiSnapshotPayload).publish, snap.publish);
   });
 
@@ -335,7 +335,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
         },
       },
     };
-    const snapBack = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 's-5', 1700000000000, snap)));
+    const snapBack = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 's-5', 1700000000000, snap)));
     assert.deepEqual((snapBack!.payload as UiSnapshotPayload).dailyUsage?.firstPost, snap.dailyUsage?.firstPost);
   });
 
@@ -364,7 +364,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal((back2!.payload as PublishCommandResultPayload).submitDispatched, undefined);
   });
 
-  it('AC-PROTO-17 ui.snapshot dailyUsage.slowStart 往返存活（payload 字段漂移 typecheck 完全抓不到）', () => {
+  it('AC-PROTO-17 ui.push_snapshot dailyUsage.slowStart 往返存活（payload 字段漂移 typecheck 完全抓不到）', () => {
     // 两份 protocol.ts 的机械保障只覆盖 MessageType 穷举，**payload 可选字段漂移一个都抓不到
     // ——而且已经漏过**：inspirationSummary 只活在 edge 侧，cloud 全仓含 test 零命中，
     // 客户端在渲染一个云端从未发过的字段。故此处手写往返把 slowStart 的每个字段焊死：
@@ -376,7 +376,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
         slowStart: { state: 'active', day: 3, totalDays: 7, since: 1699920000000, binding: true, eligible: true },
       },
     };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 'ss-1', 1700000000000, active)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 'ss-1', 1700000000000, active)));
     assert.deepEqual((back!.payload as UiSnapshotPayload).dailyUsage?.slowStart, active.dailyUsage?.slowStart);
 
     // binding=false（勾了但当前档位已更严、一格没压）必须能如实往返——它是一个被明说的态，
@@ -388,7 +388,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
         slowStart: { state: 'active', day: 5, totalDays: 7, binding: false, eligible: true },
       },
     };
-    const back2 = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 'ss-2', 1700000000000, notBinding)));
+    const back2 = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 'ss-2', 1700000000000, notBinding)));
     assert.equal((back2!.payload as UiSnapshotPayload).dailyUsage?.slowStart?.binding, false);
 
     // 三个 ineligibleReason 是裸联合字符串，两端各写一份 → 逐个焊死。
@@ -396,7 +396,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
       const snap: UiSnapshotPayload = {
         dailyUsage: { asOf: 1700000000000, totals: {}, slowStart: { state: 'off', totalDays: 7, eligible: false, ineligibleReason: reason } },
       };
-      const b = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 'ss-3', 1700000000000, snap)));
+      const b = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 'ss-3', 1700000000000, snap)));
       assert.equal((b!.payload as UiSnapshotPayload).dailyUsage?.slowStart?.ineligibleReason, reason);
     }
 
@@ -404,12 +404,12 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     const graduated: UiSnapshotPayload = {
       dailyUsage: { asOf: 1700000000000, totals: {}, slowStart: { state: 'graduated', totalDays: 7, since: 1699315200000, eligible: true } },
     };
-    const back3 = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 'ss-4', 1700000000000, graduated)));
+    const back3 = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 'ss-4', 1700000000000, graduated)));
     assert.deepEqual((back3!.payload as UiSnapshotPayload).dailyUsage?.slowStart, graduated.dailyUsage?.slowStart);
 
     // 字段整体缺省 = 未知（云端还没说）→ 往返后仍不出现；边缘据此整行不渲染，MUST NOT 当「关」。
     const absent: UiSnapshotPayload = { dailyUsage: { asOf: 1700000000000, totals: {} } };
-    const back4 = parseEnvelope(JSON.stringify(makeEnvelope('ui.snapshot', 'ss-5', 1700000000000, absent)));
+    const back4 = parseEnvelope(JSON.stringify(makeEnvelope('ui.push_snapshot', 'ss-5', 1700000000000, absent)));
     assert.equal((back4!.payload as UiSnapshotPayload).dailyUsage?.slowStart, undefined);
   });
 

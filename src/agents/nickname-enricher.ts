@@ -27,7 +27,7 @@ import type { RoleName } from '../event-bus/types.js';
 import type { IdentityObservedPayload } from '../comm/protocol.js';
 
 export interface NicknameCapturePlan {
-  command: 'identity.read_current' | 'identity.read_self_profile';
+  command: 'identity.read_current_page' | 'identity.read_self_profile';
   restore: 'none' | 'feed';
 }
 
@@ -170,7 +170,7 @@ export class NicknameEnricher extends BaseRole {
     const plan = this.activePlan;
     if (!plan) return;
     const expected =
-      plan.command === 'identity.read_current'
+      plan.command === 'identity.read_current_page'
         ? observation.source === 'current_page' && observation.pageEffect === 'none'
         : observation.source === 'self_profile' && observation.pageEffect === 'navigated_self_profile';
     if (!expected) return;

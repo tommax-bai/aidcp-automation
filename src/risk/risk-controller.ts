@@ -114,7 +114,7 @@ interface NurtureAnchor {
   source: 'environment' | 'legacy_env';
 }
 
-/** 慢启动对外投影（change account-level-slow-start）：供 ui.snapshot 组装，与 clamp 同源同格。 */
+/** 慢启动对外投影（change account-level-slow-start）：供 ui.push_snapshot 组装，与 clamp 同源同格。 */
 export interface SlowStartView {
   state: 'off' | 'active' | 'graduated';
   /** active 时 1..7。 */
@@ -538,7 +538,7 @@ export class RiskController {
   }
 
   /**
-   * 慢启动对外投影（change account-level-slow-start）：供 ui.snapshot 组装。
+   * 慢启动对外投影（change account-level-slow-start）：供 ui.push_snapshot 组装。
    * **与 clamp 共用 resolveNurtureAnchor + 同一次 clock()** → 徽章天数与生效天数同源同格。
    *
    * `binding` 是 clamp 是否至少收紧一项（逐位比较 clamp 前后两份数字）。**这个布尔必须真算**：

@@ -4,7 +4,7 @@ import { AUTOMATION_OPERATION_REGISTRY, automationOperationDescriptorFor } from 
 import type { MessageType } from '../../src/comm/protocol.js';
 
 test('Cloud automation channel classifies control, API-only automation, browser lifecycle, and page automation', () => {
-  assert.deepEqual(automationOperationDescriptorFor('ui.snapshot'), {
+  assert.deepEqual(automationOperationDescriptorFor('ui.push_snapshot'), {
     category: 'automation_control', transport: 'automation_ws', identity: 'bound_account', browser: 'forbidden',
     platformFootprint: 'none',
   });
@@ -28,9 +28,9 @@ test('identity read commands are dispatchable as page observation', () => {
   // recategorize-nonpage-commands 后它们不再与页面动作同类：类别是 page_observation
   //（翻译层观察，identity=local_environment——身份未落定时 MUST 可用，这正是它们存在的意义）。
   // 期望值按引用互为参照（两条必须同描述符），并锚定关键三维，不整抄 page 动作。
-  const a = automationOperationDescriptorFor('identity.read_current');
+  const a = automationOperationDescriptorFor('identity.read_current_page');
   const b = automationOperationDescriptorFor('identity.read_self_profile');
-  assert.notEqual(a, null, 'identity.read_current 必须已登记（否则出口闸静默拒发）');
+  assert.notEqual(a, null, 'identity.read_current_page 必须已登记（否则出口闸静默拒发）');
   assert.deepEqual(a, b, '两条身份读取必须同描述符');
   assert.equal(a?.category, 'page_observation');
   assert.equal(a?.identity, 'local_environment');
@@ -81,7 +81,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
   for (const type of [
     'session.end', 'xiaohongshu.note.open', 'xiaohongshu.search.execute', 'xiaohongshu.feed.scroll',
     'xiaohongshu.feed.refresh', 'navigation.back', 'xiaohongshu.note.browse_images', 'xiaohongshu.note.scroll_comments', 'xiaohongshu.profile.open',
-    'identity.read_current', 'identity.read_self_profile',
+    'identity.read_current_page', 'identity.read_self_profile',
     'xiaohongshu.notification.open', 'xiaohongshu.notification.browse_comments', 'xiaohongshu.notification.browse_likes',
     'xiaohongshu.notification.browse_follows', 'xiaohongshu.notification.back_home',
     'edge.task.acquire', 'edge.task.release', 'captcha.assist.capture', 'captcha.assist.click',
@@ -104,7 +104,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
   }
   // 控制与心跳。
   for (const type of [
-    'ui.snapshot', 'pacing.update', 'interaction.sync.ack', 'interaction.reply.result.ack',
+    'ui.push_snapshot', 'pacing.update', 'interaction.sync.ack', 'interaction.reply.result.ack',
     'interaction.offboard.ack', 'interaction.runtime.controls', 'ping', 'pong',
     'interaction.auth.reopen', 'interaction.browser.control',
   ] as MessageType[]) {

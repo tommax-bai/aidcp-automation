@@ -34,7 +34,7 @@ async function connectEdge(port: number, edgeId: string, accountId?: string): Pr
   return ws;
 }
 
-test('暂停后普通指令被丢弃、session.end/ui.snapshot/captcha assist 恢复命令必达、恢复后续发', async () => {
+test('暂停后普通指令被丢弃、session.end/ui.push_snapshot/captcha assist 恢复命令必达、恢复后续发', async () => {
   const s = new EdgeCloudServer({ handler: helloHandler, port: 0, clock: () => 0 });
   await s.start();
   const port = s.address();
@@ -51,10 +51,10 @@ test('暂停后普通指令被丢弃、session.end/ui.snapshot/captcha assist �
   // 暂停中：普通指令被丢弃；session.end 仍必达（不死锁）
   assert.equal(s.pushToEdges(scroll, 'edge-1'), 0, '暂停的 edge 不应收到普通指令');
   assert.equal(s.pushToEdges(end, 'edge-1'), 1, 'session.end 必达，绕过暂停闸');
-  // ui.snapshot 同样豁免（edge-companion-ui 8.1）：纯界面数据非页面命令，验证码暂停期
+  // ui.push_snapshot 同样豁免（edge-companion-ui 8.1）：纯界面数据非页面命令，验证码暂停期
   // 吞掉它会让发布终态（rejected/failed）推送永久丢失（终态不经 hello 快照回放）。
-  const snap = makeEnvelope('ui.snapshot', 'c3', 0, { publish: { state: 'failed', code: '#1' } });
-  assert.equal(s.pushToEdges(snap, 'edge-1'), 1, 'ui.snapshot 必达，绕过暂停闸');
+  const snap = makeEnvelope('ui.push_snapshot', 'c3', 0, { publish: { state: 'failed', code: '#1' } });
+  assert.equal(s.pushToEdges(snap, 'edge-1'), 1, 'ui.push_snapshot 必达，绕过暂停闸');
   const capture = makeEnvelope('captcha.assist.capture', 'c4', 0, { incidentId: 'cap-1', reason: 'refresh' });
   assert.equal(s.pushToEdges(capture, 'edge-1'), 1, 'captcha.assist.capture 必达，绕过暂停闸');
   const click = makeEnvelope('captcha.assist.click', 'c5', 0, {

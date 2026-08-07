@@ -73,7 +73,7 @@ const environmentAssist = (): AutomationOperationDescriptor => ({
  */
 export const AUTOMATION_OPERATION_REGISTRY = {
   // —— 控制与心跳：只动边缘本地投影 / 节奏 / outbox 确认，不触任何平台对象 ——
-  'ui.snapshot': automationControl('bound_account', 'none'),
+  'ui.push_snapshot': automationControl('bound_account', 'none'),
   'pacing.update': automationControl('bound_account', 'none'),
   'interaction.sync.ack': automationControl('bound_account', 'none'),
   'interaction.reply.result.ack': automationControl('bound_account', 'none'),
@@ -130,7 +130,7 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   // 登着谁」的终局时，节点拒绝一切代表该账号的动作，只放行读 / 收尾 / 救援命令，而这两条是**唯一**
   // 能问出当前登录身份、从而解开该终局的事实来源。云端这一侧漏登记 ⇒ 出口闸判 operation_unclassified
   // 静默拒发、投递数返回 0 ⇒ 那条自救通道结构上不成立。位置与边缘那份逐行对齐，便于人工比对。
-  'identity.read_current': pageObservation(),
+  'identity.read_current_page': pageObservation(),
   'identity.read_self_profile': pageObservation(),
   // 观察命令「问现状」（change add-state-observation-command）：纯读探针，一次带回当前面 + 登录身份。
   'state.read': pageObservation(),

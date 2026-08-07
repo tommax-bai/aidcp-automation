@@ -37,7 +37,7 @@ import {
   type NoteDetailPayload,
   type ProfileDetailPayload,
   type IdentityObservedPayload,
-  type StateReportPayload,
+  type StateObservedPayload,
   type ActionCompletedPayload,
   type CaptchaDetectedPayload,
   type CaptchaClearedPayload,
@@ -206,7 +206,7 @@ export interface HandlerDeps {
    * 未注入 = 恒不陈旧，逐位等于「未安装新鲜度事实源 → fresh」的既有语义。
    */
   configMirrorGate?: Pick<ConfigMirrorGatePort, 'noteStaleRefusal' | 'isStale'>;
-  /** 验证码事件协调器（risk.captcha_detected/cleared 的消费端）。未注入则两类上报被忽略（向后兼容）。 */
+  /** 验证码事件协调器（captcha.detected/cleared 的消费端）。未注入则两类上报被忽略（向后兼容）。 */
   captcha?: CaptchaCoordinator;
   /** 验证码协助通道：消费 edge 截图和人工点击复检结果。未注入则忽略（向后兼容）。 */
   captchaAssist?: Pick<CaptchaAssistService, 'onSnapshot' | 'onClickResult'>;
@@ -708,10 +708,10 @@ export class DefaultMessageHandler implements MessageHandler {
         return this.onPersonaGenerate(env, session);
       case 'persona.persist':
         return this.onPersonaPersist(env, session);
-      case 'risk.captcha_detected':
+      case 'captcha.detected':
         await this.deps.captcha?.onDetected(env.payload as CaptchaDetectedPayload, session, pusher);
         return null;
-      case 'risk.captcha_cleared':
+      case 'captcha.cleared':
         await this.deps.captcha?.onCleared(env.payload as CaptchaClearedPayload, session, pusher);
         return null;
       case 'captcha.assist.snapshot':
@@ -918,9 +918,9 @@ export class DefaultMessageHandler implements MessageHandler {
       // 观察命令「问现状」应答（change add-state-observation-command）：边缘按请求信封 id 回填
       // env.id（信封关联）。这里把应答连同 envelopeId 转成事件，pending 表（StateObservationChannel）
       // 按 payload.captureId 关联回请求方；只落通道，何时问 / 问完怎么改航向＝阶段四。
-      case 'state.report': {
-        const report = env.payload as StateReportPayload;
-        this.bus(session).emit('state.report.arrived', {
+      case 'state.observed': {
+        const report = env.payload as StateObservedPayload;
+        this.bus(session).emit('state.observed.arrived', {
           report,
           accountId: session.accountId,
           envelopeId: env.id,

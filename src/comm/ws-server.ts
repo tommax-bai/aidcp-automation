@@ -371,24 +371,24 @@ export class EdgeCloudServer implements EdgePusher {
       return 0;
     }
     let outbound = env;
-    if (env.type === 'ui.snapshot' && this.edgeCapabilities(edgeId)?.includes(CLIENT_DATA_PLANE_AUTOMATION_ENGINE_CAPABILITY)) {
+    if (env.type === 'ui.push_snapshot' && this.edgeCapabilities(edgeId)?.includes(CLIENT_DATA_PLANE_AUTOMATION_ENGINE_CAPABILITY)) {
       const payload = env.payload as Record<string, unknown>;
       const automationPayload: Record<string, unknown> = {};
       if (payload.browserStandby !== undefined) automationPayload.browserStandby = payload.browserStandby;
       if (Object.keys(automationPayload).length === 0) {
-        console.warn(`[ws-server] ui.snapshot 仅含 cloud_data（edge=${edgeId}）：新客户端应经 HTTP 拉取，拒绝下发`);
+        console.warn(`[ws-server] ui.push_snapshot 仅含 cloud_data（edge=${edgeId}）：新客户端应经 HTTP 拉取，拒绝下发`);
         return 0;
       }
       outbound = { ...env, payload: automationPayload } as Envelope;
     }
     const frame = JSON.stringify(outbound);
     // session.end 必达：绝不被验证码暂停闸吞掉，否则持久弹窗会导致会话无法终止（死锁）。
-    // ui.snapshot 的自动化投影同样豁免；新客户端的数据面字段已在上方过滤，
+    // ui.push_snapshot 的自动化投影同样豁免；新客户端的数据面字段已在上方过滤，
     // 人物、草稿、审批、发布等状态由 customer-auth HTTP 拉取，不经该暂停闸。
     // captcha.assist.* 下行恢复命令可穿透暂停闸；普通浏览/互动/发布页面动作仍被拦截。
     const bypassPause =
       env.type === 'session.end' ||
-      env.type === 'ui.snapshot' ||
+      env.type === 'ui.push_snapshot' ||
       env.type === 'edge.task.acquire' ||
       env.type === 'edge.task.release' ||
       env.type === 'interaction.runtime.controls' ||

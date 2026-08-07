@@ -13,10 +13,7 @@ export type {
   DelegatedAction,
   DelegatedActionSupport,
   NoteSupport,
-  IdentityCaptureCommand,
-  IdentityCaptureStrategy,
   CommentPlatformProfile,
-  PlatformRegistryEntry,
   ScheduledAutomationCatalogReader,
 } from 'aidcp-kernel/kernel/platform-types.js';
 import type {
@@ -25,10 +22,31 @@ import type {
   DelegatedActionSupport,
   NoteScopedAction,
   NoteSupport,
-  IdentityCaptureStrategy,
   CommentPlatformProfile,
-  PlatformRegistryEntry,
+  PlatformRegistryEntry as KernelPlatformRegistryEntry,
 } from 'aidcp-kernel/kernel/platform-types.js';
+
+// 词汇批 7（normalize-nonplatform-vocabulary）：`identity.read_current` 改名
+// `identity.read_current_page`，而 kernel platform-types（<= v0.1.2）的
+// `IdentityCaptureCommand` 仍钉着旧字面量——批 7 前置探查只查了 kernel 传输豁免名单，
+// 漏了这张类型。三条类型在此做**type-only 本地矫正**（零运行时痕迹，线名唯一事实源
+// 仍是 protocol.ts 的 MessageType 穷举）；kernel 出带新字面量的版本后，删掉本段、
+// 恢复上方 re-export 即可（届时 typecheck 会因重复声明当场提醒）。
+export type IdentityCaptureCommand = 'identity.read_current_page' | 'identity.read_self_profile';
+export type IdentityCaptureStrategy =
+  | {
+      supported: true;
+      command: IdentityCaptureCommand;
+      restore: 'none' | 'feed';
+      capability: 'identity_read_current_v1' | 'identity_read_self_profile_v1';
+    }
+  | {
+      supported: false;
+      reason: string;
+    };
+export type PlatformRegistryEntry = Omit<KernelPlatformRegistryEntry, 'identityCapture'> & {
+  identityCapture: IdentityCaptureStrategy;
+};
 // 四个不读注册表的判定件已单写在 kernel（change cloud-coupling-phase4-runtime-ports）；
 // 本地要用，同时对外等值再导出——`../platform/index` 的导出面逐字不变。
 import {
@@ -277,7 +295,7 @@ export const PLATFORM_REGISTRY: Record<PlatformId, PlatformRegistryEntry> = {
     },
     identityCapture: {
       supported: true,
-      command: 'identity.read_current',
+      command: 'identity.read_current_page',
       restore: 'none',
       capability: 'identity_read_current_v1',
     },

@@ -1,7 +1,7 @@
 /**
  * UiSnapshotService —— 陪伴界面数据下发（change edge-companion-ui 8.1）。
  *
- * 职责：把「边缘看不到、只有云端知道」的界面数据经 `ui.snapshot` 定向推给该账号的在线边缘：
+ * 职责：把「边缘看不到、只有云端知道」的界面数据经 `ui.push_snapshot` 定向推给该账号的在线边缘：
  *  - hello 注册完成后：全量快照（小红书昵称 + 最近成功发布摘要 + 在途候审/已批状态 + 待审稿件预览）；
  *  - 发布审批生命周期变化时：增量状态（pending / approved / submitted / rejected / failed）。
  *
@@ -290,7 +290,7 @@ export class UiSnapshotService {
   }
 
   private push(accountId: string, edgeId: string, payload: UiSnapshotPayload, tag: string): number {
-    const env = makeEnvelope('ui.snapshot', this.idGen(), this.clock(), payload);
+    const env = makeEnvelope('ui.push_snapshot', this.idGen(), this.clock(), payload);
     const sent = this.deps.pusher.pushToEdges(env, edgeId);
     if (sent <= 0) {
       this.logger.warn(`[ui-snapshot] ${tag} 推送未送达 account=${accountId} edge=${edgeId}（连接可能刚断，不重试）`);

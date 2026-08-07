@@ -3,7 +3,7 @@
  *
  * 守护点（tasks 3.2）：
  *   ① 发得出：登记表放行（出口闸不判 operation_unclassified）+ 桥接映射 state_read → state.read；
- *   ② 收得到：handler 把 state.report 转成 state.report.arrived 事件，携带边缘回填的信封 id；
+ *   ② 收得到：handler 把 state.observed 转成 state.observed.arrived 事件，携带边缘回填的信封 id；
  *   ③ 超时如实：pending 表按 captureId 关联；边缘静默 ⇒ `timeout` 结局，MUST NOT 伪造成
  *      一份 unconfirmed 观察；出口未投递 ⇒ `not_sent`；三态不得压成一态。
  */
@@ -18,7 +18,7 @@ import { automationOperationDescriptorFor } from '../../src/comm/operation-regis
 import { edgeCommandToEnvelope } from '../../src/comm/command-bridge.js';
 import { StateObservationChannel } from '../../src/comm/state-observation.js';
 import type { StateObservationOutcome } from '../../src/comm/state-observation.js';
-import type { StateReportPayload } from '../../src/comm/protocol.js';
+import type { StateObservedPayload } from '../../src/comm/protocol.js';
 
 function anchorStore(): AnchorStore {
   return {
@@ -31,7 +31,7 @@ function anchorStore(): AnchorStore {
   } as unknown as AnchorStore;
 }
 
-const sampleReport: StateReportPayload = {
+const sampleReport: StateObservedPayload = {
   captureId: 'cap-1',
   surface: { outcome: 'confirmed', kind: 'note_detail' },
   identity: { outcome: 'confirmed', accountId: 'acc-1', nickname: '昵称' },
@@ -56,10 +56,10 @@ test('command bridge maps state_read to a state.read envelope with captureId int
   assert.deepEqual(envelope.payload, { captureId: 'cap-9' });
 });
 
-test('handler turns state.report into state.report.arrived carrying the correlated envelope id', async () => {
+test('handler turns state.observed into state.observed.arrived carrying the correlated envelope id', async () => {
   const eventBus = new EventBus();
-  const arrived: Array<{ report: StateReportPayload; accountId?: string; envelopeId: string; ts: number }> = [];
-  eventBus.on('state.report.arrived', (p) => { arrived.push(p); });
+  const arrived: Array<{ report: StateObservedPayload; accountId?: string; envelopeId: string; ts: number }> = [];
+  eventBus.on('state.observed.arrived', (p) => { arrived.push(p); });
   const handler = new DefaultMessageHandler({
     planner: new SimplePlanner(),
     llm: { complete: async () => '0' },
@@ -70,7 +70,7 @@ test('handler turns state.report into state.report.arrived carrying the correlat
   const session: EdgeSession = { sessionId: 'edge-session-1', accountId: 'acc-1' } as EdgeSession;
 
   // 边缘按请求信封 id 回填 envelope.id（信封关联）；handler 必须把它原样带进事件。
-  const reply = await handler.handle(makeEnvelope('state.report', 'req-envelope-7', 1_784_044_802_100, sampleReport), session);
+  const reply = await handler.handle(makeEnvelope('state.observed', 'req-envelope-7', 1_784_044_802_100, sampleReport), session);
 
   assert.equal(reply, null);
   assert.equal(arrived.length, 1);

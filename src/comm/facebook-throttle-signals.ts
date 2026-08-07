@@ -4,7 +4,7 @@
  * FB 的主力限流不是 URL 跳 /checkpoint，而是 inline 弹窗 / toast：
  * "Action Blocked" / "We limit how often you can do this" / "It looks like you were
  * misusing this feature" / "You can't use this feature right now" 等。边缘把这类阻断遮罩
- * 作为 risk.captcha_detected 上报（kind='unknown' + overlay.text），若云端按既有 'unknown'→light→warned
+ * 作为 captcha.detected 上报（kind='unknown' + overlay.text），若云端按既有 'unknown'→light→warned
  * 只降速 ×0.7，不足以让已被限流的号真正刹车。用户定案：**软阻断=激进退避，直接 restricted**。
  *
  * 本模块只做 overlay 文案匹配（纯函数、可单测）；命中 → 云端把风控信号从 light 升级为 confirmed

@@ -21,6 +21,7 @@ export const CLIENT_DATA_PLANE_AUTOMATION_ENGINE_CAPABILITY = 'client_data_plane
 
 /** Edge returns one correlated terminal fact for every platform search command. */
 export const SEARCH_ACTIVITY_RECEIPT_CAPABILITY = 'search_activity_receipt_v1';
+// 能力串与消息名刻意脱钩：握手协商串不随消息改名（`identity_read_current_v1` 对应消息已更名 `identity.read_current_page`，串保持不变以兼容已发布客户端的能力协商）。
 export const IDENTITY_READ_CURRENT_CAPABILITY = 'identity_read_current_v1';
 export const IDENTITY_READ_SELF_PROFILE_CAPABILITY = 'identity_read_self_profile_v1';
 
@@ -44,7 +45,7 @@ export type MessageType =
   | 'browser.status' // edge → cloud：同一连接内浏览器 absent/ready 真态变化
   | 'standby.decision' // edge → cloud：宿主层槽位让位判决的只读回执（遥测；云端 MUST NOT 据此否决）
   // —— 自动化运行投影（cloud → edge）；客户数据字段仅供旧客户端兼容 ——
-  | 'ui.snapshot' // 新客户端仅接收浏览器待机等自动化控制投影；今日用量、人物、草稿、审批、发布等客户数据经 customer-auth HTTP 拉取
+  | 'ui.push_snapshot' // cloud → edge 下行推送（动词形定向）；新客户端仅接收浏览器待机等自动化控制投影；今日用量、人物、草稿、审批、发布等客户数据经 customer-auth HTTP 拉取
   // —— 任务规划 ——
   | 'plan.request' // edge → cloud：给定高层目标，请求拆解为步骤
   | 'plan.response' // cloud → edge：返回有序步骤清单
@@ -74,8 +75,8 @@ export type MessageType =
   | 'risk.canDo.result' // cloud → edge：allow / deny
   | 'risk.record' // edge → cloud：互动成功后记录 action
   | 'risk.record.result' // cloud → edge：记录结果
-  | 'risk.captcha_detected' // edge → cloud：检测到验证码/未知阻断弹窗，已本地暂停，请云端置风控态 + 停发命令 + 通知人工
-  | 'risk.captcha_cleared' // edge → cloud：验证码/未知阻断弹窗已清除，已恢复浏览
+  | 'captcha.detected' // edge → cloud：检测到验证码/未知阻断弹窗，已本地暂停，请云端置风控态 + 停发命令 + 通知人工（与 captcha.assist.* 同顶层域）
+  | 'captcha.cleared' // edge → cloud：验证码/未知阻断弹窗已清除，已恢复浏览
   // —— 验证码远程协助（captcha 暂停期间唯一允许穿透的恢复指令）——
   | 'captcha.assist.capture' // cloud → edge：请求原浏览器会话捕获当前验证码现场截图
   | 'captcha.assist.snapshot' // edge → cloud：返回验证码现场截图和坐标映射
@@ -118,7 +119,7 @@ export type MessageType =
   | 'xiaohongshu.note.browse_images'   // 浏览笔记图片（仅小红书）
   | 'xiaohongshu.note.scroll_comments' // 滚动评论区（仅小红书）
   | 'xiaohongshu.profile.open'         // 进入作者主页（仅小红书；取代 open_note{type:'profile'}）
-  | 'identity.read_current' // 运行期就地读取本人身份（禁止导航）
+  | 'identity.read_current_page' // 运行期就地读取本人身份（禁止导航；与 read_self_profile 平行：动词＋地点宾语）
   | 'identity.read_self_profile' // 进入会话绑定账号本人主页读取身份
   | 'xiaohongshu.notification.open'             // cloud → edge：导航到通知首页（仅小红书；仅导航，不再复合）
   | 'xiaohongshu.notification.browse_comments'  // cloud → edge：进「评论和@」+ 滚动 + 抽取（仅小红书）
@@ -136,7 +137,7 @@ export type MessageType =
   | 'action.completed'     // Edge 确认 action 执行完成
   // —— 观察命令「问现状」（change add-state-observation-command，蓝图批 3；观察族、无平台段）——
   | 'state.read'           // cloud → edge：主动询问浏览器现场（当前面 + 登录身份 + 采集时刻）；纯读
-  | 'state.report'         // edge → cloud：问现状应答；按信封 id 关联回请求，面与身份各自两态诚实
+  | 'state.observed'       // edge → cloud：问现状应答（过去分词事实形，与 identity.observed 同约定）；按信封 id 关联回请求，面与身份各自两态诚实
   // —— Persona 生成（edge → cloud 请求 / cloud → edge 响应，建号关键词驱动，客户自助 onboarding）——
   | 'persona.generate'        // edge → cloud：按关键词选择请求生成 persona
   | 'persona.generate.result' // cloud → edge：返回 soul.yaml/身份摘要或失败原因
@@ -1712,8 +1713,8 @@ export interface IdentityObservedPayload {
 
 /**
  * cloud → edge：主动询问浏览器现场。纯读——执行 MUST NOT 触发任何导航、点击或滚动。
- * `captureId` 由云端生成并要求原样回传（照 identity.read_current 的关联模式）；
- * 应答另按信封 id 关联（state.report 的 envelope.id = 本请求的 envelope.id）。
+ * `captureId` 由云端生成并要求原样回传（照 identity.read_current_page 的关联模式）；
+ * 应答另按信封 id 关联（state.observed 的 envelope.id = 本请求的 envelope.id）。
  */
 export interface StateReadPayload {
   captureId: string;
@@ -1773,7 +1774,7 @@ export type StateIdentityObservation =
  * 按信封 id 关联回请求方，MUST NOT 靠事后回执顺带；面与身份各自两态，
  * MUST NOT 把读不出来伪装成任何具体面 / 任何身份，也 MUST NOT 静默不答。
  */
-export interface StateReportPayload {
+export interface StateObservedPayload {
   captureId: string;
   surface: StateSurfaceObservation;
   identity: StateIdentityObservation;
@@ -2074,7 +2075,7 @@ export interface PayloadMap {
   welcome: WelcomePayload;
   'browser.status': BrowserStatusPayload;
   'standby.decision': StandbyDecisionPayload;
-  'ui.snapshot': UiSnapshotPayload;
+  'ui.push_snapshot': UiSnapshotPayload;
   'plan.request': PlanRequestPayload;
   'plan.response': PlanResponsePayload;
   'select.request': SelectRequestPayload;
@@ -2103,8 +2104,8 @@ export interface PayloadMap {
   'risk.canDo.result': RiskCanDoResultPayload;
   'risk.record': RiskRecordPayload;
   'risk.record.result': RiskRecordResultPayload;
-  'risk.captcha_detected': CaptchaDetectedPayload;
-  'risk.captcha_cleared': CaptchaClearedPayload;
+  'captcha.detected': CaptchaDetectedPayload;
+  'captcha.cleared': CaptchaClearedPayload;
   'captcha.assist.capture': CaptchaAssistCapturePayload;
   'captcha.assist.snapshot': CaptchaAssistSnapshotPayload;
   'captcha.assist.click': CaptchaAssistClickPayload;
@@ -2139,7 +2140,7 @@ export interface PayloadMap {
   'xiaohongshu.note.browse_images': NoteBrowseImagesPayload;
   'xiaohongshu.note.scroll_comments': NoteScrollCommentsPayload;
   'xiaohongshu.profile.open': ProfileOpenPayload;
-  'identity.read_current': IdentityReadPayload;
+  'identity.read_current_page': IdentityReadPayload;
   'identity.read_self_profile': IdentityReadPayload;
   // Edge 上报
   'page.cards': PageCardsPayload;
@@ -2149,7 +2150,7 @@ export interface PayloadMap {
   'action.completed': ActionCompletedPayload;
   // 观察命令「问现状」（change add-state-observation-command）
   'state.read': StateReadPayload;
-  'state.report': StateReportPayload;
+  'state.observed': StateObservedPayload;
   'xiaohongshu.notification.open': NotificationOpenPayload;
   'xiaohongshu.notification.browse_comments': NotificationBrowseCommentsPayload;
   'xiaohongshu.notification.browse_likes': NotificationBrowseLikesPayload;

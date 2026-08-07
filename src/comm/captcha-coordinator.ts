@@ -1,5 +1,5 @@
 /**
- * 验证码 / 阻断弹窗事件协调器（消费 edge → cloud 的 risk.captcha_detected / risk.captcha_cleared）。
+ * 验证码 / 阻断弹窗事件协调器（消费 edge → cloud 的 captcha.detected / captcha.cleared）。
  *
  * detected：
  *   ① 据 kind 迁移归属账号风控态（captcha=强信号→restricted；unknown=弱信号→warned）——账号风控终态云端单写；

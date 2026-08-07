@@ -2114,7 +2114,7 @@ export class RoleDispatcher {
   }
 
   /**
-   * 问一次边缘现状（change add-state-observation-command）：下发 state.read 并有界等待 state.report。
+   * 问一次边缘现状（change add-state-observation-command）：下发 state.read 并有界等待 state.observed。
    * 结局三态诚实：reported（内容自表两态）/ timeout（边缘静默，绝不伪造成 unconfirmed 观察）/
    * not_sent（出口未投递）。**本方法只提供能力，不含任何触发策略**——何时问、问完怎么改航向
    * ＝阶段四（观测决策上移）。
@@ -3035,7 +3035,7 @@ export class RoleDispatcher {
         const strategy = identityCaptureStrategyForPlatform(this.accountPlatform);
         if (!strategy.supported) return null;
         const capable =
-          strategy.command === 'identity.read_current'
+          strategy.command === 'identity.read_current_page'
             ? this.hasIdentityReadCurrent()
             : this.hasIdentityReadSelfProfile();
         return capable ? { command: strategy.command, restore: strategy.restore } : null;
@@ -3043,7 +3043,7 @@ export class RoleDispatcher {
       requestIdentityCapture: ({ command, captureId }) =>
         this.sendCommand({
           action:
-            command === 'identity.read_current'
+            command === 'identity.read_current_page'
               ? 'identity_read_current'
               : 'identity_read_self_profile',
           params: { captureId },
@@ -3056,7 +3056,7 @@ export class RoleDispatcher {
     this.nicknameEnricher.subscribe();
 
     // 观察命令「问现状」的云端通道（change add-state-observation-command）：pending 表按 captureId
-    // 关联（照 identity.read_current 的既有形态），应答另带边缘回填的信封 id。**只落通道**——
+    // 关联（照 identity.read_current_page 的既有形态），应答另带边缘回填的信封 id。**只落通道**——
     // 何时问、问完怎么改航向＝阶段四（观测决策上移），本类不含任何触发策略。
     // 订阅与 nicknameEnricher 同为永久监听（会话拆除不影响通道可用性——恢复链问真相恰恰发生在
     // 会话异常时）。
@@ -3065,7 +3065,7 @@ export class RoleDispatcher {
       setTimeoutFn: this.setTimeoutFn,
       clearTimeoutFn: this.clearTimeoutFn,
     });
-    this.eventBus.on('state.report.arrived', (p) =>
+    this.eventBus.on('state.observed.arrived', (p) =>
       this.stateObservation?.onReport(p.report, p.envelopeId),
     );
 
@@ -3175,7 +3175,7 @@ export class RoleDispatcher {
   /**
    * 会话启动闸的**纯判定**——不打日志、不发回调（change standby-captcha-must-not-yield）。
    *
-   * 拆出来是因为 `resumeGateSnapshot()` 是**只读**裁决，却被 `ui.snapshot` 那条约 60s 的周期链每跳调用一次。
+   * 拆出来是因为 `resumeGateSnapshot()` 是**只读**裁决，却被 `ui.push_snapshot` 那条约 60s 的周期链每跳调用一次。
    * 它若直接复用带副作用的 `canStartSession()`，未绑人设 / 无 browse 能力的账号就会**每分钟**刷一行告警、并
    * **每分钟触发一次「会话被拒」回调**——一个只读方法不该有这种脉冲。
    */

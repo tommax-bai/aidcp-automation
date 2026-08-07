@@ -214,7 +214,7 @@ test('浏览器前后台控制在验证码暂停期间仍须定向下发', async
   await s.close();
 });
 
-test('新客户端的自动化通道过滤 ui.snapshot 数据面字段，纯数据快照拒绝下发', async () => {
+test('新客户端的自动化通道过滤 ui.push_snapshot 数据面字段，纯数据快照拒绝下发', async () => {
   const s = new EdgeCloudServer({ handler: helloHandler, port: 0, clock: () => 0 });
   await s.start();
   const edge = await connectEdge(
@@ -225,7 +225,7 @@ test('新客户端的自动化通道过滤 ui.snapshot 数据面字段，纯数�
   );
 
   const message = once(edge, 'message');
-  assert.equal(s.pushToEdges(makeEnvelope('ui.snapshot', 'mixed-snapshot', 0, {
+  assert.equal(s.pushToEdges(makeEnvelope('ui.push_snapshot', 'mixed-snapshot', 0, {
     personaBound: true,
     publish: { state: 'pending' },
     dailyUsage: { asOf: 0, totals: {}, quotas: {}, saturated: [], windows: {} },
@@ -243,7 +243,7 @@ test('新客户端的自动化通道过滤 ui.snapshot 数据面字段，纯数�
     },
   });
 
-  assert.equal(s.pushToEdges(makeEnvelope('ui.snapshot', 'data-only-snapshot', 0, {
+  assert.equal(s.pushToEdges(makeEnvelope('ui.push_snapshot', 'data-only-snapshot', 0, {
     personaBound: false,
     publish: { state: 'approved' },
   }), 'edge-pull-data'), 0);

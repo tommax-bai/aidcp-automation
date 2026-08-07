@@ -7,7 +7,7 @@ test('identity EdgeCommand actions map to fixed protocol commands without target
     action: 'identity_read_current',
     params: { captureId: 'capture-1' },
   });
-  assert.equal(current.type, 'identity.read_current');
+  assert.equal(current.type, 'identity.read_current_page');
   assert.deepEqual(current.payload, { captureId: 'capture-1' });
 
   const selfProfile = edgeCommandToEnvelope({

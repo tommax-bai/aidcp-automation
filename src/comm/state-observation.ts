@@ -1,11 +1,11 @@
 /**
  * StateObservationChannel — 观察命令「问现状」的云端通道（change add-state-observation-command）。
  *
- * 职责边界（**只落通道不接决策**）：把「发一条 state.read、等它的 state.report」做成一次
+ * 职责边界（**只落通道不接决策**）：把「发一条 state.read、等它的 state.observed」做成一次
  * 可关联、有界超时的请求。何时问、问完怎么改航向＝阶段四（观测决策上移），不在本类。
  *
- * 关联形态照 identity.read_current 的既有形态：captureId 由云端生成、随命令下发、应答原样
- * 回传，pending 表按它关联；信封 id 关联发生在边缘侧（state.report 的 envelope.id = 请求
+ * 关联形态照 identity.read_current_page 的既有形态：captureId 由云端生成、随命令下发、应答原样
+ * 回传，pending 表按它关联；信封 id 关联发生在边缘侧（state.observed 的 envelope.id = 请求
  * envelope.id），由 handler 转成事件时以 envelopeId 一并携带，供审计与将来强校验。
  *
  * 三态诚实（tasks 3.2）：`reported`（拿到应答，内容自表两态）/ `timeout`（边缘静默——
@@ -14,10 +14,10 @@
  * 「边缘没收到」与「边缘读不出来」。
  */
 import { randomUUID } from 'node:crypto';
-import type { StateReportPayload } from './protocol.js';
+import type { StateObservedPayload } from './protocol.js';
 
 export type StateObservationOutcome =
-  | { kind: 'reported'; report: StateReportPayload; envelopeId?: string }
+  | { kind: 'reported'; report: StateObservedPayload; envelopeId?: string }
   | { kind: 'timeout' }
   | { kind: 'not_sent' };
 
@@ -84,10 +84,10 @@ export class StateObservationChannel {
   }
 
   /**
-   * 应答入口（由 `state.report.arrived` 事件接线）。按 captureId 命中 pending 即 resolve；
+   * 应答入口（由 `state.observed.arrived` 事件接线）。按 captureId 命中 pending 即 resolve；
    * 迟到 / 不认识的应答按无主丢弃（pending 已按超时收口，绝不复活一次已判 timeout 的请求）。
    */
-  onReport(report: StateReportPayload, envelopeId?: string): void {
+  onReport(report: StateObservedPayload, envelopeId?: string): void {
     this.settle(report.captureId, {
       kind: 'reported',
       report,
