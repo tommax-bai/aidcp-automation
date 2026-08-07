@@ -53,8 +53,8 @@ export interface PublishSequenceInput {
   cover?: string;
   /** 发帖元数据（stage-3 决策产物）：话题/@/地点/合集/可见范围/权限/合规/定时；下发为 edge 指令应用。 */
   metadata?: PublishMetadata;
-  /** 发布平台；缺省 xiaohongshu。 */
-  platform?: PlatformId;
+  /** 发布平台（批 6b：转必填——平台维在消息名里，缺失即上游 fail-closed，绝不猜）。 */
+  platform: PlatformId;
   /** 是否已通过人审（AC-PUB）；false → 序列截止于提交前 */
   approvedByUser: boolean;
   /**
@@ -278,7 +278,7 @@ export class CommandSequencer {
       cover: input.cover,
       metadata: input.metadata,
       approvedByUser: input.approvedByUser,
-      platform: input.platform ?? 'xiaohongshu',
+      platform: input.platform,
       fillBudget: this.fillBudget,
     });
   }
@@ -293,7 +293,7 @@ export class CommandSequencer {
    * - 仅当未请求配图（无图流，前向兼容）才存在"纯文字继续"路径。
    */
   async executePublishSequence(input: PublishSequenceInput): Promise<PublishSequenceResult> {
-    const platform = input.platform ?? 'xiaohongshu';
+    const platform = input.platform;
     const scheduled = input.metadata?.mode === 'scheduled';
     if (scheduled) {
       const scheduleError = validatePublishSchedule(platform, 'scheduled', input.metadata?.publishTime ?? null, this.clock());
@@ -377,7 +377,7 @@ export class CommandSequencer {
 
       let result: PublishCommandResultPayload;
       try {
-        result = await this.sendAndWaitResult(cmd, targetEdgeId);
+        result = await this.sendAndWaitResult(cmd, platform, targetEdgeId);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         // 配图唯一放宽：upload_image 超时/异常 → 丢弃该张（不计入 K）、继续（其余图仍可成功=部分成功）。
@@ -553,7 +553,6 @@ export class CommandSequencer {
       recordId: input.recordId,
       seq: 1_000_000 + Math.max(0, Math.floor(input.attempt)),
       kind: 'reconcile_scheduled',
-      platform: 'xiaohongshu',
       params: {
         publishTime: input.publishTime,
         scheduledTitle: input.title,
@@ -561,7 +560,7 @@ export class CommandSequencer {
       },
     };
     try {
-      const result = await this.sendAndWaitResult(cmd, input.edgeId);
+      const result = await this.sendAndWaitResult(cmd, 'xiaohongshu', input.edgeId);
       if (!result.ok) return { state: 'pending', error: result.error ?? 'scheduled_reconcile_failed' };
       if (!result.value || !result.postUrl) return { state: 'pending', error: 'scheduled_public_identity_incomplete' };
       return { state: 'published', postId: result.value, postUrl: result.postUrl };
@@ -586,13 +585,20 @@ export class CommandSequencer {
     }
   }
 
+  /** 批 6b：平台维在消息名里——按平台选 {p}.publish.command 信封名；非发布平台响亮 throw（fail-closed，不猜）。 */
+  private publishEnvelopeTypeFor(platform: PlatformId): 'xiaohongshu.publish.command' | 'facebook.publish.command' {
+    if (platform === 'xiaohongshu') return 'xiaohongshu.publish.command';
+    if (platform === 'facebook') return 'facebook.publish.command';
+    throw new Error(`publish command has no envelope type on platform=${platform}`);
+  }
+
   /**
-   * 下发一条 publish.command 并等待其 result（按 recordId+seq 关联 + 超时清理）。
+   * 下发一条 {p}.publish.command 并等待其 result（按 recordId+seq 关联 + 超时清理）。
    * edgeId 指定则定向到该节点；缺省广播（向后兼容）。送达数为 0（含定向到的节点已离线）→ 诚实 reject（不假成功）。
    */
-  sendAndWaitResult(cmd: PublishCommandPayload, edgeId?: string): Promise<PublishCommandResultPayload> {
+  sendAndWaitResult(cmd: PublishCommandPayload, platform: PlatformId, edgeId?: string): Promise<PublishCommandResultPayload> {
     const key = `${cmd.recordId}:${cmd.seq}`;
-    const envelope = makeEnvelope('publish.command', this.idGen(), this.clock(), cmd);
+    const envelope = makeEnvelope(this.publishEnvelopeTypeFor(platform), this.idGen(), this.clock(), cmd);
     // 指令自带执行预算（FB 正文按长度伸缩）→ 云端等「预算 + 兜底余量」，边缘必定先答，孤儿执行由构造消失。
     // 不带预算（小红书全路径）→ 逐字节沿用旧常数窗口：upload_image 用更宽超时，给边缘
     // 「下载+CDP+后置校验」留足空间先返回干净 ok:false（见 uploadTimeoutMs 说明）。
@@ -630,11 +636,11 @@ export class CommandSequencer {
       clearTimeout(pending.timeoutHandle);
       this.pending.delete(key);
       this.logger.warn(`[CommandSequencer] 边缘 ${edgeId} 断开 → 在途指令 key=${key} 诚实失败`);
-      pending.reject(new Error(`publish.command edge disconnected edgeId=${edgeId} key=${key}`));
+      pending.reject(new Error(`publish command edge disconnected edgeId=${edgeId} key=${key}`));
     }
   }
 
-  /** 收到 publish.command.result：按 recordId+seq 关联 resolve（envelope.id 仅日志、不参与查找）。 */
+  /** 收到 {p}.publish.command.result：按 recordId+seq 关联 resolve（envelope.id 仅日志、不参与查找）。 */
   onResult(payload: PublishCommandResultPayload, envelopeId?: string): void {
     const key = `${payload.recordId}:${payload.seq}`;
     const pending = this.pending.get(key);

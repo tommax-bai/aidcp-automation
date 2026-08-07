@@ -721,7 +721,7 @@ export interface RoleDispatcherOptions {
 }
 
 export interface EdgeCommand {
-  action: 'scroll' | 'refresh' | 'open_note' | 'close_note' | 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'search' | 'back' | 'browse_images' | 'scroll_comments' | 'profile_open' | 'identity_read_current' | 'identity_read_self_profile' | 'state_read' | 'open_notifications' | 'browse_notification_comments' | 'browse_notification_likes' | 'browse_notification_follows' | 'notification_back_home' | 'pacing_update' | 'session.end';
+  action: 'scroll' | 'refresh' | 'open_note' | 'like' | 'collect' | 'follow' | 'comment' | 'comment_like' | 'search' | 'back' | 'browse_images' | 'scroll_comments' | 'profile_open' | 'identity_read_current' | 'identity_read_self_profile' | 'state_read' | 'open_notifications' | 'browse_notification_comments' | 'browse_notification_likes' | 'browse_notification_follows' | 'notification_back_home' | 'pacing_update' | 'session.end';
   params?: Record<string, unknown>;
   reason?: string;
   /**
@@ -4442,9 +4442,11 @@ export class RoleDispatcher {
           // 返回前停留下限（time directive）：笔记已被打开并阅读过（curator 关卡），按 read 量级
           // 给停留，治「无价值秒退」。无当前笔记时 dwellMs=undefined，边缘走内置默认兜底。
           const dwellMs = this.dwellForCurrentNote('read');
-          // 透传来源页型 → targetPage：搜索来源会话回搜索结果、feed 来源回 explore（此前一律丢失被错误拽回 explore）。
+          // 透传来源页型 → targetPage：搜索来源会话回搜索结果、feed 来源回 explore。
+          // 批 6b：targetPage 转必填（XHS 形按格式 fail-closed 拒收）——pageType 缺席时云端**显式**
+          // 补 'feed'（回哪张列表是云端决策，绝不留给边缘替答）。
           const params: Record<string, unknown> = dwellMs === undefined ? {} : { dwellMs };
-          if (payload.pageType) params.targetPage = payload.pageType;
+          params.targetPage = payload.pageType ?? 'feed';
           this.sendCommand({ action: 'back', reason: 'back_to_feed', params });
         }
       }),

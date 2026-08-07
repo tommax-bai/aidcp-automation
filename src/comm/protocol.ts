@@ -63,8 +63,7 @@ export type MessageType =
   | 'note.ack'    // cloud → edge：确认收到笔记，异步处理中
   | 'xiaohongshu.note.open' // cloud → edge：打开一条笔记（小红书）
   | 'facebook.note.open' // cloud → edge：打开一条帖子（Facebook；可 url 直达或群首帖 selection）
-  | 'xiaohongshu.note.close' // cloud → edge：关闭当前笔记（小红书；云端现役零发送点，分工批 6 裁）
-  | 'facebook.note.close' // cloud → edge：关闭当前帖子（Facebook；云端现役零发送点，分工批 6 裁）
+  // （批 6b 裁决：{p}.note.close 已删除——云端零发送点，关弹层是 {p}.navigation.back 的引擎内部子步骤）
   | 'xiaohongshu.search.execute' // cloud → edge：执行一次关键词搜索（小红书）
   | 'facebook.search.execute' // cloud → edge：执行一次搜索（Facebook 全站/容器 scope）
   | 'session.end' // cloud → edge：结束本次浏览会话
@@ -82,11 +81,11 @@ export type MessageType =
   | 'captcha.assist.snapshot' // edge → cloud：返回验证码现场截图和坐标映射
   | 'captcha.assist.click' // cloud → edge：把人工点位派发到原浏览器会话
   | 'captcha.assist.click_result' // edge → cloud：返回点击后的 fresh 复检结果
-  // —— Edge 页面写任务租约（同一 edge/CDP 单写）——
-  | 'edge.task.acquire' // cloud → edge：申请任务级执行权；edge quiesced 后才确认
-  | 'edge.task.acquired' // edge → cloud：执行权已授予，浏览已到命令安全边界
-  | 'edge.task.release' // cloud → edge：释放任务级执行权
-  | 'edge.task.released' // edge → cloud：释放已收敛
+  // —— Edge 页面写任务租约（同一 edge/CDP 单写；非平台域、无平台段，批 6b 去 edge. 前缀冗余）——
+  | 'task.acquire' // cloud → edge：申请任务级执行权；edge quiesced 后才确认
+  | 'task.acquired' // edge → cloud：执行权已授予，浏览已到命令安全边界
+  | 'task.release' // cloud → edge：释放任务级执行权
+  | 'task.released' // edge → cloud：释放已收敛
   // —— 发布编排（Publish Agent 驱动）——
   | 'publish.approval_request' // edge → cloud：请求发送发布审批卡片
   | 'publish.approval_action' // edge → cloud：客户端预览内提交发布/取消审批
@@ -94,8 +93,10 @@ export type MessageType =
   | 'publish.draft_image_remove' // edge → cloud：客户端预览内删除待审稿件的某张配图
   | 'publish.draft_image_remove.result' // cloud → edge：返回删配图结果（含写后真态）
   | 'publish.result' // edge → cloud：发布结果回传（v1 整页路径）
-  | 'publish.command' // cloud → edge：下发一条参数化发布原子指令（A 阶段1 指令驱动路径）
-  | 'publish.command.result' // edge → cloud：回传单条发布指令的执行结果
+  | 'xiaohongshu.publish.command' // cloud → edge：下发一条参数化发布原子指令（小红书；kind 取 12 全集）
+  | 'facebook.publish.command' // cloud → edge：下发一条参数化发布原子指令（Facebook；kind 取 6 子集，非法 kind 边缘 fail-closed）
+  | 'xiaohongshu.publish.command.result' // edge → cloud：回传单条发布指令的执行结果（小红书）
+  | 'facebook.publish.command.result' // edge → cloud：回传单条发布指令的执行结果（Facebook）
   // —— 角色驱动指令（cloud → edge，RoleDispatcher 驱动）——
   | 'xiaohongshu.feed.scroll'   // 信息流滚动（小红书）
   | 'xiaohongshu.search.scroll' // 搜索结果页滚动（小红书）
@@ -115,7 +116,8 @@ export type MessageType =
   | 'facebook.note.comment'    // 发评论（Facebook；含群帖 keep-open 流）
   | 'xiaohongshu.comment.like' // 给「别人的某条评论」点赞（仅小红书，详情页拟人微互动）
   | 'facebook.group.join'  // Facebook 加群原子指令（独立 join 能力，绝不走 browse）
-  | 'navigation.back'      // 返回上一页
+  | 'xiaohongshu.navigation.back' // 返回上一页（小红书；targetPage 必填——回哪张列表是云端决策）
+  | 'facebook.navigation.back'    // 返回上一页（Facebook；无 targetPage——来源列表是引擎记录的会话事实）
   | 'xiaohongshu.note.browse_images'   // 浏览笔记图片（仅小红书）
   | 'xiaohongshu.note.scroll_comments' // 滚动评论区（仅小红书）
   | 'xiaohongshu.profile.open'         // 进入作者主页（仅小红书；取代 open_note{type:'profile'}）
@@ -940,12 +942,6 @@ export interface NoteOpenPayload {
   thinkMs?: number;
 }
 
-export interface NoteClosePayload {
-  reason?: string;
-  /** 关闭前当前页应达到的总停留时间中心值（毫秒，可选） */
-  dwellMs?: number;
-}
-
 /** 让边缘执行一次搜索（cloud → edge）。 */
 export interface SearchExecutePayload {
   /** 独占评论/维护任务的租约所有者；普通浏览省略。 */
@@ -1447,7 +1443,7 @@ export interface PublishResultPayload {
   error?: string;
 }
 
-/** 发布原子指令的种类（E1-E12；仍由一对通用 publish.command/result 消息承载）。 */
+/** 发布原子指令的种类（E1-E12；共享词表——合法集按平台消息名拆分，见 FacebookPublishCommandKind）。 */
 export type PublishCommandKind =
   | 'navigate_entry'
   | 'select_mode'
@@ -1463,6 +1459,18 @@ export type PublishCommandKind =
   | 'capture_scheduled'
   /** 小红书目标时刻后：只读核验真实公开 postId/postUrl。 */
   | 'reconcile_scheduled';
+
+/**
+ * Facebook 发布合法 kind 子集（beta，6 词）。封面/候选项/开关/定时族为小红书专属，
+ * `facebook.publish.command` 载荷在类型面即不可表示这些组合；边缘运行时同样 fail-closed 拒收。
+ */
+export type FacebookPublishCommandKind =
+  | 'navigate_entry'
+  | 'select_mode'
+  | 'upload_image'
+  | 'fill_field'
+  | 'submit_publish'
+  | 'capture_postId';
 
 /**
  * 各 kind 的参数（按 kind 区分；元数据维度本阶段先占位预留）。
@@ -1492,13 +1500,11 @@ export interface PublishCommandParams {
 }
 
 /**
- * 一条参数化发布指令（cloud → edge）。
+ * 一条参数化发布指令（cloud → edge）。平台维只在消息名里（`{p}.publish.command`），载荷无平台字段。
  * `recordId + seq` 为业务级永久关联键（请求/结果配对靠它）；`envelope.id` 仅供日志。
  * 注意：此 `recordId`（数字，PublishLogStore.insert 返回）与 AC-PUB 审批文件的 `requestId`（字符串）是两个不同的键。
  */
 export interface PublishCommandPayload {
-  /** 运行时平台；缺省按历史小红书处理。 */
-  platform?: 'xiaohongshu' | 'facebook';
   /** 当前 edge 页面写任务租约；发布完整序列逐条携同一值。 */
   taskId: string;
   /** 发布记录主键 */
@@ -1513,6 +1519,11 @@ export interface PublishCommandPayload {
   timeoutMs?: number;
   /** 简短说明（观测用） */
   reason?: string;
+}
+
+/** `facebook.publish.command` 载荷：kind 收窄为 FB 合法子集，非法组合编译期不可表示。 */
+export interface FacebookPublishCommandPayload extends Omit<PublishCommandPayload, 'kind'> {
+  kind: FacebookPublishCommandKind;
 }
 
 /**
@@ -1553,6 +1564,11 @@ export interface PublishCommandResultPayload {
     attempts?: number;
     durationMs?: number;
   };
+}
+
+/** `facebook.publish.command.result` 载荷：kind 收窄为 FB 合法子集。 */
+export interface FacebookPublishCommandResultPayload extends Omit<PublishCommandResultPayload, 'kind'> {
+  kind: FacebookPublishCommandKind;
 }
 
 /** 确认收到笔记（cloud → edge），异步处理中。 */
@@ -1654,9 +1670,23 @@ export interface InteractionLikeCommentPayload {
   thinkMs?: number;
 }
 
+/**
+ * `xiaohongshu.navigation.back` 载荷。`targetPage` 必填（批 6b）：回哪张来源列表是云端决策，
+ * 缺字段按格式错误 fail-closed 拒收——补空即决策，决策归上层。
+ */
 export interface NavigationBackPayload {
   reason?: string;  // quality_rejected | back_to_feed | profile_done
-  targetPage?: 'feed' | 'search';
+  targetPage: 'feed' | 'search';
+  /** 返回前当前页应达到的总停留时间中心值（毫秒，可选；治详情页秒退） */
+  dwellMs?: number;
+}
+
+/**
+ * `facebook.navigation.back` 载荷。无 `targetPage`：FB 的来源列表（home/search/group）
+ * 是引擎记录的会话事实、非云端选择项，不设伪选择字段。
+ */
+export interface FacebookNavigationBackPayload {
+  reason?: string;
   /** 返回前当前页应达到的总停留时间中心值（毫秒，可选；治详情页秒退） */
   dwellMs?: number;
 }
@@ -2088,8 +2118,6 @@ export interface PayloadMap {
   'note.ack': NoteAckPayload;
   'xiaohongshu.note.open': NoteOpenPayload;
   'facebook.note.open': NoteOpenPayload;
-  'xiaohongshu.note.close': NoteClosePayload;
-  'facebook.note.close': NoteClosePayload;
   'xiaohongshu.search.execute': SearchExecutePayload;
   'facebook.search.execute': SearchExecutePayload;
   'session.end': SessionEndPayload;
@@ -2110,13 +2138,15 @@ export interface PayloadMap {
   'captcha.assist.snapshot': CaptchaAssistSnapshotPayload;
   'captcha.assist.click': CaptchaAssistClickPayload;
   'captcha.assist.click_result': CaptchaAssistClickResultPayload;
-  'edge.task.acquire': EdgeTaskAcquirePayload;
-  'edge.task.acquired': EdgeTaskAcquiredPayload;
-  'edge.task.release': EdgeTaskReleasePayload;
-  'edge.task.released': EdgeTaskReleasedPayload;
+  'task.acquire': EdgeTaskAcquirePayload;
+  'task.acquired': EdgeTaskAcquiredPayload;
+  'task.release': EdgeTaskReleasePayload;
+  'task.released': EdgeTaskReleasedPayload;
   'publish.result': PublishResultPayload;
-  'publish.command': PublishCommandPayload;
-  'publish.command.result': PublishCommandResultPayload;
+  'xiaohongshu.publish.command': PublishCommandPayload;
+  'facebook.publish.command': FacebookPublishCommandPayload;
+  'xiaohongshu.publish.command.result': PublishCommandResultPayload;
+  'facebook.publish.command.result': FacebookPublishCommandResultPayload;
   // 角色驱动指令
   'xiaohongshu.feed.scroll': PageScrollPayload;
   'xiaohongshu.search.scroll': PageScrollPayload;
@@ -2136,7 +2166,8 @@ export interface PayloadMap {
   'facebook.note.comment': InteractionCommentPayload;
   'xiaohongshu.comment.like': InteractionLikeCommentPayload;
   'facebook.group.join': GroupJoinPayload;
-  'navigation.back': NavigationBackPayload;
+  'xiaohongshu.navigation.back': NavigationBackPayload;
+  'facebook.navigation.back': FacebookNavigationBackPayload;
   'xiaohongshu.note.browse_images': NoteBrowseImagesPayload;
   'xiaohongshu.note.scroll_comments': NoteScrollCommentsPayload;
   'xiaohongshu.profile.open': ProfileOpenPayload;

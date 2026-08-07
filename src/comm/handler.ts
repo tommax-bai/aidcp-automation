@@ -144,11 +144,10 @@ const LEGACY_ACTION_COMPLETION_ALIASES: Readonly<Record<string, string>> = {
   'facebook.search.execute': 'search',
   'xiaohongshu.note.open': 'open_note',
   'facebook.note.open': 'open_note',
-  'xiaohongshu.note.close': 'close',
-  'facebook.note.close': 'close',
   'xiaohongshu.note.browse_images': 'browse_images',
   'xiaohongshu.note.scroll_comments': 'scroll_comments',
-  'navigation.back': 'back',
+  'xiaohongshu.navigation.back': 'back',
+  'facebook.navigation.back': 'back',
   'xiaohongshu.profile.open': 'profile_open',
   'facebook.group.join': 'join_group',
   'xiaohongshu.notification.open': 'open_notifications',
@@ -210,7 +209,7 @@ export interface HandlerDeps {
   captcha?: CaptchaCoordinator;
   /** 验证码协助通道：消费 edge 截图和人工点击复检结果。未注入则忽略（向后兼容）。 */
   captchaAssist?: Pick<CaptchaAssistService, 'onSnapshot' | 'onClickResult'>;
-  /** A 阶段1 发布指令编排器：消费 publish.command.result 关联回报（未注入则忽略，向后兼容）。 */
+  /** A 阶段1 发布指令编排器：消费 {p}.publish.command.result 关联回报（未注入则忽略，向后兼容）。 */
   commandSequencer?: Pick<CommandSequencer, 'onResult'>;
   /** task.acquired/released 关联器；未注入时回执仅忽略，兼容纯协议测试。 */
   edgeTaskLeases?: Pick<EdgeTaskLeaseClient, 'onAcquired' | 'onReleased'>;
@@ -720,10 +719,10 @@ export class DefaultMessageHandler implements MessageHandler {
       case 'captcha.assist.click_result':
         this.deps.captchaAssist?.onClickResult(env.payload as CaptchaAssistClickResultPayload);
         return null;
-      case 'edge.task.acquired':
+      case 'task.acquired':
         this.deps.edgeTaskLeases?.onAcquired(env.payload as EdgeTaskAcquiredPayload, session.edgeId);
         return null;
-      case 'edge.task.released':
+      case 'task.released':
         this.deps.edgeTaskLeases?.onReleased(env.payload as EdgeTaskReleasedPayload, session.edgeId);
         return null;
       case 'page.cards': {
@@ -1104,8 +1103,9 @@ export class DefaultMessageHandler implements MessageHandler {
         }
         return null;
       }
-      case 'publish.command.result':
-        // A 阶段1：按 recordId+seq 关联回 CommandSequencer，驱动序列推进。
+      case 'xiaohongshu.publish.command.result':
+      case 'facebook.publish.command.result':
+        // A 阶段1：按 recordId+seq 关联回 CommandSequencer，驱动序列推进（批 6b：平台形结果名）。
         this.deps.commandSequencer?.onResult(env.payload as PublishCommandResultPayload, env.id);
         return null;
       case 'publish.result':

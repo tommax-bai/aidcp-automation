@@ -46,7 +46,8 @@ const PLATFORM_SCOPED_TYPES: Readonly<Record<PlatformId, Partial<Record<string, 
   xiaohongshu: {
     refresh: 'xiaohongshu.feed.refresh',
     open_note: 'xiaohongshu.note.open',
-    close_note: 'xiaohongshu.note.close',
+    // 批 6b：close_note 已退役（{p}.note.close 从协议删除，关弹层是 back 的引擎内部子步骤）。
+    back: 'xiaohongshu.navigation.back',
     collect: 'xiaohongshu.note.collect',
     follow: 'xiaohongshu.user.follow',
     comment: 'xiaohongshu.note.comment',
@@ -64,7 +65,7 @@ const PLATFORM_SCOPED_TYPES: Readonly<Record<PlatformId, Partial<Record<string, 
   facebook: {
     refresh: 'facebook.feed.refresh',
     open_note: 'facebook.note.open',
-    close_note: 'facebook.note.close',
+    back: 'facebook.navigation.back',
     follow: 'facebook.user.follow',
     comment: 'facebook.note.comment',
     search: 'facebook.search.execute',
@@ -111,8 +112,6 @@ export function edgeCommandToEnvelope(command: EdgeCommand, platform?: PlatformI
       return createEnvelope(platformScopedType('refresh', platform), { reason: command.reason, ...command.params });
     case 'open_note':
       return createEnvelope(platformScopedType('open_note', platform), command.params ?? {});
-    case 'close_note':
-      return createEnvelope(platformScopedType('close_note', platform), command.params ?? {});
     case 'like': {
       // 词汇批 5：对象由发令方声明。生产发令方（RoleDispatcher 的下发出口）已用
       // `withResolvedLikeObject` 按目标身份把对象维补满——规范 Reel ⇒ video，其余 ⇒ note。
@@ -140,7 +139,9 @@ export function edgeCommandToEnvelope(command: EdgeCommand, platform?: PlatformI
     case 'search':
       return createEnvelope(platformScopedType('search', platform), command.params ?? {});
     case 'back':
-      return createEnvelope('navigation.back', { reason: command.reason, ...command.params });
+      // 批 6b：navigation.back 平台段化（XHS 形 targetPage 必填、FB 形无 targetPage）；
+      // wechat_channels 缺席即响亮 throw（现状语义）。
+      return createEnvelope(platformScopedType('back', platform), { reason: command.reason, ...command.params });
     case 'browse_images':
       return createEnvelope(platformScopedType('browse_images', platform), command.params ?? {});
     case 'scroll_comments':

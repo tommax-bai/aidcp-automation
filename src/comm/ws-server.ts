@@ -389,8 +389,8 @@ export class EdgeCloudServer implements EdgePusher {
     const bypassPause =
       env.type === 'session.end' ||
       env.type === 'ui.push_snapshot' ||
-      env.type === 'edge.task.acquire' ||
-      env.type === 'edge.task.release' ||
+      env.type === 'task.acquire' ||
+      env.type === 'task.release' ||
       env.type === 'wechat_channels.inbox.runtime.controls' ||
       env.type === 'wechat_channels.inbox.browser.control' ||
       env.type === 'captcha.assist.capture' ||

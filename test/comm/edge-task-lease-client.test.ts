@@ -23,7 +23,7 @@ describe('EdgeTaskLeaseClient', () => {
       { onReleaseSettled: ({ acknowledged }) => releases.push(acknowledged) },
     );
     assert.equal(ran, false);
-    assert.equal(pushed[0]?.type, 'edge.task.acquire');
+    assert.equal(pushed[0]?.type, 'task.acquire');
     assert.deepEqual(pushed[0]?.payload as EdgeTaskAcquirePayload, {
       taskId: 'task-1', kind: 'publish', priority: 'human', leaseMs: 60_000, acquireTimeoutMs: 1_000,
     });
@@ -31,7 +31,7 @@ describe('EdgeTaskLeaseClient', () => {
     client.onAcquired({ taskId: 'task-1', kind: 'publish', cancelledBrowseCommands: 3 }, 'edge-1');
     await tick();
     assert.equal(ran, true);
-    assert.equal(pushed[1]?.type, 'edge.task.release');
+    assert.equal(pushed[1]?.type, 'task.release');
     assert.equal((pushed[1]?.payload as EdgeTaskReleasePayload).taskId, 'task-1');
     client.onReleased({ taskId: 'task-1', reason: 'released' }, 'edge-1');
     assert.equal(await done, 'task-1');
@@ -111,7 +111,7 @@ describe('EdgeTaskLeaseClient', () => {
       (error: unknown) => error instanceof EdgeTaskLeaseError && error.code === 'edge_unhealthy',
     );
     assert.equal(ran, false);
-    assert.deepEqual(pushed.map((envelope) => envelope.type), ['edge.task.acquire']);
+    assert.deepEqual(pushed.map((envelope) => envelope.type), ['task.acquire']);
   });
 
   it('acquire 超时立即 release，迟到 acquired 时重复 release 清理无主租约', async () => {
@@ -128,11 +128,11 @@ describe('EdgeTaskLeaseClient', () => {
       acquiring,
       (error: unknown) => error instanceof EdgeTaskLeaseError && error.code === 'acquire_timeout',
     );
-    assert.deepEqual(pushed.map((envelope) => envelope.type), ['edge.task.acquire', 'edge.task.release']);
+    assert.deepEqual(pushed.map((envelope) => envelope.type), ['task.acquire', 'task.release']);
     assert.deepEqual(pushed[1]?.payload as EdgeTaskReleasePayload, { taskId: 'late-task', outcome: 'failed' });
 
     client.onAcquired({ taskId: 'late-task', kind: 'comment_prepare', cancelledBrowseCommands: 0 }, 'edge-1');
-    assert.deepEqual(pushed.map((envelope) => envelope.type), ['edge.task.acquire', 'edge.task.release', 'edge.task.release']);
+    assert.deepEqual(pushed.map((envelope) => envelope.type), ['task.acquire', 'task.release', 'task.release']);
     client.onReleased({ taskId: 'late-task', reason: 'released' }, 'edge-1');
   });
 });

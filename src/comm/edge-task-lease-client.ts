@@ -87,7 +87,7 @@ export interface EdgeTaskLeaseClientOptions {
   logger?: Pick<Console, 'log' | 'warn'>;
   /**
    * 7.5 活跃租约中断：收到**活跃**租约（正在 withLease 跑）的抢占释放（preempted_by_task / yield_timeout）时回调，
-   * 让持有方就地中断在飞命令——发布经 command-sequencer.preemptTask reject 在途 publish.command（交序列器归类、
+   * 让持有方就地中断在飞命令——发布经 command-sequencer.preemptTask reject 在途 {p}.publish.command（交序列器归类、
    * **绝不 unwind withLease**）；巡视经 role-dispatcher 收敛。无该回调则退化为今天的「仅 active.delete」（work 靠命令回执/超时兜底收敛）。
    */
   onActiveLeasePreempted?: (taskId: string, edgeId: string, reason: PreemptionReason) => void;
@@ -162,7 +162,7 @@ export class EdgeTaskLeaseClient {
         reject,
       });
       const sent = this.pusher.pushToEdges(
-        makeEnvelope('edge.task.acquire', `task-acquire-${taskId}`, this.clock(), payload),
+        makeEnvelope('task.acquire', `task-acquire-${taskId}`, this.clock(), payload),
         request.edgeId,
       );
       if (sent <= 0) {
@@ -185,7 +185,7 @@ export class EdgeTaskLeaseClient {
       timer.unref?.();
       this.releasing.set(lease.taskId, { edgeId: lease.edgeId, timer, resolve, reject });
       const sent = this.pusher.pushToEdges(
-        makeEnvelope('edge.task.release', `task-release-${lease.taskId}`, this.clock(), payload),
+        makeEnvelope('task.release', `task-release-${lease.taskId}`, this.clock(), payload),
         lease.edgeId,
       );
       if (sent <= 0) {
@@ -351,7 +351,7 @@ export class EdgeTaskLeaseClient {
 
   private pushRelease(taskId: string, edgeId: string): void {
     const sent = this.pusher.pushToEdges(
-      makeEnvelope('edge.task.release', `task-release-${taskId}`, this.clock(), { taskId, outcome: 'failed' }),
+      makeEnvelope('task.release', `task-release-${taskId}`, this.clock(), { taskId, outcome: 'failed' }),
       edgeId,
     );
     if (sent <= 0) this.logger.warn(`[edge-task] stale task release delivered to 0 edges taskId=${taskId} edge=${edgeId}`);

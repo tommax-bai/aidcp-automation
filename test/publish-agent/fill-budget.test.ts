@@ -42,6 +42,7 @@ const input = (over: Partial<PublishSequenceInput> = {}): PublishSequenceInput =
   content: 'C',
   tags: [],
   approvedByUser: true,
+  platform: 'xiaohongshu',
   ...over,
 });
 
@@ -122,9 +123,8 @@ describe('正文填写单步预算（FB 逐字输入 vs 固定单步墙）', () 
           seq: 0,
           kind: 'fill_field',
           params: { fieldType: 'content', value: 'x' },
-          platform: 'facebook',
           timeoutMs: 95_000,
-        })
+        }, 'facebook')
         .catch(() => {});
       assert.equal(timers.at(-1), 95_000 + 8_000);
 
@@ -135,15 +135,14 @@ describe('正文填写单步预算（FB 逐字输入 vs 固定单步墙）', () 
           seq: 1,
           kind: 'select_mode',
           params: { optionKind: 'target', optionValue: 'facebook_personal_timeline' },
-          platform: 'facebook',
           timeoutMs: 40_000,
-        })
+        }, 'facebook')
         .catch(() => {});
       assert.equal(timers.at(-1), 40_000 + 8_000);
 
       // 不带预算（小红书）→ 逐字节沿用旧的 30s 常数窗口，绝不叠余量。
       await seq
-        .sendAndWaitResult({ taskId: 't', recordId: 1, seq: 2, kind: 'fill_field', params: {}, platform: 'xiaohongshu' })
+        .sendAndWaitResult({ taskId: 't', recordId: 1, seq: 2, kind: 'fill_field', params: {} }, 'xiaohongshu')
         .catch(() => {});
       assert.equal(timers.at(-1), 30_000);
     } finally {
@@ -197,7 +196,8 @@ describe('预算配置的失效模式（复审补洞）', () => {
   it('边缘断开 → 在途发布指令立刻诚实失败，不空等满预算（否则堵死该账号的串行队列）', async () => {
     const seq = new CommandSequencer({ pusher: { pushToEdges: () => 1 }, clock: () => 0, logger: { log() {}, warn() {}, error() {} } });
     const pending = seq.sendAndWaitResult(
-      { taskId: 't', recordId: 9, seq: 0, kind: 'fill_field', params: {}, platform: 'facebook', timeoutMs: 240_000 },
+      { taskId: 't', recordId: 9, seq: 0, kind: 'fill_field', params: {}, timeoutMs: 240_000 },
+      'facebook',
       'edge-a',
     );
     seq.invalidateEdge('edge-b'); // 别的节点断开，不该动它

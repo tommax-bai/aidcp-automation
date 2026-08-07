@@ -24,7 +24,8 @@ export interface BuildPublishCommandPlanInput {
   cover?: string;
   metadata?: PublishMetadata;
   approvedByUser: boolean;
-  platform?: PlatformId;
+  /** 发布平台（批 6b：转必填——静默缺省清零，缺失由各入口 fail-closed 带独立原因，绝不猜）。 */
+  platform: PlatformId;
   /** Facebook 正文填写的单步预算配置；缺省用 DEFAULT_FILL_BUDGET。小红书路径不受影响。 */
   fillBudget?: FillBudgetConfig;
 }
@@ -40,7 +41,6 @@ export function buildPublishCommandPlan(input: BuildPublishCommandPlanInput): Pu
       seq: seq++,
       kind,
       params,
-      platform: profile.platform,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     });
   };

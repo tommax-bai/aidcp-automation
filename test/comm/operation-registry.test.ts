@@ -46,15 +46,15 @@ test('identity read commands are dispatchable as page observation', () => {
  * 本用例守的是**分侧不塌**——写互动与纯浏览 / 纯拉取必须始终落在留痕维的两侧。
  *
  * ⚠️ 本维 MUST NOT 单独决定放行，也尚未接线任何重放决策（将来消费方是云端重试上限 / 升级 /
- * 绝不重放）。反例常驻：`edge.task.acquire` 是 'none'，但边缘身份闸照拦——准入判据，不是留痕判据。
+ * 绝不重放）。反例常驻：`task.acquire` 是 'none'，但边缘身份闸照拦——准入判据，不是留痕判据。
  */
 test('platform-footprint keeps direct write commands and browse-only commands on opposite sides', () => {
   // 两个参照锚点：xiaohongshu.note.comment 是「直接产生可归因新对象」最无争议的一条；
-  // note.close 是「纯浏览、不产生对象」最无争议的一条。
+  // xiaohongshu.navigation.back 是「纯浏览、不产生对象」最无争议的一条（批 6b：note.close 已退役，重锚于 back）。
   const write = automationOperationDescriptorFor('xiaohongshu.note.comment');
-  const browse = automationOperationDescriptorFor('xiaohongshu.note.close');
+  const browse = automationOperationDescriptorFor('xiaohongshu.navigation.back');
   assert.notEqual(write, null, 'xiaohongshu.note.comment 是参照锚点，它自己不能是 null');
-  assert.notEqual(browse, null, 'note.close 是参照锚点，它自己不能是 null');
+  assert.notEqual(browse, null, 'xiaohongshu.navigation.back 是参照锚点，它自己不能是 null');
   assert.notEqual(
     write?.platformFootprint,
     browse?.platformFootprint,
@@ -66,7 +66,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
     'xiaohongshu.note.like', 'facebook.note.like', 'facebook.video.like',
     'xiaohongshu.note.collect', 'xiaohongshu.user.follow', 'facebook.user.follow',
     'facebook.note.comment', 'xiaohongshu.comment.like',
-    'facebook.group.join', 'publish.command', 'plan.response',
+    'facebook.group.join', 'xiaohongshu.publish.command', 'facebook.publish.command', 'plan.response',
   ] as MessageType[]) {
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
@@ -77,19 +77,19 @@ test('platform-footprint keeps direct write commands and browse-only commands on
   // API 族里唯一的直写：真发出私信。
   assert.equal(automationOperationDescriptorFor('wechat_channels.inbox.reply.send')?.platformFootprint, write?.platformFootprint);
 
-  // 浏览 / 读 / 收尾 / 租约 / 验证码协助：与 note.close 同侧。
+  // 浏览 / 读 / 收尾 / 租约 / 验证码协助：与 xiaohongshu.navigation.back 同侧。
   for (const type of [
     'session.end', 'xiaohongshu.note.open', 'xiaohongshu.search.execute', 'xiaohongshu.feed.scroll',
-    'xiaohongshu.feed.refresh', 'navigation.back', 'xiaohongshu.note.browse_images', 'xiaohongshu.note.scroll_comments', 'xiaohongshu.profile.open',
+    'xiaohongshu.feed.refresh', 'facebook.navigation.back', 'xiaohongshu.note.browse_images', 'xiaohongshu.note.scroll_comments', 'xiaohongshu.profile.open',
     'identity.read_current_page', 'identity.read_self_profile',
     'xiaohongshu.notification.open', 'xiaohongshu.notification.browse_comments', 'xiaohongshu.notification.browse_likes',
     'xiaohongshu.notification.browse_follows', 'xiaohongshu.notification.back_home',
-    'edge.task.acquire', 'edge.task.release', 'captcha.assist.capture', 'captcha.assist.click',
+    'task.acquire', 'task.release', 'captcha.assist.capture', 'captcha.assist.click',
   ] as MessageType[]) {
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
       browse?.platformFootprint,
-      `${type} 不直接产生可归因新对象，必须与 note.close 同侧`,
+      `${type} 不直接产生可归因新对象，必须与 xiaohongshu.navigation.back 同侧`,
     );
   }
   // 纯拉取 / 只核验 / 本地清理：协议注释明写「绝不发起新平台写」「结果可重放」。
@@ -99,7 +99,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
       browse?.platformFootprint,
-      `${type} 不发起新平台写，必须与 note.close 同侧（与 wechat_channels.inbox.reply.send 分侧）`,
+      `${type} 不发起新平台写，必须与 xiaohongshu.navigation.back 同侧（与 wechat_channels.inbox.reply.send 分侧）`,
     );
   }
   // 控制与心跳。
@@ -111,7 +111,7 @@ test('platform-footprint keeps direct write commands and browse-only commands on
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
       browse?.platformFootprint,
-      `${type} 是控制 / 心跳 / 浏览器生命周期，必须与 note.close 同侧`,
+      `${type} 是控制 / 心跳 / 浏览器生命周期，必须与 xiaohongshu.navigation.back 同侧`,
     );
   }
 });

@@ -61,7 +61,43 @@ describe('bridge interaction composite table (batch 5)', () => {
   }
 });
 
-describe('action.completed correlation-key alias table (26 keys, values frozen)', () => {
+describe('bridge back platform table (batch 6b: navigation.back platformized, close_note retired)', () => {
+  it('back × xiaohongshu → xiaohongshu.navigation.back（透传 targetPage/dwellMs）', () => {
+    const env = edgeCommandToEnvelope(
+      { action: 'back', reason: 'back_to_feed', params: { targetPage: 'feed', dwellMs: 1200 } },
+      'xiaohongshu',
+    );
+    assert.equal(env.type, 'xiaohongshu.navigation.back');
+    assert.equal((env.payload as { targetPage?: string }).targetPage, 'feed');
+    assert.equal((env.payload as { dwellMs?: number }).dwellMs, 1200);
+  });
+
+  it('back × facebook → facebook.navigation.back', () => {
+    const env = edgeCommandToEnvelope({ action: 'back', reason: 'back_to_feed', params: {} }, 'facebook');
+    assert.equal(env.type, 'facebook.navigation.back');
+  });
+
+  it('back × wechat_channels throws（组合缺席＝响亮 throw，现状语义）', () => {
+    assert.throws(() => edgeCommandToEnvelope({ action: 'back', params: {} }, 'wechat_channels'));
+  });
+
+  it('back 缺平台 throws（桥不代答）', () => {
+    assert.throws(() => edgeCommandToEnvelope({ action: 'back', params: {} }, undefined));
+  });
+
+  it('close_note 已退役：任何翻译请求响亮 throw（{p}.note.close 从协议删除、零静默近似）', () => {
+    assert.throws(
+      () => edgeCommandToEnvelope({ action: 'close_note' as never, params: {} }, 'xiaohongshu'),
+      /close_note/,
+    );
+    assert.throws(
+      () => edgeCommandToEnvelope({ action: 'close_note' as never, params: {} }, 'facebook'),
+      /close_note/,
+    );
+  });
+});
+
+describe('action.completed correlation-key alias table (32 keys, values frozen)', () => {
   // 值＝云端角色关联键＝风控动作名（RISK_ACTIONS，kernel 枚举 + DB CHECK 钉死）。
   // 词汇批 5 红线：只换键、值不动——改坏任意一条（键漏改 / 值误改）本表穷举当场红。
   const EXPECTED: Record<string, string> = {
@@ -85,11 +121,10 @@ describe('action.completed correlation-key alias table (26 keys, values frozen)'
     'facebook.search.execute': 'search',
     'xiaohongshu.note.open': 'open_note',
     'facebook.note.open': 'open_note',
-    'xiaohongshu.note.close': 'close',
-    'facebook.note.close': 'close',
     'xiaohongshu.note.browse_images': 'browse_images',
     'xiaohongshu.note.scroll_comments': 'scroll_comments',
-    'navigation.back': 'back',
+    'xiaohongshu.navigation.back': 'back',
+    'facebook.navigation.back': 'back',
     'xiaohongshu.profile.open': 'profile_open',
     'facebook.group.join': 'join_group',
     'xiaohongshu.notification.open': 'open_notifications',

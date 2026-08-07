@@ -53,8 +53,8 @@ function gateFixture(state: 'allowed' | 'blocked' | 'unknown') {
 
 test('副本陈旧（unknown）时租约归还仍放行 —— 扣住它，浏览器槽位就永不释放', () => {
   const { gate, refusals } = gateFixture('unknown');
-  assert.equal(gate(envelopeOf('edge.task.release'), 'ads-1'), true);
-  assert.equal(gate(envelopeOf('edge.task.acquire'), 'ads-1'), true);
+  assert.equal(gate(envelopeOf('task.release'), 'ads-1'), true);
+  assert.equal(gate(envelopeOf('task.acquire'), 'ads-1'), true);
   assert.deepEqual(refusals, [], '放行的那些不记账，否则「因陈旧拒绝」这个指标会被纯控制面淹没');
 });
 
@@ -69,14 +69,14 @@ test('副本陈旧时新的真实平台动作被拦下，且这一次拒绝有�
 test('副本陈旧时控制面照常放行（停手的边界是「新的真实平台动作」，不是一切）', () => {
   const { gate, refusals } = gateFixture('unknown');
   assert.equal(gate(envelopeOf('ui.push_snapshot'), 'ads-1'), true);
-  assert.equal(gate(envelopeOf('xiaohongshu.note.close'), 'ads-1'), true, '详情页收尾属自然结束路径');
+  assert.equal(gate(envelopeOf('xiaohongshu.navigation.back'), 'ads-1'), true, '详情页收尾属自然结束路径（批 6b：close 并入 back）');
   assert.deepEqual(refusals, []);
 });
 
 test('确定态 blocked 一律不放行，且**不记**「因陈旧的拒绝」（那是另一回事）', () => {
   const { gate, refusals } = gateFixture('blocked');
   assert.equal(gate(envelopeOf('xiaohongshu.note.like'), 'ads-1'), false);
-  assert.equal(gate(envelopeOf('edge.task.release'), 'ads-1'), false);
+  assert.equal(gate(envelopeOf('task.release'), 'ads-1'), false);
   assert.deepEqual(refusals, [], 'blocked 是环境删除生命周期，不是副本陈旧；混记会污染停手指标');
 });
 

@@ -325,6 +325,18 @@ describe('RoleDispatcher Integration', () => {
     const backFeed = commands.filter((c) => c.action === 'back' && (c.params as { targetPage?: string })?.targetPage === 'feed');
     assert.equal(backFeed.length, 1, `feed 来源 back 应带 targetPage:'feed'`);
 
+    // 批 6b：targetPage 转必填（XHS 形按格式 fail-closed 拒收）——pageType 缺席时云端**显式**补 'feed'，
+    // 绝不发出不带 targetPage 的 back（补空即决策，决策归云端）。
+    dispatcher.bus.emit('feed.entered', { trigger: 'back_to_feed', ts: Date.now() } as never);
+    await new Promise((r) => setTimeout(r, 10));
+    const backs = commands.filter((c) => c.action === 'back');
+    assert.equal(backs.length, 3, '三次 back_to_feed 应各发一条 back');
+    assert.ok(
+      backs.every((c) => ['feed', 'search'].includes((c.params as { targetPage?: string })?.targetPage ?? '')),
+      `每条 back 都必须带显式 targetPage，实际=${JSON.stringify(backs)}`,
+    );
+    assert.equal((backs[2].params as { targetPage?: string })?.targetPage, 'feed', 'pageType 缺席 ⇒ 云端显式补 feed');
+
     dispatcher.endSession();
   });
 

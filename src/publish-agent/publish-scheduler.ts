@@ -122,6 +122,7 @@ export interface PublishSchedulerDeps {
   /** 解析「唯一真实账号」：恰好一个真实账号则返回它，0 或多个返回 null（自动 / 无参发布据此 honest-fail，绝不回落 default）。 */
   resolveSingleAccountId: () => Promise<string | null>;
   /** 账号平台事实源；缺省 xiaohongshu。 */
+  /** 目标账号所属平台（批 6b：必须接线——缺席时 buildTriggerInput fail-closed，绝不猜 xiaohongshu）。 */
   getPlatform?: (accountId: string) => PlatformId | Promise<PlatformId>;
   /**
    * 人设绑定判定（persona-driven-content-pipeline）：注入则发布前闸——未绑人设的账号诚实拒绝，
@@ -333,7 +334,12 @@ export class PublishScheduler {
             opts?.inspirationSinceMs === undefined ? undefined : { updatedSinceMs: opts.inspirationSinceMs })
         : this.noCuratedMaterials('comment'),
     ]);
-    const platform = this.d.getPlatform ? await this.d.getPlatform(accountId) : 'xiaohongshu';
+    // 批 6b：发布平台静默缺省清零——getPlatform 未接线不是「就当小红书」，是编排装配缺陷，
+    // fail-closed 带独立原因（错猜平台=后续整条发布链在错的平台词表上跑）。
+    if (!this.d.getPlatform) {
+      throw new Error('publish_platform_unresolved: getPlatform dependency not wired');
+    }
+    const platform = await this.d.getPlatform(accountId);
     const hoursSinceLastPublish = (this.clock() - baseline) / HOUR_MS;
     return {
       metrics: {

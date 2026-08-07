@@ -1451,7 +1451,13 @@ export async function runAutomationMain(
     const loadCandidate = async (recordId: number) => {
       const draft = await apiClients.automationPublishLog.loadForDispatch(recordId);
       if (!draft) return null;
-      const platform = draft.platform ?? 'xiaohongshu';
+      // 批 6b：发布平台静默缺省清零——草稿缺 platform 绝不猜；按候选稿不可用处理并具名记档
+      //（draft_platform_missing），委托层据此终止该稿而不是在错的平台上发出去。
+      if (!draft.platform) {
+        console.warn(`[automation-main] recordId=${recordId} 草稿缺 platform → 候选稿不可用（draft_platform_missing，不猜平台）`);
+        return null;
+      }
+      const platform = draft.platform;
       // 视频号在本会话里刻意只做收件箱，不进主动发布域。
       if (platform === 'wechat_channels') return null;
       return {

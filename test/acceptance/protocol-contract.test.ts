@@ -54,19 +54,19 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'action.result': true,
   'note.content': true, 'note.ack': true,
   'xiaohongshu.note.open': true, 'facebook.note.open': true,
-  'xiaohongshu.note.close': true, 'facebook.note.close': true,
   'xiaohongshu.search.execute': true, 'facebook.search.execute': true, 'session.end': true,
   'session.budget.request': true, 'session.budget': true,
   'risk.canDo': true, 'risk.canDo.result': true, 'risk.record': true, 'risk.record.result': true,
   'captcha.detected': true, 'captcha.cleared': true,
   'captcha.assist.capture': true, 'captcha.assist.snapshot': true,
   'captcha.assist.click': true, 'captcha.assist.click_result': true,
-  'edge.task.acquire': true, 'edge.task.acquired': true,
-  'edge.task.release': true, 'edge.task.released': true,
+  'task.acquire': true, 'task.acquired': true,
+  'task.release': true, 'task.released': true,
   'publish.approval_request': true, 'publish.approval_action': true, 'publish.approval_action.result': true,
   'publish.draft_image_remove': true, 'publish.draft_image_remove.result': true,
   'publish.result': true,
-  'publish.command': true, 'publish.command.result': true,
+  'xiaohongshu.publish.command': true, 'facebook.publish.command': true,
+  'xiaohongshu.publish.command.result': true, 'facebook.publish.command.result': true,
   'xiaohongshu.feed.scroll': true, 'xiaohongshu.search.scroll': true,
   'facebook.feed.scroll': true, 'facebook.search.scroll': true, 'facebook.reels.scroll': true,
   'xiaohongshu.feed.refresh': true, 'facebook.feed.refresh': true,
@@ -75,7 +75,8 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'xiaohongshu.note.collect': true, 'xiaohongshu.user.follow': true, 'facebook.user.follow': true,
   'xiaohongshu.note.comment': true, 'facebook.note.comment': true, 'xiaohongshu.comment.like': true,
   'facebook.group.join': true,
-  'navigation.back': true, 'xiaohongshu.note.browse_images': true, 'xiaohongshu.note.scroll_comments': true, 'xiaohongshu.profile.open': true,
+  'xiaohongshu.navigation.back': true, 'facebook.navigation.back': true,
+  'xiaohongshu.note.browse_images': true, 'xiaohongshu.note.scroll_comments': true, 'xiaohongshu.profile.open': true,
   'identity.read_current_page': true, 'identity.read_self_profile': true,
   'page.cards': true, 'note.detail': true, 'profile.detail': true, 'identity.observed': true, 'action.completed': true,
   'state.read': true, 'state.observed': true,
@@ -101,8 +102,8 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal(PROTOCOL_VERSION, 2);
   });
 
-  it('AC-PROTO-02 消息类型总数为 107（增删消息须同步冻结契约 + 本断言）', () => {
-    assert.equal(ALL_TYPES.length, 107);
+  it('AC-PROTO-02 消息类型总数为 108（增删消息须同步冻结契约 + 本断言）', () => {
+    assert.equal(ALL_TYPES.length, 108);
   });
 
   it('AC-PROTO-03 每个消息类型都能构造合法信封且版本一致', () => {
@@ -339,28 +340,28 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.deepEqual((snapBack!.payload as UiSnapshotPayload).dailyUsage?.firstPost, snap.dailyUsage?.firstPost);
   });
 
-  it('AC-PROTO-15 edge.task.released 抢占类原因字符串往返存活（裸值，typecheck 抓不到两端漂移）', () => {
+  it('AC-PROTO-15 task.released 抢占类原因字符串往返存活（裸值，typecheck 抓不到两端漂移）', () => {
     // 三个新增释放原因是裸联合字符串，两端 protocol.ts 各写一份、typecheck 不跨端校验
     // → 手写往返把值焊死；任一端漏改/拼错，该端本断言即红（change lease-strict-preemption 6.4）。
     for (const reason of ['preempted_by_task', 'window_busy', 'yield_timeout'] as const) {
       const payload: EdgeTaskReleasedPayload = { taskId: 't-14', reason };
-      const back = parseEnvelope(JSON.stringify(makeEnvelope('edge.task.released', 'r-14', 1700000000000, payload)));
+      const back = parseEnvelope(JSON.stringify(makeEnvelope('task.released', 'r-14', 1700000000000, payload)));
       assert.equal((back!.payload as EdgeTaskReleasedPayload).reason, reason);
     }
     // window_busy 专用剩余预算字段随包往返存活——「不让抢占者空等」的事实源。
     const busy: EdgeTaskReleasedPayload = { taskId: 't-14b', reason: 'window_busy', windowRemainingMs: 8_500 };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('edge.task.released', 'r-14b', 1700000000000, busy)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('task.released', 'r-14b', 1700000000000, busy)));
     assert.equal((back!.payload as EdgeTaskReleasedPayload).windowRemainingMs, 8_500);
   });
 
-  it('AC-PROTO-16 publish.command.result 已派发提交位往返存活（区分「已点未确认」与「压根没点」）', () => {
+  it('AC-PROTO-16 {p}.publish.command.result 已派发提交位往返存活（区分「已点未确认」与「压根没点」）', () => {
     // 已派发但未确认：ok=false 且 submitDispatched=true → 云端必须按「已提交待确认」处置、绝不烧 failed。
     const dispatched: PublishCommandResultPayload = { recordId: 1, seq: 2, kind: 'submit_publish', ok: false, submitDispatched: true };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('publish.command.result', 'p-15', 1700000000000, dispatched)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('xiaohongshu.publish.command.result', 'p-15', 1700000000000, dispatched)));
     assert.equal((back!.payload as PublishCommandResultPayload).submitDispatched, true);
     // 压根没点：字段缺省 → undefined，往返后仍不出现（云端据此判提交前失败可安全重投）。
     const notDispatched: PublishCommandResultPayload = { recordId: 1, seq: 3, kind: 'submit_publish', ok: false };
-    const back2 = parseEnvelope(JSON.stringify(makeEnvelope('publish.command.result', 'p-15b', 1700000000000, notDispatched)));
+    const back2 = parseEnvelope(JSON.stringify(makeEnvelope('xiaohongshu.publish.command.result', 'p-15b', 1700000000000, notDispatched)));
     assert.equal((back2!.payload as PublishCommandResultPayload).submitDispatched, undefined);
   });
 

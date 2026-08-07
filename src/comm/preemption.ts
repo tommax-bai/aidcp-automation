@@ -8,9 +8,9 @@
  * 本模块把这组字符串与判据收成**单一事实源**，所有消费点一律 import 此处，杜绝集合漂移。
  *
  * 两条抵达渠道（消费点据此选读 error 还是 reason）：
- * - `publish.command.result.error` / `action.completed.reason`：边缘对**在飞的那条命令**如实回执
+ * - `{p}.publish.command.result.error` / `action.completed.reason`：边缘对**在飞的那条命令**如实回执
  *   （`preempted_by_task` 打字中途被接管、`task_lease_mismatch` 命令到达时租约已不在）。
- * - `edge.task.released.reason`：租约级释放（`window_busy` 撞提交窗口、`yield_timeout` 写者不停手），
+ * - `task.released.reason`：租约级释放（`window_busy` 撞提交窗口、`yield_timeout` 写者不停手），
  *   由 edge-task-lease-client 处理；只有在 7.5「活跃租约中断」把在飞命令**就地 reject** 时才会以
  *   `CommandPreemptedError` 形态流进命令编排的 catch。
  *
@@ -42,7 +42,7 @@ export function isPreemptionReason(reason: string | null | undefined): reason is
 
 /**
  * 7.5 活跃租约中断的**结构化**载体：edge-task-lease-client 收到活跃租约的抢占释放时，用它 reject
- * 命令编排的在飞 publish.command，使 catch 能**按类型**判抢占（而非脆弱的 message 子串匹配）、
+ * 命令编排的在飞 {p}.publish.command，使 catch 能**按类型**判抢占（而非脆弱的 message 子串匹配）、
  * 归入独立 `preempted` outcome 而非任何提交前失败档。
  * `submitDispatched` 透传「提交是否已派发」：若中断时提交已派发，MUST 走「已提交待确认」、绝不重投。
  */

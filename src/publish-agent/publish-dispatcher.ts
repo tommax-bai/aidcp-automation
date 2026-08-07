@@ -801,6 +801,18 @@ export class PublishDispatcher {
       return;
     }
 
+    // 批 6b：发布平台静默缺省清零。草稿无 platform ⇒ 绝不猜（错猜的失败模式是「XHS 命令发给 FB 边缘」，
+    // 决策已在静默中做错）。冻结草稿里就没有平台 ⇒ 重来必然同样结果，结构性 failed、带独立原因。
+    if (!draft.platform) {
+      await this.store.updateStatus(recordId, 'failed').catch(() => {});
+      this.clearBrowserSlotWaiting(recordId);
+      await this.settleFacebookMedia(draft, 'structural_before_submit', recordId, 'draft_platform_missing');
+      this.logger.warn(`[PublishDispatcher] recordId=${recordId} 草稿缺 platform → 诚实 failed（draft_platform_missing，不猜平台、不下发）`);
+      this.notifyUi(accountId, recordId, 'failed', draft.title);
+      return;
+    }
+    const draftPlatform = draft.platform;
+
     // 图文帖必须有图（executor 已拦，下发段再守一道；缺图诚实 failed）。
     if (draft.imageUrls.length === 0) {
       await this.store.updateStatus(recordId, 'failed').catch(() => {});
@@ -892,7 +904,7 @@ export class PublishDispatcher {
             images: draft.imageUrls,
             cover: undefined,
             metadata: draft.metadata ?? undefined,
-            platform: draft.platform ?? 'xiaohongshu',
+            platform: draftPlatform,
             approvedByUser: true,
             edgeId,
             // 7.1 HOLE-13：把「已开始」下移到提交点击真正下发前——此前的导航/上传/填字段皆平台零副作用，

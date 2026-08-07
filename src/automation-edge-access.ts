@@ -322,7 +322,7 @@ export function createAutomationEdgeTransportGate(
     // recategorize-nonpage-commands：登记表新增 page_observation / environment_assist 两类，
     // kernel 的传输类别联合没有它们。此处映射回 'page_automation'（它们改类前的档位）——
     // 本闸对这两类的行为逐位保持：读身份在副本 unknown 时照旧不放行，验证码协助照旧靠具名豁免放行。
-    // （session.end / edge.task.release 已真实归入 automation_control ⇒ 本闸放行——这是唯一的
+    // （session.end / task.release 已真实归入 automation_control ⇒ 本闸放行——这是唯一的
     // 有意行为变化：收尾被扣住正是 kernel 文档自陈要避免的死锁形态。）
     const rawCategory = automationOperationDescriptorFor(envelope.type)?.category ?? null;
     const kernelCategory = rawCategory === 'page_observation' || rawCategory === 'environment_assist'

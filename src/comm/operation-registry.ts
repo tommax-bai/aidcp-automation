@@ -19,7 +19,7 @@ export type AutomationOperationClass =
  *
  * 判据：这条命令**执行成功后**，平台上是否**直接**出现一个可归因到该账号的新对象。
  * 三条边界裁定（详见边缘那份的字段注释）：按消息类型取最坏一档；只算直接后果不算间接触发；
- * **本维 MUST NOT 单独决定放行**（反例：`edge.task.acquire` 是 `none`，身份未落定照拦——准入判据）。
+ * **本维 MUST NOT 单独决定放行**（反例：`task.acquire` 是 `none`，身份未落定照拦——准入判据）。
  *
  * 云端这一侧**将来**的消费方是重放决策（重试上限 / 升级 / 绝不重放都在云端做）：
  * `account_visible` 的命令一经派发绝不自动重放。**当前尚未接线**——本维今天只被测试断言
@@ -99,8 +99,6 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   'session.end': automationControl('local_environment', 'none'),
   'xiaohongshu.note.open': pageAutomation('none'),
   'facebook.note.open': pageAutomation('none'),
-  'xiaohongshu.note.close': pageAutomation('none'),
-  'facebook.note.close': pageAutomation('none'),
   // 搜索只产生账号自见的隐式行为记录，不产生平台上可归因的新对象。
   'xiaohongshu.search.execute': pageAutomation('none'),
   'facebook.search.execute': pageAutomation('none'),
@@ -122,7 +120,8 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   'facebook.note.comment': pageAutomation(),
   'xiaohongshu.comment.like': pageAutomation(),
   'facebook.group.join': pageAutomation(),
-  'navigation.back': pageAutomation('none'),
+  'xiaohongshu.navigation.back': pageAutomation('none'),
+  'facebook.navigation.back': pageAutomation('none'),
   'xiaohongshu.note.browse_images': pageAutomation('none'),
   'xiaohongshu.note.scroll_comments': pageAutomation('none'),
   'xiaohongshu.profile.open': pageAutomation('none'),
@@ -139,12 +138,13 @@ export const AUTOMATION_OPERATION_REGISTRY = {
   'xiaohongshu.notification.browse_likes': pageAutomation('none'),
   'xiaohongshu.notification.browse_follows': pageAutomation('none'),
   'xiaohongshu.notification.back_home': pageAutomation('none'),
-  // 留痕维按消息类型语义判（发布 ⇒ 留痕）；publish.command 按最坏一档（多种原子里只有
+  // 留痕维按消息类型语义判（发布 ⇒ 留痕）；{p}.publish.command 按最坏一档（多种原子里只有
   // 「点提交」真留痕，但本表按消息类型编址）。
-  'publish.command': pageAutomation(),
+  'xiaohongshu.publish.command': pageAutomation(),
+  'facebook.publish.command': pageAutomation(),
   // 租约属准入不属留痕：acquire 不产生对象但身份未落定照拦（本维不决定放行的常驻反例）。
-  'edge.task.acquire': pageAutomation('none'),
-  'edge.task.release': automationControl('local_environment', 'none'),
+  'task.acquire': pageAutomation('none'),
+  'task.release': automationControl('local_environment', 'none'),
   'captcha.assist.capture': environmentAssist(),
   // 人工点位只作用于验证码浮层，解开阻断不产生该账号名下的新对象。
   'captcha.assist.click': environmentAssist(),
