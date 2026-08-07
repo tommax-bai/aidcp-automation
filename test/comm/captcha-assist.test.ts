@@ -455,3 +455,46 @@ describe('CaptchaAssistService · text answer（change captcha-assist-text-answe
     assert.equal(inc.lastResult?.textNotExecuted, undefined, 'inputMode=click_type ⇒ 无偏斜标记');
   });
 });
+
+// 词汇批 7 补锁：handler 对 captcha.detected / captcha.cleared 的 case 派发此前零测试覆盖——
+// 消息改名时 case 串漏改只有 typecheck 挡（而 payload 两端是 as 断言、case 归错家 typecheck
+// 也未必红）。这里锁死：两条上报必须到达验证码协调器，绝不落进 unsupported_type 静默忽略。
+describe('handler captcha report dispatch', () => {
+  it('captcha.detected / captcha.cleared reach the coordinator (never unsupported_type)', async () => {
+    const { DefaultMessageHandler, makeEnvelope } = await import('../../src/comm/index.js');
+    const { SimplePlanner } = await import('../../src/planner/index.js');
+    const { EventBus } = await import('../../src/event-bus/index.js');
+    const calls: string[] = [];
+    const handler = new DefaultMessageHandler({
+      planner: new SimplePlanner(),
+      llm: { complete: async () => '0' },
+      eventBus: new EventBus(),
+      cache: {
+        get: async () => null,
+        recordHit: async () => {},
+        recordFailure: async () => {},
+        stage: async () => {},
+        confirmStaged: async () => ({ promoted: false, successes: 1, needed: 2 }),
+        dropStaged: async () => {},
+      } as never,
+      captcha: {
+        onDetected: async () => { calls.push('detected'); },
+        onCleared: async () => { calls.push('cleared'); },
+      } as never,
+    });
+    const session = { sessionId: 'edge-s1', edgeId: 'edge-1', accountId: 'acc-1' } as EdgeSession;
+
+    const detectedReply = await handler.handle(
+      makeEnvelope('captcha.detected', 'cd-1', 1, { edgeId: 'edge-1', kind: 'captcha' }),
+      session,
+    );
+    const clearedReply = await handler.handle(
+      makeEnvelope('captcha.cleared', 'cc-1', 2, { edgeId: 'edge-1' }),
+      session,
+    );
+
+    assert.equal(detectedReply, null);
+    assert.equal(clearedReply, null);
+    assert.deepEqual(calls, ['detected', 'cleared']);
+  });
+});
