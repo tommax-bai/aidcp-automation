@@ -171,7 +171,7 @@ describe('buildFacebookEdgeSteps', () => {
           ts: 0,
         } as never);
       }
-      if (env.type === 'interaction.comment') {
+      if (env.type === 'facebook.note.comment') {
         bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
       }
     });
@@ -264,10 +264,10 @@ describe('buildFacebookEdgeSteps', () => {
     assert.equal(r.reason, 'editor_not_found');
   });
 
-  it('comment：action.completed{comment,ok:true} → ok:true；interaction.comment 带 noteId+text', async () => {
+  it('comment：action.completed{comment,ok:true} → ok:true；facebook.note.comment 带 noteId+text', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'interaction.comment') bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
+      if (env.type === 'facebook.note.comment') bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
     });
     const r = await steps(bus, pusher).submitComment('https://fb.com/g/1/posts/2', '很喜欢');
     assert.equal(r.ok, true);
@@ -278,7 +278,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('comment：显式 fast return 透传 fastReturnToFeed=true，未确认结果原样返回', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makePusher((env) => {
-      if (env.type === 'interaction.comment') bus.emit('action.completed', { action: 'comment', ok: false, reason: 'verification_ambiguous', ts: 0 } as never);
+      if (env.type === 'facebook.note.comment') bus.emit('action.completed', { action: 'comment', ok: false, reason: 'verification_ambiguous', ts: 0 } as never);
     });
     const r = await steps(bus, pusher).submitComment('https://fb.com/g/1/posts/2', '很喜欢', undefined, true);
     assert.equal(r.ok, false);
@@ -289,7 +289,7 @@ describe('buildFacebookEdgeSteps', () => {
   it('comment：action.completed{comment,ok:false,reason} → ok:false + reason', async () => {
     const bus = new EventBus();
     const { pusher } = makePusher((env) => {
-      if (env.type === 'interaction.comment') bus.emit('action.completed', { action: 'comment', ok: false, reason: 'verification_ambiguous', ts: 0 } as never);
+      if (env.type === 'facebook.note.comment') bus.emit('action.completed', { action: 'comment', ok: false, reason: 'verification_ambiguous', ts: 0 } as never);
     });
     const r = await steps(bus, pusher).submitComment('https://fb.com/g/1/posts/2', '很喜欢');
     assert.equal(r.ok, false);
@@ -321,19 +321,19 @@ describe('facebookCommentSubmitTimeoutMs（P0-1 长度感知提交超时）', ()
 });
 
 describe('buildFacebookEdgeSteps — keep-open 租约 taskId 透传（change facebook-manual-comment-keepopen-lease）', () => {
-  it('三条命令 search.execute / note.open / interaction.comment 都带 lease taskId（否则被自己的租约挡死）', async () => {
+  it('三条命令 search.execute / note.open / facebook.note.comment 都带 lease taskId（否则被自己的租约挡死）', async () => {
     const bus = new EventBus();
     const target = 'https://www.facebook.com/groups/1/posts/2';
     const { pusher, sent } = makePusher((env) => {
       if (env.type === 'facebook.search.execute') bus.emit('page.cards.arrived', { cards: [{ noteId: target }], ts: 0 } as never);
       else if (env.type === 'facebook.note.open') bus.emit('note.detail.arrived', { detail: { noteId: target, content: '正文' }, ts: 0 } as never);
-      else if (env.type === 'interaction.comment') bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
+      else if (env.type === 'facebook.note.comment') bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
     });
     const s = buildFacebookEdgeSteps({ bus, pusher, edgeId: 'e-fb', taskId: 'task-xyz', stepTimeoutMs: 40, logger: { log: () => {}, warn: () => {} } });
     await s.searchInContainer('咖啡', 'https://www.facebook.com/groups/1');
     await s.openPost(target);
     await s.submitComment(target, '这篇不错');
-    for (const t of ['facebook.search.execute', 'facebook.note.open', 'interaction.comment']) {
+    for (const t of ['facebook.search.execute', 'facebook.note.open', 'facebook.note.comment']) {
       const env = sent.find((e) => e.type === t);
       assert.ok(env, `应下发 ${t}`);
       assert.equal(env!.payload.taskId, 'task-xyz', `${t} 必须带 lease taskId`);

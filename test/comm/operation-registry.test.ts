@@ -49,11 +49,11 @@ test('identity read commands are dispatchable as page observation', () => {
  * 绝不重放）。反例常驻：`edge.task.acquire` 是 'none'，但边缘身份闸照拦——准入判据，不是留痕判据。
  */
 test('platform-footprint keeps direct write commands and browse-only commands on opposite sides', () => {
-  // 两个参照锚点：interaction.comment 是「直接产生可归因新对象」最无争议的一条；
+  // 两个参照锚点：xiaohongshu.note.comment 是「直接产生可归因新对象」最无争议的一条；
   // note.close 是「纯浏览、不产生对象」最无争议的一条。
-  const write = automationOperationDescriptorFor('interaction.comment');
+  const write = automationOperationDescriptorFor('xiaohongshu.note.comment');
   const browse = automationOperationDescriptorFor('xiaohongshu.note.close');
-  assert.notEqual(write, null, 'interaction.comment 是参照锚点，它自己不能是 null');
+  assert.notEqual(write, null, 'xiaohongshu.note.comment 是参照锚点，它自己不能是 null');
   assert.notEqual(browse, null, 'note.close 是参照锚点，它自己不能是 null');
   assert.notEqual(
     write?.platformFootprint,
@@ -61,15 +61,17 @@ test('platform-footprint keeps direct write commands and browse-only commands on
     '写互动与纯浏览必须落在留痕维的两侧——两侧塌成一侧则本维失去全部区分力',
   );
 
-  // 直接留痕（含按消息类型取最坏一档的 publish.* 与 plan.response）：与 interaction.comment 同侧。
+  // 直接留痕（含按消息类型取最坏一档的 publish.* 与 plan.response）：与 xiaohongshu.note.comment 同侧。
   for (const type of [
-    'interaction.like', 'interaction.collect', 'interaction.follow', 'interaction.like_comment',
+    'xiaohongshu.note.like', 'facebook.note.like', 'facebook.video.like',
+    'xiaohongshu.note.collect', 'xiaohongshu.user.follow', 'facebook.user.follow',
+    'facebook.note.comment', 'xiaohongshu.comment.like',
     'facebook.group.join', 'publish.command', 'plan.response',
   ] as MessageType[]) {
     assert.equal(
       automationOperationDescriptorFor(type)?.platformFootprint,
       write?.platformFootprint,
-      `${type} 直接产生可归因新对象（或按最坏一档），必须与 interaction.comment 同侧`,
+      `${type} 直接产生可归因新对象（或按最坏一档），必须与 xiaohongshu.note.comment 同侧`,
     );
   }
   // API 族里唯一的直写：真发出私信。

@@ -43,7 +43,7 @@ function fakeEdge(bus: EventBus, targetNoteId: string) {
           bus.emit('note.detail.arrived', { detail: { noteId: targetNoteId, title: '目标笔记', content: '正文', likeCount: 10, collectCount: 9 }, ts: 0 } as never);
         } else if (env.type === 'xiaohongshu.note.scroll_comments') {
           bus.emit('action.completed', { action: 'scroll_comments', ok: true, candidates: [{ text: '学到了' }], ts: 0 } as never);
-        } else if (env.type === 'interaction.comment') {
+        } else if (env.type === 'xiaohongshu.note.comment') {
           bus.emit('action.completed', { action: 'comment', ok: true, ts: 0 } as never);
         }
         return 1;
@@ -245,8 +245,8 @@ describe('CommentScheduler.triggerTargeted happy path', () => {
     assert.equal((search.payload.keyword as string).length, TARGETED_SEARCH_TERM_MAX_LEN);
     assert.equal(search.payload.keyword, longTitle.slice(0, TARGETED_SEARCH_TERM_MAX_LEN));
 
-    const comment = edge.pushed.find((e) => e.type === 'interaction.comment');
-    assert.ok(comment, '应下发 interaction.comment');
+    const comment = edge.pushed.find((e) => e.type === 'xiaohongshu.note.comment');
+    assert.ok(comment, '应下发 xiaohongshu.note.comment');
     assert.equal(comment.payload.noteId, 'note-1');
 
     assert.deepEqual(leaseKinds, ['comment_prepare', 'comment_commit']);
@@ -272,7 +272,7 @@ describe('CommentScheduler.triggerTargeted happy path', () => {
     const receipt = await cardDone.promise;
     assert.equal(receipt.ok, true);
     assert.match(receipt.title, /定向联系评论/);
-    const comment = edge.pushed.find((e) => e.type === 'interaction.comment');
+    const comment = edge.pushed.find((e) => e.type === 'xiaohongshu.note.comment');
     assert.ok(comment);
     assert.equal(comment.payload.groupChatCode, 'GROUP-CODE'); // 线协议字段名仍为 groupChatCode；联系方式整段注入（边端 insertText）
   });
@@ -307,7 +307,7 @@ describe('CommentScheduler.triggerTargeted happy path', () => {
     assert.equal(edge.pushed.some((e) => e.type === 'xiaohongshu.search.execute'), true, 'commit 必须重新搜索稳定 noteId');
     assert.equal(edge.pushed.some((e) => e.type === 'xiaohongshu.note.open'), true, 'commit 必须重新打开目标复检');
     assert.ok(edge.pushed.some((e) => e.type === 'xiaohongshu.note.scroll_comments'));
-    assert.ok(edge.pushed.some((e) => e.type === 'interaction.comment'));
+    assert.ok(edge.pushed.some((e) => e.type === 'xiaohongshu.note.comment'));
   });
 });
 

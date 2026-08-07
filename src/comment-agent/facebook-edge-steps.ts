@@ -416,7 +416,7 @@ export function buildFacebookEdgeSteps(deps: FacebookEdgeStepsDeps): {
         submitTimeout,
         () =>
           push(
-            makeEnvelope('interaction.comment', randomUUID(), Date.now(), {
+            makeEnvelope('facebook.note.comment', randomUUID(), Date.now(), {
               noteId: target,
               text,
               ...(groupChatCode && groupChatCode.length > 0 ? { groupChatCode } : {}),

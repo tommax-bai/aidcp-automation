@@ -349,7 +349,7 @@ export function buildEdgeCommentSteps(deps: EdgeCommentStepsDeps): {
         timeout,
         () =>
           push(
-            makeEnvelope('interaction.comment', randomUUID(), Date.now(), {
+            makeEnvelope('xiaohongshu.note.comment', randomUUID(), Date.now(), {
               taskId,
               noteId,
               text,

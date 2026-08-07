@@ -68,7 +68,7 @@ function makeEnv(
         }
       } else if (env.type === 'xiaohongshu.note.scroll_comments') {
         bus.emit('action.completed', { action: 'scroll_comments', ok: opts.scrollOk ?? true, reason: opts.scrollReason, candidates: opts.comments ?? [], ts: Date.now() } as never);
-      } else if (env.type === 'interaction.comment') {
+      } else if (env.type === 'xiaohongshu.note.comment') {
         bus.emit('action.completed', { action: 'comment', ok: opts.postOk ?? true, reason: opts.postReason, ts: Date.now() } as never);
       }
       return 1;
@@ -243,12 +243,12 @@ describe('buildEdgeCommentSteps', () => {
     assert.deepEqual(await steps.post('a', '一条评论'), { status: 'confirmed' });
   });
 
-  it('post：fastReturnToFeed 只在显式 true 时进入 interaction.comment payload', async () => {
+  it('post：fastReturnToFeed 只在显式 true 时进入 xiaohongshu.note.comment payload', async () => {
     const bus = new EventBus();
     const { pusher, sent } = makeEnv(bus, { postOk: false, postReason: 'submitted_unconfirmed' });
     const steps = buildEdgeCommentSteps({ bus, pusher, edgeId: 'e1', dedup: makeDedup() });
     assert.deepEqual(await steps.post('a', '一条评论', null, true), { status: 'submitted_unconfirmed' });
-    assert.equal(sent.find((env) => env.type === 'interaction.comment')?.payload.fastReturnToFeed, true);
+    assert.equal(sent.find((env) => env.type === 'xiaohongshu.note.comment')?.payload.fastReturnToFeed, true);
   });
 
   it('post：回执 ok:false 无 reason → not_dispatched（提交前失败，可重排）', async () => {

@@ -34,12 +34,23 @@ const SCROLL_TYPES: Readonly<Record<PlatformId, Partial<Record<ScrollSurface, Me
   wechat_channels: {},
 } satisfies Record<PlatformId, Partial<Record<ScrollSurface, MessageType>>>;
 
+/** like 命令：平台 × 对象 → 信封类型（词汇批 5「按对象拆、不按位置拆」；video=Reels 或 feed 视频帖）。 */
+const LIKE_TYPES: Readonly<Record<PlatformId, Partial<Record<'note' | 'video', MessageType>>>> = {
+  xiaohongshu: { note: 'xiaohongshu.note.like' },
+  facebook: { note: 'facebook.note.like', video: 'facebook.video.like' },
+  wechat_channels: {},
+} satisfies Record<PlatformId, Partial<Record<'note' | 'video', MessageType>>>;
+
 /** 平台段命令：平台 × 动作 → 信封类型（缺席组合＝该平台不存在该能力）。 */
 const PLATFORM_SCOPED_TYPES: Readonly<Record<PlatformId, Partial<Record<string, MessageType>>>> = {
   xiaohongshu: {
     refresh: 'xiaohongshu.feed.refresh',
     open_note: 'xiaohongshu.note.open',
     close_note: 'xiaohongshu.note.close',
+    collect: 'xiaohongshu.note.collect',
+    follow: 'xiaohongshu.user.follow',
+    comment: 'xiaohongshu.note.comment',
+    comment_like: 'xiaohongshu.comment.like',
     search: 'xiaohongshu.search.execute',
     browse_images: 'xiaohongshu.note.browse_images',
     scroll_comments: 'xiaohongshu.note.scroll_comments',
@@ -54,6 +65,8 @@ const PLATFORM_SCOPED_TYPES: Readonly<Record<PlatformId, Partial<Record<string, 
     refresh: 'facebook.feed.refresh',
     open_note: 'facebook.note.open',
     close_note: 'facebook.note.close',
+    follow: 'facebook.user.follow',
+    comment: 'facebook.note.comment',
     search: 'facebook.search.execute',
   },
   wechat_channels: {},
@@ -100,16 +113,27 @@ export function edgeCommandToEnvelope(command: EdgeCommand, platform?: PlatformI
       return createEnvelope(platformScopedType('open_note', platform), command.params ?? {});
     case 'close_note':
       return createEnvelope(platformScopedType('close_note', platform), command.params ?? {});
-    case 'like':
-      return createEnvelope('interaction.like', command.params ?? {});
+    case 'like': {
+      // 词汇批 5：对象由发令方声明（Reels/feed 视频路径标 video），缺省 note；
+      // 不存在组合（xiaohongshu×video）响亮 throw——结构性不可达的后备，非第二道支持闸。
+      if (!platform) {
+        throw new Error('like requires a platform for translation, got none');
+      }
+      const objectKind = command.likeObject ?? 'note';
+      const type = LIKE_TYPES[platform]?.[objectKind];
+      if (!type) {
+        throw new Error(`like object=${objectKind} does not exist on platform=${platform}`);
+      }
+      return createEnvelope(type, command.params ?? {});
+    }
     case 'collect':
-      return createEnvelope('interaction.collect', command.params ?? {});
+      return createEnvelope(platformScopedType('collect', platform), command.params ?? {});
     case 'follow':
-      return createEnvelope('interaction.follow', command.params ?? {});
+      return createEnvelope(platformScopedType('follow', platform), command.params ?? {});
     case 'comment':
-      return createEnvelope('interaction.comment', command.params ?? {});
+      return createEnvelope(platformScopedType('comment', platform), command.params ?? {});
     case 'comment_like':
-      return createEnvelope('interaction.like_comment', command.params ?? {});
+      return createEnvelope(platformScopedType('comment_like', platform), command.params ?? {});
     case 'search':
       return createEnvelope(platformScopedType('search', platform), command.params ?? {});
     case 'back':

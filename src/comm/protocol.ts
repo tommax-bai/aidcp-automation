@@ -104,11 +104,15 @@ export type MessageType =
   | 'xiaohongshu.feed.refresh'  // 主 feed 深度到阈值后点右下「刷新」回顶换新批（小红书）
   | 'facebook.feed.refresh'     // 主 feed 换批（Facebook：顶栏首页图标页内点击）
   | 'pacing.update'        // 会话中途风控档位变化推送新 tempo（cloud → edge，pacing-fallback-hardening）
-  | 'interaction.like'     // 点赞
-  | 'interaction.collect'  // 收藏
-  | 'interaction.follow'   // 关注
-  | 'interaction.comment'  // 发评论（浏览闭环写互动）
-  | 'interaction.like_comment' // 给「别人的某条评论」点赞（详情页拟人微互动）
+  | 'xiaohongshu.note.like'    // 点赞笔记（小红书；视频笔记同为 note 对象）
+  | 'facebook.note.like'       // 点赞帖子（Facebook；对象=note，Reel/视频用 facebook.video.like）
+  | 'facebook.video.like'      // 点赞当前视频/Reel（Facebook；名字声明对象，执行点核对现场、不符诚实失败）
+  | 'xiaohongshu.note.collect' // 收藏笔记（仅小红书，Facebook 无收藏）
+  | 'xiaohongshu.user.follow'  // 关注作者（小红书；对象=用户）
+  | 'facebook.user.follow'     // 关注当前 Reel 作者（Facebook；noteId 绑定当前活动 Reel，Feed/主页关注不支持）
+  | 'xiaohongshu.note.comment' // 发评论（小红书，浏览闭环写互动）
+  | 'facebook.note.comment'    // 发评论（Facebook；含群帖 keep-open 流）
+  | 'xiaohongshu.comment.like' // 给「别人的某条评论」点赞（仅小红书，详情页拟人微互动）
   | 'facebook.group.join'  // Facebook 加群原子指令（独立 join 能力，绝不走 browse）
   | 'navigation.back'      // 返回上一页
   | 'xiaohongshu.note.browse_images'   // 浏览笔记图片（仅小红书）
@@ -2121,11 +2125,15 @@ export interface PayloadMap {
   'xiaohongshu.feed.refresh': FeedRefreshPayload;
   'facebook.feed.refresh': FeedRefreshPayload;
   'pacing.update': PacingUpdatePayload;
-  'interaction.like': InteractionLikePayload;
-  'interaction.collect': InteractionCollectPayload;
-  'interaction.follow': InteractionFollowPayload;
-  'interaction.comment': InteractionCommentPayload;
-  'interaction.like_comment': InteractionLikeCommentPayload;
+  'xiaohongshu.note.like': InteractionLikePayload;
+  'facebook.note.like': InteractionLikePayload;
+  'facebook.video.like': InteractionLikePayload;
+  'xiaohongshu.note.collect': InteractionCollectPayload;
+  'xiaohongshu.user.follow': InteractionFollowPayload;
+  'facebook.user.follow': InteractionFollowPayload;
+  'xiaohongshu.note.comment': InteractionCommentPayload;
+  'facebook.note.comment': InteractionCommentPayload;
+  'xiaohongshu.comment.like': InteractionLikeCommentPayload;
   'facebook.group.join': GroupJoinPayload;
   'navigation.back': NavigationBackPayload;
   'xiaohongshu.note.browse_images': NoteBrowseImagesPayload;

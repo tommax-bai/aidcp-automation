@@ -70,8 +70,10 @@ const ALL_MESSAGE_TYPES: Record<MessageType, true> = {
   'xiaohongshu.feed.scroll': true, 'xiaohongshu.search.scroll': true,
   'facebook.feed.scroll': true, 'facebook.search.scroll': true, 'facebook.reels.scroll': true,
   'xiaohongshu.feed.refresh': true, 'facebook.feed.refresh': true,
-  'pacing.update': true, 'interaction.like': true, 'interaction.collect': true, 'interaction.follow': true,
-  'interaction.comment': true, 'interaction.like_comment': true,
+  'pacing.update': true,
+  'xiaohongshu.note.like': true, 'facebook.note.like': true, 'facebook.video.like': true,
+  'xiaohongshu.note.collect': true, 'xiaohongshu.user.follow': true, 'facebook.user.follow': true,
+  'xiaohongshu.note.comment': true, 'facebook.note.comment': true, 'xiaohongshu.comment.like': true,
   'facebook.group.join': true,
   'navigation.back': true, 'xiaohongshu.note.browse_images': true, 'xiaohongshu.note.scroll_comments': true, 'xiaohongshu.profile.open': true,
   'identity.read_current': true, 'identity.read_self_profile': true,
@@ -99,8 +101,8 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
     assert.equal(PROTOCOL_VERSION, 2);
   });
 
-  it('AC-PROTO-02 消息类型总数为 103（增删消息须同步冻结契约 + 本断言）', () => {
-    assert.equal(ALL_TYPES.length, 103);
+  it('AC-PROTO-02 消息类型总数为 107（增删消息须同步冻结契约 + 本断言）', () => {
+    assert.equal(ALL_TYPES.length, 107);
   });
 
   it('AC-PROTO-03 每个消息类型都能构造合法信封且版本一致', () => {
@@ -113,12 +115,12 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
   });
 
   it('AC-PROTO-04 信封 JSON 往返保持等价', () => {
-    const env = makeEnvelope('interaction.like', 'rt-1', 1700000000000, { noteId: 'n1', reason: 'r' });
+    const env = makeEnvelope('xiaohongshu.note.like', 'rt-1', 1700000000000, { noteId: 'n1', reason: 'r' });
     const back = parseEnvelope(JSON.stringify(env));
     assert.deepEqual(back, env);
   });
 
-  it('AC-PROTO-04B interaction.follow 兼容旧载荷，并保留 Reel noteId', () => {
+  it('AC-PROTO-04B {p}.user.follow 兼容旧载荷，并保留 Reel noteId', () => {
     const legacy: InteractionFollowPayload = { authorId: 'author-1' };
     const reel: InteractionFollowPayload = {
       authorId: 'author-1',
@@ -126,7 +128,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
       thinkMs: 1200,
     };
     assert.equal(legacy.noteId, undefined);
-    const env = makeEnvelope('interaction.follow', 'follow-1', 1700000000000, reel);
+    const env = makeEnvelope('facebook.user.follow', 'follow-1', 1700000000000, reel);
     assert.deepEqual(parseEnvelope(JSON.stringify(env)), env);
     assert.equal((env.payload as InteractionFollowPayload).noteId, reel.noteId);
   });
@@ -206,7 +208,7 @@ describe('AC-PROTO 协议契约一致性（cloud）', () => {
 
   it('AC-PROTO-08B comment --feed 快返字段往返存活（防两端静默漂移）', () => {
     const payload: InteractionCommentPayload = { noteId: 'n1', text: '评论正文', fastReturnToFeed: true };
-    const back = parseEnvelope(JSON.stringify(makeEnvelope('interaction.comment', 'c-feed', 1700000000000, payload)));
+    const back = parseEnvelope(JSON.stringify(makeEnvelope('xiaohongshu.note.comment', 'c-feed', 1700000000000, payload)));
     assert.equal((back!.payload as InteractionCommentPayload).fastReturnToFeed, true);
   });
 

@@ -725,6 +725,12 @@ export interface EdgeCommand {
   params?: Record<string, unknown>;
   reason?: string;
   /**
+   * like 的对象（词汇批 5：按对象拆、不按位置拆，bridge 据此选 {p}.note.like / facebook.video.like）。
+   * 仅 action='like' 有意义；Reels 与 feed 视频帖两类发送点显式标 'video'，缺省 'note'。
+   * 关联键值不随对象变（回执恒 action='like'）。
+   */
+  likeObject?: 'note' | 'video';
+  /**
    * 滚动命令的目标面（词汇批 4：面进命令名，bridge 据此选 {platform}.{surface}.scroll）。
    * 仅 action='scroll' 有意义；由 sendScrollCommand / sendBrowseRedrive 经单点解析器填充，
    * 缺失时 bridge 响亮 throw——补空即决策，翻译层不代答。
@@ -978,7 +984,7 @@ export class RoleDispatcher {
    * like/collect 下发后的重试上下文（change fix-interaction-and-comment-capture）：回执带不带 noteId，
    * 故下发时按动作暂存 noteId + 已重试次数；可重试失败（点了没生效/互动栏一时缺失）时据此原地重发一次。
    */
-  private readonly interactionRetry = new Map<'like' | 'collect', { noteId: string; attempts: number }>();
+  private readonly interactionRetry = new Map<'like' | 'collect', { noteId: string; attempts: number; likeObject?: 'note' | 'video' }>();
   private readonly notifyComments?: (items: NotificationItem[]) => Promise<void>;
   private readonly conceptStore?: ConceptStorePort;
   /** 搜索前限频闸（每关键词每会话/每天上限），dispatcher 持有单例，会话重启时清会话计数。 */
@@ -3938,10 +3944,11 @@ export class RoleDispatcher {
     const sent = this.sendNoteScopedCommand('like', {
       action: 'like',
       reason,
+      likeObject: 'video',
       params: { noteId, thinkMs: this.thinkNow() },
     });
     if (sent) {
-      this.interactionRetry.set('like', { noteId, attempts: 0 });
+      this.interactionRetry.set('like', { noteId, attempts: 0, likeObject: 'video' });
       console.log(
         `[interaction_appraiser] ${reason} action=like probability=${FACEBOOK_PRESENTED_VIDEO_LIKE_PROBABILITY} roll=${roll} note=${noteId}`,
       );
@@ -4049,10 +4056,11 @@ export class RoleDispatcher {
     const sent = this.sendNoteScopedCommand('like', {
       action: 'like',
       reason,
+      likeObject: 'video',
       params: { noteId, thinkMs: this.thinkNow() },
     });
     if (sent) {
-      this.interactionRetry.set('like', { noteId, attempts: 0 });
+      this.interactionRetry.set('like', { noteId, attempts: 0, likeObject: 'video' });
       console.log(`[interaction_appraiser] ${reason} action=like mode=${mode} ordinal=${ordinal} every=${viewsPerLike} note=${noteId}`);
     } else {
       console.log(`[interaction_appraiser] skip reason=facebook_reel_like_dispatch_suppressed ordinal=${ordinal} note=${noteId}`);
@@ -5115,7 +5123,7 @@ export class RoleDispatcher {
             tracker.attempts < 1
           ) {
             // 只有重发真发出（未被软暂停/去重丢弃）才消耗这次重试名额；否则不烧名额、落下方清理。
-            const resent = this.sendCommand({ action: payload.action, params: { noteId: tracker.noteId, thinkMs: this.thinkNow() } });
+            const resent = this.sendCommand({ action: payload.action, likeObject: tracker.likeObject, params: { noteId: tracker.noteId, thinkMs: this.thinkNow() } });
             if (resent) {
               tracker.attempts += 1;
               console.log(

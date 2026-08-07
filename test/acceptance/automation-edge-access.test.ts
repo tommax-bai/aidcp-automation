@@ -60,9 +60,9 @@ test('副本陈旧（unknown）时租约归还仍放行 —— 扣住它，浏�
 
 test('副本陈旧时新的真实平台动作被拦下，且这一次拒绝有账可查', () => {
   const { gate, refusals } = gateFixture('unknown');
-  assert.equal(gate(envelopeOf('interaction.like'), 'ads-1'), false);
+  assert.equal(gate(envelopeOf('xiaohongshu.note.like'), 'ads-1'), false);
   assert.deepEqual(refusals, [
-    { key: 'client_environment_automation_gate', context: 'transport:interaction.like' },
+    { key: 'client_environment_automation_gate', context: 'transport:xiaohongshu.note.like' },
   ]);
 });
 
@@ -75,7 +75,7 @@ test('副本陈旧时控制面照常放行（停手的边界是「新的真实�
 
 test('确定态 blocked 一律不放行，且**不记**「因陈旧的拒绝」（那是另一回事）', () => {
   const { gate, refusals } = gateFixture('blocked');
-  assert.equal(gate(envelopeOf('interaction.like'), 'ads-1'), false);
+  assert.equal(gate(envelopeOf('xiaohongshu.note.like'), 'ads-1'), false);
   assert.equal(gate(envelopeOf('edge.task.release'), 'ads-1'), false);
   assert.deepEqual(refusals, [], 'blocked 是环境删除生命周期，不是副本陈旧；混记会污染停手指标');
 });

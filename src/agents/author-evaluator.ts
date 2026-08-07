@@ -89,7 +89,7 @@ export class AuthorEvaluator extends BaseRole {
     // 已关注作者：跳过整条主页子链（change skip-profile-visit-if-followed）。
     // 在调 LLM 之前最早短路——不评估、不下发 profile.open、不浏览主页、不发起关注。
     // 信号来自 note.detail 的 authorFollowed（边缘探测的平台当下真实态）；缺省/读取失败时落 false，
-    // 走原评估流程，并由末端 interaction.follow 的 already_followed 良性 no-op 作兜底。
+    // 走原评估流程，并由末端 {p}.user.follow 的 already_followed 良性 no-op 作兜底。
     if (noteData.authorFollowed === true) {
       this.emit('profile.skipped', {
         noteId: payload.noteId,
