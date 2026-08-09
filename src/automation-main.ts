@@ -1096,6 +1096,10 @@ export async function runAutomationMain(
       resolvedController: (accountId) =>
         riskFoundation.resolvedController(accountId) ?? null,
     },
+    // 任务收敛（页面租约确认释放）→ 让该账号在线会话回主浏览面继续（单体 2923aab 的那根线；
+    // 拆仓装配曾漏接，加群成功后浏览器整场停在群页面）。
+    redriveBrowse: (accountId, edgeId) =>
+      connectionRuntime.runtimes.redriveBrowseForAccount(accountId, edgeId),
     logger,
   });
 

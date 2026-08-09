@@ -100,6 +100,12 @@ export interface AutomationFacebookCoordinatorOptions {
    */
   facebookOperationBaseFor(accountId: string): FacebookOperationPolicyBaseResolution;
   risk: AutomationCoordinatorRiskPort;
+  /**
+   * 任务收敛后的浏览恢复通道（单体 `2923aab` 的那根线）。协调器侧该依赖是可选的——
+   * 漏接不报错、恢复能力静默消失（dev 2026-08-09 加群后整场停在群页面即此因），
+   * 所以在装配缝上把它定为**必填**：新装配点不接线就编译不过。
+   */
+  redriveBrowse: NonNullable<FacebookConsumptionCoordinatorDeps['redriveBrowse']>;
   ownerId?: string;
   actionLeaseMs?: number;
   logger?: Pick<Console, 'warn' | 'log'>;
@@ -199,6 +205,7 @@ export function createAutomationFacebookCoordinator(
       options.memberships.findMembership(accountId, groupUrl),
     recordConfirmedComment: (accountId: string, groupUrl: string, opts) =>
       options.memberships.recordCoverageCommented(accountId, groupUrl, opts),
+    redriveBrowse: options.redriveBrowse,
     ...(options.ownerId !== undefined ? { ownerId: options.ownerId } : {}),
     ...(options.actionLeaseMs !== undefined ? { actionLeaseMs: options.actionLeaseMs } : {}),
     logger,

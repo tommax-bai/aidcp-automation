@@ -215,6 +215,23 @@ test('恢复入口交付出去，调用时才真跑', async () => {
   assert.equal(result!.scanned, 0);
 });
 
+/* ─────── 任务收敛后的浏览恢复通道：必须透传，漏接=恢复能力静默消失 ─────── */
+
+test('redriveBrowse 透传进协调器 deps，调用能到达在线会话恢复口', () => {
+  const calls: Array<[string, string]> = [];
+  const { captured } = build({
+    redriveBrowse: (accountId: string, edgeId: string) => {
+      calls.push([accountId, edgeId]);
+      return 1;
+    },
+  });
+  // 协调器侧该依赖是可选口（deps.redriveBrowse?.(…)）：装配层没接线不会报错，
+  // 加群/评论任务收敛后就没人把浏览会话带回主浏览面（dev 2026-08-09 实测整场停在群页面）。
+  assert.equal(typeof captured.deps.redriveBrowse, 'function', '装配缝必须把恢复通道接进 deps');
+  captured.deps.redriveBrowse('acc-7', 'edge-7');
+  assert.deepEqual(calls, [['acc-7', 'edge-7']]);
+});
+
 /* ─────── 运行时存储没建成 → 整片不构造，且恢复入口是具名 no-op ─────── */
 
 test('消费运行时存储不可用 → 口具名 unavailable，恢复入口诚实回 null', async () => {
