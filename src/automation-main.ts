@@ -167,7 +167,8 @@ import {
 } from './config/mirror-bump-outbox.js';
 import { ConfigMirrorBumpHttpClient } from './transport/config-mirror-bump-http.js';
 import { PgPanelAutomationRead } from './risk/panel-automation-read.js';
-import { PgRiskCommandService } from './risk/risk-command-service.js';
+import { PgRiskCommandService, createRiskCommandApplyHandler } from './risk/risk-command-service.js';
+import { RiskCommandConsumer } from './transport/risk-command-outbox.js';
 import { GroupRouteStore } from './cache/group-route-store.js';
 import { QuotaConfigStore } from './config/quota-config-store.js';
 import { PacingConfigStore } from './config/pacing-config-store.js';
@@ -933,6 +934,10 @@ export async function runAutomationMain(
     // 剪裁 `sync_read.changed` 要等这个中继的游标追平。名字由组装根传进去——
     // 记账那个模块是 automation 层，不许 import 组装根（边界门禁会当场判 forbidden）。
     syncReadChangedConsumer: AUTOMATION_SYNC_READ_SIGNAL_RELAY_CONSUMER,
+    // 本进程确实起了 `risk.command` 的消费者（见第 15 段），剪裁器据此按它的游标下界剪。
+    // 传 false 会让 `risk.command` 变成「无人消费」，而那条主题**刻意没有兜底强删**，
+    // 于是只进不出；传 true 但实际没起消费者才是危险方向（会按一个永不推进的游标算保留期）。
+    riskCommandConsumed: true,
     raiseAlert: riskFoundation.raiseAlert,
     logger,
   });
@@ -1778,6 +1783,28 @@ export async function runAutomationMain(
   // 拆仓重接线时这个参数被漏掉过一次（automation 65af812，单体 cloud@2d34e06 是传了的），
   // 客户自助解除受限因此从 2026-08-04 起在 dev / OL 全线必败。现已在注册器签名上改成必填。
   registerRiskCommandRoutes(root.internalServer, riskCommandService, { executionTarget });
+  // 风控命令的**落地端**。上面那行只是收命令（提交侧 emit 进 outbox），真正把命令应用到
+  // `RiskController` 的单写者是这个消费者 —— 而拆仓重接线时它整个没被搬过来（单体
+  // cloud@2d34e06 的 `src/server.ts` 是接了的）。缺席的形态与上面那条注释记的漏参一模一样、
+  // 但更彻底：面板 / 客户端提交冻结 / 受限 / 配额档位 / 解除受限，一律 202 受理、
+  // **永远没有人应用**，命令在 outbox 里静静堆着，风控状态纹丝不动，日志一个字都不提。
+  // 单体停机（2026-08-04）之后 dev / OL 两侧的这四类写全线失效。
+  //
+  // 单写不变量收口在这一个回调里：状态迁移只经 `riskRegistry.getController(accountId)`，
+  // 解除受限只有写后真态为 normal 才解该账号的 Edge 暂停（见领域应用器）。
+  const riskCommandConsumer = new RiskCommandConsumer({
+    pool: ownerPool,
+    executionTarget,
+    apply: createRiskCommandApplyHandler({
+      service: riskCommandService,
+      getController: (accountId) => riskFoundation.riskRegistry.getController(accountId),
+      // 晚绑定：边缘接入层此刻已建好（第 9 段），但仍按全仓惯例经 ref 取，避免构造顺序耦合。
+      resumeEdgesForAccount: (accountId) =>
+        edgeAccessRef.get().server.resumeEdgesForAccount(accountId),
+      logger,
+    }),
+    logger,
+  });
   registerPanelAutomationRoutes(root.internalServer, new PgPanelAutomationRead({ pool: ownerPool }));
   // 宿主层让位判决遥测（change report-host-standby-decisions）：**只读**路由。
   // 本进程是这份事实的唯一写者（边缘回执只到本进程这条 WebSocket），接口进程的面板只能问过来。
@@ -1889,6 +1916,9 @@ export async function runAutomationMain(
       // 风控自动恢复扫描：就绪闸放行之后才起（构造期起等于让一个未放行的进程写风控状态）。
       // 首扫立即执行——部署当天观察「存量受限账号成批恢复」就看这一轮的带数日志。
       riskRecoverySweeper.start();
+      // 风控命令消费者：同理放在就绪闸之后（它也写风控状态）。起来后第一轮会把单体停机以来
+      // 积压的命令按 id 顺序补齐 —— 那些是运营真按过的按钮，MUST NOT 当成过期丢弃。
+      riskCommandConsumer.start();
       // 委托任务的执行泵：**就绪闸放行之后**才起。构造期起等于让一个还没放行的进程去认领任务，
       // 而认领是有租约的 —— 认了又不干活，那条任务要等租约过期才轮得到别人。
       // `start()` 自己会先收敛旧进程遗留的 planning/executing claim，再开放泵。
@@ -1903,6 +1933,7 @@ export async function runAutomationMain(
     },
     async stop() {
       // 逆序停。
+      riskCommandConsumer.stop();
       riskRecoverySweeper.stop();
       delegatedTaskWorker?.stop();
       auditRelay.stop();
