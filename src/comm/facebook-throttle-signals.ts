@@ -51,13 +51,46 @@ export const FB_THROTTLE_PHRASES: readonly string[] = [
   '我们限制了你发帖',
   '我们限制了您发帖',
   '执行其他操作的频率',
+  // FB 法语界面变体（change fb-throttle-popup-fr-copy）。**本段两条必须与边缘
+  // FB_THROTTLE_FR_PHRASES 逐条一致**（两仓无共享模块，两侧单测各锁一份集合，任一侧漂移即失败）。
+  //
+  // 真实文案：「Cette fonctionnalité n'est pas disponible. / Un contrôle de sécurité est requis pour
+  // continuer. / Si vous pensez que ceci ne va pas à l'encontre des Standards de la communauté,
+  // dites-le nous.」——该弹窗的**英文版**今天已命中本词库（'this feature isnt available'）、一次刹车到
+  // restricted，法语版却零命中 ⇒ 边缘判 none、连上报都不发 ⇒ 云端风控停 normal 继续按原节奏下发动作。
+  // 同一平台阻断因界面语言不同得到截然不同的处置，是覆盖面缺陷，不是设计意图。
+  //
+  // 词条以**归一后形式**书写（小写 / 去撇号 / 去变音符 / 折空白）：'n'est' → 'nest'，'contrôle de
+  // sécurité' → 'controle de securite'。见 normalize()。
+  //
+  // 'est requis' 是**必需限定**，绝不可省：裸的「contrôle de sécurité」在 FB 法语安全设置页里是功能名、
+  // 遍地都是；加上「是必需的」后语义才从「这里有个功能」变为「平台要求你现在做」。
+  //
+  // **显式不收第三句**「ne va pas à l'encontre des Standards de la communauté」：那是违规**申诉入口
+  // 话术**，附在一切违规告知之后、包括通知中心里的**陈年**内容删除通知 ⇒ 一条旧通知就能把账号打进
+  // restricted。与上面 'we removed your' 被删的理由完全同源（措辞过泛，误报代价不可承受）。
+  'controle de securite est requis',
+  'cette fonctionnalite nest pas disponible',
 ];
 
-/** 归一化：小写、去撇号/智能引号、折叠空白，便于稳定子串匹配。 */
+/**
+ * 归一化：小写、去撇号/智能引号、**去变音符**、折叠空白，便于稳定子串匹配。
+ *
+ * 去变音符（change fb-throttle-popup-fr-copy）消解拉丁字母词条的三条失配路径，每一条都**无法在代码
+ * 评审中看出来**、命中任一条判据都会静默空转：
+ *  ① Unicode 等价形式——'é' 可以是预组合的 U+00E9，也可以是 'e' + U+0301 的组合序列，页面 innerText
+ *     用哪种不受我们控制，两者字面比较不相等；
+ *  ② 转录损耗——文案取证多经截图转录，变音符在这一步丢失（本 change 的原始文案即如此）；
+ *  ③ 地区变体——同一措辞在不同地区可能标注不同。
+ *
+ * 对既有英文与中文词条是**恒等变换**（两者均不含变音符；CJK 不含 U+0300–U+036F 区间的组合记号）。
+ */
 function normalize(text: string): string {
   return text
     .toLowerCase()
     .replace(/[’'`]/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
