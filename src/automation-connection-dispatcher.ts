@@ -302,6 +302,11 @@ export interface AutomationDispatcherDeps {
   cooldownGate: RoleDispatcherOptions['cooldownGate'];
   /** 引流线索「已评过」去重（复用风控互动账本）。 */
   hasCommentedForLead: NonNullable<RoleDispatcherOptions['hasCommentedForLead']>;
+  /**
+   * 搜索额度发起制记账口（change fb-search-livelock-recovery）：走全系统唯一风险记账入口
+   *（`recordRiskFact` 漏斗，含幂等键去重）。缺席 = 不记（测试装配）；生产必接线。
+   */
+  recordSearchFact?: (accountId: string, dedupeKey: string) => Promise<boolean>;
   /** 通知联系人名册：每连接握手订阅一次。缺席即不订阅（单体同形）。 */
   notificationContacts?: {
     appendEvents(accountId: string, items: unknown[]): Promise<unknown>;
@@ -446,6 +451,7 @@ export function createAutomationDispatcherFactory(
       explainInteract: (action: Parameters<typeof ctx.controller.explain>[0]) =>
         ctx.controller.explain(action),
       explainSearch: () => ctx.controller.explain('search'),
+      ...(deps.recordSearchFact ? { recordSearchFact: deps.recordSearchFact } : {}),
       explainView: () => ctx.controller.explain('view'),
       facebookRuleModeDecision: resolveFacebookOperationDecision,
       facebookRuleCommentBodyScheme: (accountId: string) =>

@@ -254,6 +254,19 @@ const FACEBOOK_REELS_TERMINAL_SCROLL_REASONS = new Set([
   'reels_identity_unresolved',
 ]);
 /**
+ * 发现式搜索的平台准入名单外平台（change fb-search-livelock-recovery）：
+ * Facebook 的发现式（无 container）搜索在 Native 引擎是退役路径——页面路由脚本对无 container 的
+ * `search_execute` 一律 `permission_gated` 拒绝，命令必失败。评估器入口拦（不烧模型调用）+
+ * 下发口断言兜底（防绕过），二者同读本名单。定向（带 container）搜索不受此约束。
+ */
+const DISCOVERY_SEARCH_UNSUPPORTED_PLATFORMS: ReadonlySet<string> = new Set(['facebook']);
+/**
+ * 统一失败恢复预算上限（change fb-search-livelock-recovery）：连续 N 次「失败→redrive」之间
+ * 没有出现任何成功动作回执 ⇒ 诚实结束会话（recovery_exhausted），MUST NOT 无限重驱。
+ * 预算只由失败消费；任何成功回执清零。
+ */
+const FAILURE_REDRIVE_MAX_ATTEMPTS = 3;
+/**
  * 一场之内允许「重驱到 Reels 后又收到普通 Feed 决定性空/到底证据」而重开 Reels 的次数上限
  *（change restore-facebook-post-join-comment-continuity）。
  *
@@ -447,6 +460,12 @@ export interface RoleDispatcherOptions {
   explainInteract?: (action: 'like' | 'collect' | 'follow' | 'comment' | 'comment_like') => ViewQuotaDecision;
   /** 自治搜索前的账号级风险解释口；不把 search 混入 note-scoped interaction。 */
   explainSearch?: () => ViewQuotaDecision;
+  /**
+   * 搜索额度发起制记账口（change fb-search-livelock-recovery）：命令真正下发（sent=true）即记
+   * 1 次账号 `search` 风险事实，失败不回滚——失败不免费，否则策略层把失败词当「还没搜过」无限重发。
+   * 幂等键由调用方给出（activityId 或本地唯一后缀）。缺省不记（旧测试装配零回归；生产必接线）。
+   */
+  recordSearchFact?: (accountId: string, dedupeKey: string) => Promise<boolean>;
   /** 浏览前风控闸：兼容旧测试/旧装配；优先使用 explainView。 */
   canView?: () => boolean;
   /**
@@ -819,6 +838,9 @@ export class RoleDispatcher {
   private readonly canInteract: (action: 'like' | 'collect' | 'follow' | 'comment' | 'comment_like') => boolean;
   private readonly explainInteract: (action: 'like' | 'collect' | 'follow' | 'comment' | 'comment_like') => ViewQuotaDecision;
   private readonly explainSearch: () => ViewQuotaDecision;
+  private readonly recordSearchFact?: RoleDispatcherOptions['recordSearchFact'];
+  /** 统一失败恢复预算（change fb-search-livelock-recovery）：失败→redrive 消耗，成功回执清零。 */
+  private failureRedriveAttempts = 0;
   private readonly canView: () => boolean;
   private readonly explainView: () => ViewQuotaDecision;
   private readonly facebookRuleModeDecision: (accountId: string) => FacebookRuleModeDecision;
@@ -1103,6 +1125,7 @@ export class RoleDispatcher {
       return allowed ? { allowed } : { allowed, reason: 'risk_blocked' };
     });
     this.explainSearch = options.explainSearch ?? (() => ({ allowed: true }));
+    this.recordSearchFact = options.recordSearchFact;
     this.canView = options.canView ?? (() => true);
     this.explainView = options.explainView ?? (() => {
       const allowed = this.canView();
@@ -2560,6 +2583,38 @@ export class RoleDispatcher {
     return this.sendBrowseRedrive('feed');
   }
 
+  /**
+   * 统一失败恢复（change fb-search-livelock-recovery）：导航类失败 / 面错位的默认兜底 =
+   * redrive 回本场钉住的主浏览入口，不再按当前面认知原地滚动——认知本身可能错，原地滚是放大器
+   *（实证：搜索失败后页型钉死 search，兜底滚动全部声明搜索面被边缘拒绝，活锁 20+ 分钟）。
+   *
+   * 恢复预算只由失败消费：redrive 被调度/配额闸抑制不扣（等既有唤醒路径），任何成功回执清零；
+   * 连续 FAILURE_REDRIVE_MAX_ATTEMPTS 次未见成功 → 诚实结束会话（可续场：下一场从头锚定主入口，
+   * 重新加载后的页面上原样重来有可能不同结果，故 MUST NOT 落永久终态）。
+   */
+  private recoverViaRedrive(reason: string): void {
+    if (!this.sessionActive) return;
+    if (this.failureRedriveAttempts >= FAILURE_REDRIVE_MAX_ATTEMPTS) {
+      console.warn(
+        `[RoleDispatcher] 失败恢复预算耗尽（连续 ${this.failureRedriveAttempts} 次未见成功回执，本次=${reason}）→ 诚实结束会话`,
+      );
+      this.endSession('recovery_exhausted', { autoResumeEligible: true });
+      return;
+    }
+    // 回主路径与页型账本同步翻转：redrive 目标是主浏览面，页型必须一起回 feed，
+    // 否则回到主入口后新到的卡片仍被记成搜索批（本次事故第 2 环的对偶）。
+    this.rollbackSearchExcursion(reason);
+    const sent = this.redriveBrowse();
+    if (!sent) {
+      console.log(`[RoleDispatcher] 失败恢复 redrive 被调度/配额闸抑制（${reason}）→ 不消耗恢复预算，等既有唤醒路径`);
+      return;
+    }
+    this.failureRedriveAttempts += 1;
+    console.log(
+      `[RoleDispatcher] 失败恢复 → redrive 回主浏览入口（${reason}，${this.failureRedriveAttempts}/${FAILURE_REDRIVE_MAX_ATTEMPTS}）`,
+    );
+  }
+
   private authorizeFacebookPrimaryReels(): boolean {
     if (
       this.accountPlatform !== 'facebook'
@@ -2627,6 +2682,9 @@ export class RoleDispatcher {
       return false;
     }
     this.reelsRedriveRecoveryAttempts += 1;
+    // 与统一失败恢复共享同一预算（change fb-search-livelock-recovery）：Reels 专用重驱与通用
+    // redrive 交替时合并计数，防两条路各自「没到上限」地无限轮转；任何成功回执照常清零。
+    this.failureRedriveAttempts += 1;
     console.log(
       `[RoleDispatcher] Facebook Reels ${reason} → 重发统一重驱命令 (${this.reelsRedriveRecoveryAttempts}/${FACEBOOK_REELS_FALLBACK_MAX_RECOVERY_ATTEMPTS})`,
     );
@@ -2952,6 +3010,9 @@ export class RoleDispatcher {
         sessionContext: this.sessionContext,
         getSearchedKeywords,
         getConceptPool: () => this.conceptPool,
+        // 平台准入（change fb-search-livelock-recovery）：FB 发现搜索为引擎退役路径，评估入口即拦、不烧 LLM。
+        // 平台缺省（旧装配）视为支持——闸只对显式已知的退役平台收紧。
+        discoverySearchSupported: () => !DISCOVERY_SEARCH_UNSUPPORTED_PLATFORMS.has(this.accountPlatform ?? ''),
       }),
       new SearchExecutor({ ...commonOptions, sessionContext: this.sessionContext }),
       // 时长上限统一经调度器 maxDurationMs() 解析（按账号读单场上限提供者，热加载）；
@@ -3391,6 +3452,8 @@ export class RoleDispatcher {
     this.setupCommandTranslation();
     this.setupEdgeEventSubscriptions();
     this.pinFacebookPrimarySurface();
+    // 恢复预算按场清零（change fb-search-livelock-recovery）：新场从头锚定主入口，上一场的失败史不背进来。
+    this.failureRedriveAttempts = 0;
     this.sessionActive = true;
     this.cancelStartGateRecheck(); // 会话真起来了 → 复判使命完成
     // 浏览面钉定若是「问不到」→ 武装复判。**必须排在 sessionActive 置真之后**：
@@ -3468,7 +3531,7 @@ export class RoleDispatcher {
    * 概念池未接线时**刻意不再响**：装配缺席已由 `refreshConceptPool` 在会话启动时具名报过一次，
    * 而本方法每搜一个词就走一次，在这里重复只会刷屏、不增加任何信息。
    */
-  private markConceptSearched(keyword: string, phase: 'legacy' | 'receipt'): void {
+  private markConceptSearched(keyword: string, phase: 'dispatch'): void {
     const store = this.conceptStore;
     if (!store) return;
     void store.markSearched(keyword).catch((err) => {
@@ -3479,6 +3542,35 @@ export class RoleDispatcher {
           `（该词本次未记入已搜，下次仍可能被选中）: ${err instanceof Error ? err.message : String(err)}`,
       );
     });
+  }
+
+  /**
+   * 搜索额度发起制记账（change fb-search-livelock-recovery）：下发点一次性记 1 次账号 `search`
+   * 风险事实，幂等键含 activityId（或本地唯一后缀），失败终态不回滚。记账口未接线（旧测试装配）
+   * 或写入失败时具名告警，绝不静默——额度少记会重新打开「失败免费→无限重发」的口子。
+   */
+  private recordSearchDispatchFact(dedupeSuffix: string): void {
+    const record = this.recordSearchFact;
+    if (!record) return;
+    const accountId = this.currentAccountId;
+    void record(accountId, `cloud-search-dispatch:${encodeURIComponent(accountId)}:${dedupeSuffix}`).catch((err) => {
+      console.warn(
+        `[RoleDispatcher] 搜索发起记账失败 account=${accountId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }
+
+  /**
+   * 搜索行程页型回滚（change fb-search-livelock-recovery）：搜索失败/面错位已证明「不在搜索页」时，
+   * 把下发时置的 `sourcePageType='search'` 标回 feed 并清搜索行程计数。不回滚的后果是活锁：
+   * 后续一切恢复滚动都声明搜索面、被边缘诚实拒绝，而唯一的既有退出（搜索页攒卡）永远走不到。
+   */
+  private rollbackSearchExcursion(reason: string): void {
+    if (this.sessionContext.sourcePageType !== 'search') return;
+    this.sessionContext.setSourcePageType('feed');
+    this.sessionContext.resetSearchCardsBrowsed();
+    this.sessionContext.resetScrolls();
+    console.log(`[RoleDispatcher] 搜索行程页型回滚 → feed（${reason}）`);
   }
 
   /**
@@ -4453,6 +4545,13 @@ export class RoleDispatcher {
 
       this.eventBus.on('search.approved', (payload) => {
         const keyword = payload.keyword;
+        // 闸零：平台准入断言（change fb-search-livelock-recovery）。主拦截在评估器入口（不烧 LLM），
+        // 这里是防绕过网——任何路径直达下发口的发现式搜索同样拦下，绝不下发一条引擎必拒的命令。
+        if (DISCOVERY_SEARCH_UNSUPPORTED_PLATFORMS.has(this.accountPlatform ?? '')) {
+          console.log(`[RoleDispatcher] 搜索被拦截，跳过 keyword=${keyword} reason=platform_unsupported`);
+          this.emitSearchSkippedAfterIntercept(payload.currentPageType, 'platform_unsupported');
+          return;
+        }
         // 搜索前三道闸（账号风险、关键词限频、会话预算）。被拦不下发、不扣尝试预算、不 markSearched。
         const riskDecision = this.explainSearch();
         if (!riskDecision.allowed) {
@@ -4493,20 +4592,23 @@ export class RoleDispatcher {
         this.searchLimiter.recordSearch(keyword);
         this.searchedKeywords.push(keyword);
         this.consumeBudget('search');
+        // 记账翻转（change fb-search-livelock-recovery）：发起制——真正下发即完成全部记账
+        //（额度事实 + 概念词已搜），失败不回滚、不免费。终态回执只补 outcome 审计（handler 侧）。
+        // 新旧 Edge 在此口径下行为一致：记账不再依赖终态回执。
+        this.markConceptSearched(keyword, 'dispatch');
+        this.recordSearchDispatchFact(activityId ?? randomUUID());
         // change bounded-search-excursion（#2 修页型自指 bug）：唯一权威写入点——**真正下发了搜索指令**
         // 才把当前列表页型标为 search（被上面两道闸拦下、未下发的搜索绝不到这里，故不会误翻转）。
-        // 由此搜索结果页被 SearchScroller 正确驱动、搜索卡不再计入 feed 深度；回首页时在 page.cards 处标回 feed。
+        // 由此搜索结果页被 SearchScroller 正确驱动、搜索卡不再计入 feed 深度；回首页时在 page.cards 处标回 feed；
+        // 搜索失败时在 action.completed 处回滚（rollbackSearchExcursion）。
         this.sessionContext.setSourcePageType('search');
         if (activityId) {
           if (this.pendingSearchKeywords.size >= 128) {
             const oldest = this.pendingSearchKeywords.keys().next().value as string | undefined;
             if (oldest) this.pendingSearchKeywords.delete(oldest);
-            console.warn('[RoleDispatcher] pending search map 已达 128，淘汰最旧关联（不伪造概念词已搜）');
+            console.warn('[RoleDispatcher] pending search map 已达 128，淘汰最旧关联');
           }
           this.pendingSearchKeywords.set(activityId, keyword);
-        } else {
-          // 旧 Edge 无统一终态，保持历史兼容；handler 不会把该兼容标记冒充账号搜索事实。
-          this.markConceptSearched(keyword, 'legacy');
         }
       }),
 
@@ -4765,6 +4867,9 @@ export class RoleDispatcher {
       // note.detail/page.cards，事件循环会因无触发而死等；统一以一次 scroll 续刷兜底。
       this.eventBus.on('action.completed', (payload) => {
         console.log(`[RoleDispatcher] action.completed: ${payload.action} ok=${payload.ok}`);
+        // 恢复预算由成功清零（change fb-search-livelock-recovery）：预算度量的是「连续失败恢复
+        // 未见任何成功」，一次成功即证明会话仍能推进，后续偶发失败重新拥有完整恢复窗口。
+        if (payload.ok === true) this.failureRedriveAttempts = 0;
         // 7.8（change lease-strict-preemption；co-deploy 于 edge §8.1 批 D 之前必落）：被抢占是**调度事件**、不是动作失败。
         // 原因级短路 MUST 插在按动作名匹配的 noRecoverScroll 名单**之前**——open_note / refresh / profile_open 不在名单里、
         // 仅靠动作名匹配会漏网，一旦边缘补上诚实回执就会触发一次恢复滚动、滚到抢占方页面。被抢占：不兜底滚动、不重试、
@@ -4815,6 +4920,26 @@ export class RoleDispatcher {
           });
           return;
         }
+        // 面错位失败必须被消费（change fb-search-livelock-recovery）：边缘的诚实拒绝在回执名里
+        // 携带实际观测面（surface_mismatch_observed_reels / _list）。此前该原因零处置——诚实拒绝
+        // 被读成「什么都没发生」，正是活锁的形成机制。按观测面重同步认知 + 回滚搜索页型 + 回主入口。
+        // 插在 Reels 专用重驱分支之前：重驱命令自身的面错位也走本分支（redriveBrowse 会重置重驱在途态）。
+        if (
+          payload.action === 'scroll'
+          && payload.ok === false
+          && typeof payload.reason === 'string'
+          && payload.reason.startsWith('surface_mismatch_observed_')
+        ) {
+          const observed: 'feed' | 'reels' =
+            payload.reason === 'surface_mismatch_observed_reels' ? 'reels' : 'feed';
+          if (this.accountPlatform === 'facebook') this.lastFacebookListKind = observed;
+          this.rollbackSearchExcursion(payload.reason);
+          console.log(
+            `[RoleDispatcher] 滚动面错位（${payload.reason}）→ 面认知重同步为 ${observed}，回主入口恢复`,
+          );
+          this.recoverViaRedrive(`surface_resync_${observed}`);
+          return;
+        }
         if (
           payload.action === 'scroll'
           && payload.ok === false
@@ -4852,15 +4977,13 @@ export class RoleDispatcher {
           this.sendScrollCommand(`continue_after_${payload.reason}`, 0, 'reels');
           return;
         }
-        if (payload.action === 'search' && this.hasSearchActivityReceipt()) {
+        if (payload.action === 'search') {
+          // 记账已翻转为发起制（change fb-search-livelock-recovery）：概念词与额度在下发点消耗，
+          // 终态在此只清关联表；失败终态额外回滚搜索行程页型——失败的搜索 MUST NOT 把会话钉死在
+          // 「搜索行程」状态（钉死后一切恢复滚动声明错误的面，活锁）。回滚先于下方通用失败兜底执行。
           const activityId = typeof payload.activityId === 'string' ? payload.activityId.trim() : '';
-          const keyword = activityId ? this.pendingSearchKeywords.get(activityId) : undefined;
-          if (activityId && keyword) {
-            this.pendingSearchKeywords.delete(activityId);
-            if (payload.actuated === true) {
-              this.markConceptSearched(keyword, 'receipt');
-            }
-          }
+          if (activityId) this.pendingSearchKeywords.delete(activityId);
+          if (payload.ok === false) this.rollbackSearchExcursion('search_failed');
         }
         // observedSurface 仅审计（change platform-browse-protocol）：回执回声 surface 与期望不符 → warn（检测漂移）；
         // 绝不参与控制流（控制流一律读 effectiveReadSurface，见 shouldCloseWithScroll）。期望取版本偏斜后的有效值：
@@ -5192,8 +5315,10 @@ export class RoleDispatcher {
           payload.action === 'like' ||
           payload.action === 'collect';
         if (payload.ok === false && !noRecoverScroll && this.sessionActive) {
-          console.log(`[RoleDispatcher] 动作失败兜底 → scroll（recover_after_${payload.action}_failed）`);
-          this.sendScrollCommand(`recover_after_${payload.action}_failed`);
+          // 默认失败兜底改 redrive（change fb-search-livelock-recovery）：导航类失败后页面状态不明，
+          // 按当前面认知原地滚动是在可能已错的认知上再赌一次；回主浏览入口重新锚定才是确定的恢复。
+          console.log(`[RoleDispatcher] 动作失败兜底 → redrive（recover_after_${payload.action}_failed）`);
+          this.recoverViaRedrive(`recover_after_${payload.action}_failed`);
         }
       }),
     );

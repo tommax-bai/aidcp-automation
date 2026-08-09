@@ -326,11 +326,16 @@ test('Facebook pending 期间去重，Reels 卡清闸后新空 Feed 可重新重
   dispatcher.endSession('test');
 });
 
-test('Facebook 搜索批次不重开 fallback epoch，也不消费普通 Feed 继续态', () => {
+test('Facebook 发现式搜索被平台闸拦下：不产生搜索批次、不重开 fallback epoch、Feed 续滚照常', () => {
+  // change fb-search-livelock-recovery：FB 发现搜索为引擎退役路径（必失败），下发口平台闸拦截。
+  // 原「FB 搜索批次」场景由此结构性不可达：search.approved 不再翻页型、不下发 search 命令，
+  // 后续 feed 失败按普通 Feed 语义处置（续滚 / 具名 feed_exhausted 重驱）。
   const commands: EdgeCommand[] = [];
   const dispatcher = new RoleDispatcher({ soul, llm, accountPlatform: 'facebook', sendCommand: (command) => commands.push(command) });
   dispatcher.setup();
   dispatcher.startSession();
+  const skipped: string[] = [];
+  dispatcher.bus.on('search.skipped', (p) => { skipped.push(p.reason); });
 
   dispatcher.bus.emit('feed.empty.confirmed', { ts: 1 });
   dispatcher.bus.emit('page.cards.arrived', {
@@ -363,12 +368,15 @@ test('Facebook 搜索批次不重开 fallback epoch，也不消费普通 Feed �
     ts: 6,
   });
 
+  const searches = commands.filter((command) => command.action === 'search');
   const fallback = commands.filter(isReelsRedrive);
   const continuation = commands.filter(
     (command) => command.action === 'scroll' && command.reason === 'feed_continuation_unconfirmed',
   );
-  assert.equal(fallback.length, 2, '搜索卡本身不授权；后续具名 feed_exhausted 可开启新重驱');
-  assert.equal(continuation.length, 0, '搜索态的同名失败不得进入普通 Feed 续滚');
+  assert.equal(searches.length, 0, 'FB 发现式搜索必须被平台闸拦下，不下发引擎必拒的命令');
+  assert.ok(skipped.includes('platform_unsupported'), '拦截必须具名（platform_unsupported），不得静默吞掉');
+  assert.equal(fallback.length, 2, '被拦的搜索不授权 fallback；后续具名 feed_exhausted 可开启新重驱');
+  assert.equal(continuation.length, 1, '页型未被翻成 search，Feed 未定继续态照常续滚');
   dispatcher.endSession('test');
 });
 

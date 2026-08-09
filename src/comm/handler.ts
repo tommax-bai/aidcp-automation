@@ -1001,9 +1001,8 @@ export class DefaultMessageHandler implements MessageHandler {
                   this.logger.warn(`[comm] search action.completed 矛盾终态 activityId=${activityId} — 已消费但不记平台事实`);
                   emitActionCompleted = false;
                 } else if (result.actuated === true && outcome !== 'not_submitted') {
-                  // 先落持久 outbox，再推进（design D5）。搜索的去重键用 activityId：它每次搜索唯一，
-                  // 且边缘重连重发同一条终态时携带同一个 activityId ⇒ 天然只记一次。
-                  await this.enqueueRiskFact(session, env, 'search', activityId);
+                  // 记账翻转（change fb-search-livelock-recovery）：搜索额度按发起制在 Cloud 下发点
+                  // 一次性消耗（RoleDispatcher 侧），此处终态只补 outcome 审计，MUST NOT 二次记账。
                   this.bus(session).emit('search.occurred', {
                     accountId: session.accountId,
                     activityId,

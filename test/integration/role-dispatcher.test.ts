@@ -688,7 +688,9 @@ describe('RoleDispatcher Integration', () => {
 
   // ─── 动作失败兜底（防死锁） ──────────────────────────────────
 
-  it('action.completed ok=false → 兜底 scroll 续刷，不让事件循环死等', async () => {
+  it('action.completed ok=false → 兜底 redrive 回主入口续刷，不让事件循环死等', async () => {
+    // change fb-search-livelock-recovery：导航类失败的默认兜底从「原地滚」改为 redrive 回主浏览入口
+    //（原地滚建立在「当前面认知正确」上，认知错了它就是活锁放大器）。
     const commands: EdgeCommand[] = [];
     const llm = createMockLlm(['{"verdict":"skip","reason":"x"}']);
     const dispatcher = new RoleDispatcher({ soul: mockSoul, llm, sendCommand: (cmd) => commands.push(cmd) });
@@ -701,9 +703,9 @@ describe('RoleDispatcher Integration', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const recover = commands.find(
-      (c) => c.action === 'scroll' && String(c.reason ?? '').includes('recover_after_open_note_failed'),
+      (c) => c.action === 'scroll' && String(c.reason ?? '') === 'resume_redrive',
     );
-    assert.ok(recover, `open_note 失败后应下发兜底 scroll，实际=${JSON.stringify(commands)}`);
+    assert.ok(recover, `open_note 失败后应下发 redrive 恢复，实际=${JSON.stringify(commands)}`);
   });
 
   it('action.completed scroll ok=false → 不递归触发兜底 scroll', async () => {
@@ -785,14 +787,16 @@ describe('RoleDispatcher Integration', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const recover = commands.find(
-      (c) => c.action === 'scroll' && String(c.reason ?? '').includes('recover_after_back_failed'),
+      (c) => c.action === 'scroll' && String(c.reason ?? '') === 'resume_redrive',
     );
-    assert.ok(recover, `返回失败仍应下发兜底 scroll，实际=${JSON.stringify(commands)}`);
+    assert.ok(recover, `返回失败仍应走失败兜底（redrive 回主入口），实际=${JSON.stringify(commands)}`);
     const rescan = commands.find((c) => String(c.reason ?? '') === 'rescan_after_back');
     assert.equal(rescan, undefined, '返回失败 MUST NOT 被记成一次正常续扫');
   });
 
-  it('facebook: 搜索失败恢复 scroll 也携带拟人停留 dwellMs', async () => {
+  it('facebook: 搜索失败 → 兜底 redrive 回主入口，不再按（可能已错的）当前面原地滚', async () => {
+    // change fb-search-livelock-recovery：搜索失败的旧兜底继承被污染的搜索页型、在搜索面上原地滚，
+    // 被边缘诚实拒绝后活锁。新兜底 = redrive 回主浏览入口（resume_redrive），页型账本同步回 feed。
     const commands: EdgeCommand[] = [];
     const llm = createMockLlm([]);
     const dispatcher = new RoleDispatcher({
@@ -810,14 +814,135 @@ describe('RoleDispatcher Integration', () => {
     dispatcher.bus.emit('action.completed', { action: 'search', ok: false, reason: 'no_target', ts: Date.now() });
     await new Promise((r) => setTimeout(r, 10));
 
-    const recover = commands.find((c) => c.action === 'scroll' && c.reason === 'recover_after_search_failed');
-    assert.ok(recover, `search 失败后应下发兜底 scroll，实际=${JSON.stringify(commands)}`);
-    assert.equal(
-      recover!.params?.dwellMs,
-      11_000,
-      `FB search 恢复 scroll 应保留共享的 11s normal 中心，实际=${JSON.stringify(recover!.params)}`,
-    );
+    const recover = commands.find((c) => c.action === 'scroll' && c.reason === 'resume_redrive');
+    assert.ok(recover, `search 失败后应下发 redrive 恢复，实际=${JSON.stringify(commands)}`);
+    const inPlace = commands.find((c) => String(c.reason ?? '').includes('recover_after_search_failed'));
+    assert.equal(inPlace, undefined, '不得再按当前面认知原地滚（认知可能已被失败的搜索污染）');
     dispatcher.endSession();
+  });
+
+  it('搜索失败回滚页型：后续恢复滚动不再声明搜索面（事故链端到端回归）', async () => {
+    // change fb-search-livelock-recovery 4.4：搜索下发把页型翻成 search；失败后必须翻回 feed，
+    // 否则空闲看门狗的每次轻推都声明搜索面、被边缘诚实拒绝 → 活锁（dev 2026-08-09 实诊 20+ 分钟）。
+    const commands: EdgeCommand[] = [];
+    const llm = createMockLlm([]);
+    const dispatcher = new RoleDispatcher({ soul: mockSoul, llm, sendCommand: (cmd) => commands.push(cmd) });
+    dispatcher.setup();
+    dispatcher.startSession();
+
+    // 搜索下发（非 FB 平台可达）→ 页型翻成 search
+    dispatcher.bus.emit('search.approved', { keyword: '向量数据库', reason: 'r', currentPageType: 'feed', source: 'new_concept', ts: 1 });
+    assert.ok(commands.some((c) => c.action === 'search'), '前置：搜索应真的下发');
+
+    // 搜索失败 → 页型回滚 + redrive 兜底
+    commands.length = 0;
+    dispatcher.bus.emit('action.completed', { action: 'search', ok: false, reason: 'not_on_search_page', ts: 2 });
+    await new Promise((r) => setTimeout(r, 10));
+    const redrive = commands.find((c) => c.action === 'scroll' && c.reason === 'resume_redrive');
+    assert.ok(redrive, `搜索失败应触发 redrive，实际=${JSON.stringify(commands)}`);
+    assert.equal(redrive!.surface, 'feed', '页型已回滚，redrive 声明 feed 面而非 search 面');
+
+    // 空闲看门狗轻推 → 不再产出搜索面滚动（活锁的重发环已断）
+    commands.length = 0;
+    dispatcher.bus.emit('session.idle_nudge', { reason: 'idle_recover_nudge', ts: 3 });
+    await new Promise((r) => setTimeout(r, 10));
+    const nudge = commands.find((c) => c.action === 'scroll');
+    assert.ok(nudge, '轻推仍应产出恢复滚动');
+    assert.notEqual(nudge!.surface, 'search', `轻推不得再声明搜索面，实际=${JSON.stringify(nudge)}`);
+    dispatcher.endSession();
+  });
+
+  it('facebook: surface_mismatch_observed_reels 回执被消费 → 面认知重同步 + redrive，不再零处置', async () => {
+    // change fb-search-livelock-recovery：边缘诚实拒绝的回执名携带实际观测面，云端必须读进认知；
+    // 零处置会把「我不在那个面」读成「什么都没发生」——活锁的形成机制。
+    const commands: EdgeCommand[] = [];
+    const llm = createMockLlm([]);
+    const dispatcher = new RoleDispatcher({
+      soul: mockSoul,
+      llm,
+      sendCommand: (cmd) => commands.push(cmd),
+      accountPlatform: 'facebook',
+      getNickname: () => 'FB Name',
+    });
+    dispatcher.setCurrentAccountId('fb-acc');
+    dispatcher.setup();
+    dispatcher.startSession();
+
+    commands.length = 0;
+    dispatcher.bus.emit('action.completed', { action: 'scroll', ok: false, reason: 'surface_mismatch_observed_reels', ts: 1 });
+    await new Promise((r) => setTimeout(r, 10));
+    const redrive = commands.find((c) => c.action === 'scroll' && c.reason === 'resume_redrive');
+    assert.ok(redrive, `面错位失败应触发 redrive 恢复，实际=${JSON.stringify(commands)}`);
+
+    // 面认知已重同步为 reels：下一次看门狗轻推按观测面声明
+    commands.length = 0;
+    dispatcher.bus.emit('session.idle_nudge', { reason: 'idle_recover_nudge', ts: 2 });
+    await new Promise((r) => setTimeout(r, 10));
+    const nudge = commands.find((c) => c.action === 'scroll');
+    assert.ok(nudge, '轻推仍应产出恢复滚动');
+    assert.equal(nudge!.surface, 'reels', `面认知应重同步为观测到的 reels，实际=${JSON.stringify(nudge)}`);
+    dispatcher.endSession();
+  });
+
+  it('恢复预算：连续失败 redrive 到顶诚实结束会话；成功回执重置预算', async () => {
+    // change fb-search-livelock-recovery：恢复通道必须带上限（连续 3 次未见成功 → recovery_exhausted），
+    // 预算只由失败消费、任何成功回执清零。
+    const emitFail = (d: RoleDispatcher, ts: number) =>
+      d.bus.emit('action.completed', { action: 'open_note', ok: false, reason: 'modal_timeout', ts });
+
+    // 场景一：4 连败 → 前 3 次各产出一条 redrive，第 4 次结束会话、不再重驱
+    {
+      const commands: EdgeCommand[] = [];
+      const llm = createMockLlm([]);
+      const dispatcher = new RoleDispatcher({ soul: mockSoul, llm, sendCommand: (cmd) => commands.push(cmd) });
+      dispatcher.setup();
+      dispatcher.startSession();
+      for (let i = 1; i <= 3; i++) {
+        commands.length = 0;
+        emitFail(dispatcher, i);
+        await new Promise((r) => setTimeout(r, 5));
+        assert.ok(
+          commands.some((c) => c.action === 'scroll' && c.reason === 'resume_redrive'),
+          `第 ${i} 次失败应仍有 redrive 恢复`,
+        );
+      }
+      commands.length = 0;
+      emitFail(dispatcher, 4);
+      await new Promise((r) => setTimeout(r, 5));
+      assert.equal(
+        commands.find((c) => c.action === 'scroll' && c.reason === 'resume_redrive'),
+        undefined,
+        '预算耗尽后不得再重驱（会话已以 recovery_exhausted 诚实结束）',
+      );
+      // 会话已结束：后续失败不再产生任何恢复命令
+      commands.length = 0;
+      emitFail(dispatcher, 5);
+      await new Promise((r) => setTimeout(r, 5));
+      assert.equal(commands.length, 0, '会话结束后失败回执不再驱动任何命令');
+    }
+
+    // 场景二：2 败 → 1 成 → 预算清零 → 再 3 败仍全部有 redrive（未提前结束）
+    {
+      const commands: EdgeCommand[] = [];
+      const llm = createMockLlm([]);
+      const dispatcher = new RoleDispatcher({ soul: mockSoul, llm, sendCommand: (cmd) => commands.push(cmd) });
+      dispatcher.setup();
+      dispatcher.startSession();
+      emitFail(dispatcher, 1);
+      emitFail(dispatcher, 2);
+      await new Promise((r) => setTimeout(r, 5));
+      dispatcher.bus.emit('action.completed', { action: 'like', ok: true, ts: 3 });
+      for (let i = 4; i <= 6; i++) {
+        commands.length = 0;
+        emitFail(dispatcher, i);
+        await new Promise((r) => setTimeout(r, 5));
+        assert.ok(
+          commands.some((c) => c.action === 'scroll' && c.reason === 'resume_redrive'),
+          `成功回执后预算应已清零，第 ${i - 3} 次失败仍应有 redrive`,
+        );
+      }
+      dispatcher.endSession();
+    }
   });
 
   // ─── facebook-browse-and-like-loop 5.2: 会话启动平台闸对 Facebook 放行 ─────────────────

@@ -21,18 +21,26 @@ export interface SearchEvaluatorOptions extends RoleOptions {
   getSearchedKeywords: () => string[];
   /** 概念池快照来源（跨会话从浏览学到的 candidates）。缺省返回空池 → 退化为仅 seed_keywords。 */
   getConceptPool?: () => ConceptPool;
+  /**
+   * 发现式搜索的平台准入（change fb-search-livelock-recovery）：返回 false 时在评估入口即跳过、
+   * 不消耗模型调用。Facebook 的发现式搜索在 Native 引擎是退役路径（无 container 一律拒绝），
+   * 判了也只会产出一条注定失败的命令。缺省视为支持（旧装配零回归）。
+   */
+  discoverySearchSupported?: () => boolean;
 }
 
 export class SearchEvaluator extends BaseRole {
   readonly roleName: RoleName = 'search_evaluator';
   private readonly getSearchedKeywords: () => string[];
   private readonly getConceptPool: () => ConceptPool;
+  private readonly discoverySearchSupported: () => boolean;
   private unsubscribers: (() => void)[] = [];
 
   constructor(options: SearchEvaluatorOptions) {
     super(options);
     this.getSearchedKeywords = options.getSearchedKeywords;
     this.getConceptPool = options.getConceptPool ?? (() => EMPTY_POOL);
+    this.discoverySearchSupported = options.discoverySearchSupported ?? (() => true);
     if (!options.llm) throw new Error('SearchEvaluator 需要 LlmClient');
   }
 
@@ -56,6 +64,16 @@ export class SearchEvaluator extends BaseRole {
   // ─── 核心评估 ─────────────────────────────────────────────
 
   async evaluate(payload: SearchNeededPayload): Promise<void> {
+    // 平台准入压在最前：不支持发现式搜索的平台直接具名跳过，不调 LLM、不下发。
+    if (!this.discoverySearchSupported()) {
+      this.emit('search.skipped', {
+        currentPageType: payload.currentPageType,
+        reason: 'platform_unsupported',
+        ts: Date.now(),
+      });
+      return;
+    }
+
     const { seedKeywords, candidates, available } = this.computeKeywordSets();
 
     // 候选集去重去已搜后为空 → 诚实跳过（不调 LLM、不编造关键词）。

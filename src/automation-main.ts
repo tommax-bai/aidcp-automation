@@ -1190,6 +1190,9 @@ export async function runAutomationMain(
       riskFoundation.riskStore
         .hasInteraction(accountId, noteId, 'comment')
         .catch(() => false),
+    // 搜索额度发起制记账（change fb-search-livelock-recovery）：走全系统唯一风险记账入口（漏斗+幂等键）。
+    recordSearchFact: (accountId: string, dedupeKey: string) =>
+      riskAccounting.recordRiskFact(accountId, 'search', dedupeKey),
     notificationContacts: apiClients.notificationContacts,
     businessConfig,
     comment: {

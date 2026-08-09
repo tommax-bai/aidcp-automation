@@ -6,7 +6,8 @@
  *   1. 关键词来自「seed_keywords ∪ 概念池 candidates」，不再仅 6 个写死种子词；
  *   2. search.execute 的 source 如实标注来源（new_concept / random_from_interests）；
  *   3. 搜索前三道闸（账号风险 + 预算 + 限频）生效，被拦时诚实跳过；
- *   4. 新 Edge 只在 actuated 回执后 markSearched，旧 Edge 保持下发后标记的兼容行为。
+ *   4. 记账发起制（change fb-search-livelock-recovery）：真正下发即 markSearched + 记额度，
+ *      失败终态不回滚（失败不免费）；终态回执只补 outcome 审计。新旧 Edge 同口径。
  *
  * 环境层级：离线 / 逻辑级（无外部依赖；桩 LLM + 桩 ConceptStore，不接 PG）。
  */
@@ -114,6 +115,26 @@ describe('AC-SEARCH 概念池驱动的搜索智能', () => {
     assert.equal(skipped!.reason, 'no_available_keywords');
   });
 
+  it('AC-SEARCH-12 平台不支持发现式搜索 → 评估入口具名跳过，不烧 LLM（change fb-search-livelock-recovery）', async () => {
+    const bus = new EventBus();
+    const role = new SearchEvaluator({
+      eventBus: bus,
+      soul: mockSoul,
+      llm: llmThrowing(), // 被调用即抛 → reason 会变成 llm_error，据此证明「没调」
+      sessionContext: new SessionContext(),
+      getSearchedKeywords: () => [],
+      getConceptPool: () => ({ known: [], candidates: ['向量数据库'] }),
+      discoverySearchSupported: () => false,
+    });
+    let skipped = null as SearchSkippedPayload | null;
+    bus.on('search.skipped', (p) => { skipped = p; });
+
+    await role.evaluate({ consecutiveScrolls: 5, currentPageType: 'feed', ts: Date.now() });
+
+    assert.ok(skipped, '平台不支持时应 emit search.skipped（浏览闭环续滚不断流）');
+    assert.equal(skipped!.reason, 'platform_unsupported', '拦截必须具名，且先于候选集与 LLM 判定');
+  });
+
   // ─── RoleDispatcher：搜索前三道闸 + 执行事实 ───────────────────────
 
   function setupDispatcher(options: { capable?: boolean; searchAllowed?: boolean } = {}) {
@@ -184,7 +205,9 @@ describe('AC-SEARCH 概念池驱动的搜索智能', () => {
     assert.deepEqual(marked, ['RAG 实战'], '仅第一次通过时 markSearched');
   });
 
-  it('AC-SEARCH-08 新 Edge 下发只记尝试，actuated=true 终态后才 markSearched', async () => {
+  it('AC-SEARCH-08 记账发起制：下发即 markSearched，终态只补审计、不重复标记', async () => {
+    // change fb-search-livelock-recovery：额度与概念词按「发起」记账——旧口径（actuated 后才标）
+    // 让失败搜索免费，评估器把失败词当「还没搜过」无限重发（活锁燃料环）。
     const { bus, commands, marked } = setupDispatcher({ capable: true });
 
     bus.emit('search.approved', { keyword: '向量数据库', reason: 'r', currentPageType: 'feed', source: 'new_concept', ts: 0 });
@@ -193,14 +216,14 @@ describe('AC-SEARCH 概念池驱动的搜索智能', () => {
     assert.equal(command.params?.purpose, 'discovery');
     assert.equal(command.params?.scope, 'global');
     assert.equal(typeof command.params?.activityId, 'string');
-    assert.deepEqual(marked, [], '仅下发不得把概念词标成已搜');
+    assert.deepEqual(marked, ['向量数据库'], '真正下发即标已搜（发起制）');
 
     bus.emit('action.completed', {
       action: 'search', ok: true, actuated: true, searchOutcome: 'results_ready',
       activityId: command.params!.activityId as string, purpose: 'discovery', scope: 'global', resultCount: 2, ts: 1,
     });
     await Promise.resolve();
-    assert.deepEqual(marked, ['向量数据库']);
+    assert.deepEqual(marked, ['向量数据库'], '终态只补审计，不重复标记');
 
     bus.emit('action.completed', {
       action: 'search', ok: true, actuated: true, searchOutcome: 'results_ready',
@@ -210,17 +233,18 @@ describe('AC-SEARCH 概念池驱动的搜索智能', () => {
     assert.deepEqual(marked, ['向量数据库'], '重复终态不得重复标记');
   });
 
-  it('AC-SEARCH-09 新 Edge 未提交终态不 markSearched', async () => {
+  it('AC-SEARCH-09 失败终态不回滚发起制标记，失败词不再被重复选中', async () => {
     const { bus, commands, marked } = setupDispatcher({ capable: true });
     bus.emit('search.approved', { keyword: 'LLM Agent', reason: 'r', currentPageType: 'feed', ts: 0 });
     const activityId = searchCmds(commands)[0].params!.activityId as string;
+    assert.deepEqual(marked, ['LLM Agent'], '下发即标已搜');
 
     bus.emit('action.completed', {
       action: 'search', ok: false, actuated: false, searchOutcome: 'not_submitted',
       activityId, purpose: 'discovery', scope: 'global', ts: 1,
     });
     await Promise.resolve();
-    assert.deepEqual(marked, []);
+    assert.deepEqual(marked, ['LLM Agent'], '失败不回滚、不免费（防失败词无限重发）');
   });
 
   it('AC-SEARCH-10 账号风险闸拒绝时不下发、不扣尝试、不 markSearched', () => {
