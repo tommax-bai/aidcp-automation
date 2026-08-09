@@ -35,8 +35,19 @@ export const RISK_COMMAND_ROUTES = {
 } as const;
 
 export interface RiskCommandHttpServerOptions {
-  /** automation 进程本地 target；缺失/非法时 recovery route fail-closed。 */
-  executionTarget?: string;
+  /**
+   * automation 进程本地 target；非法值时 recovery route fail-closed。
+   *
+   * **必填，且下面的 options 参数不给缺省值**——这是编译期唯一拦得住那次真实事故的地方：
+   * 拆仓重接线时它被整个漏掉（automation 65af812；单体 cloud@2d34e06 是传了的），
+   * 于是本机 target 恒 undefined、recovery 两条 route 无条件拒收；失败又在接口进程那侧
+   * 被吞成一句 503 `environment_risk_unavailable`，两侧都不打日志 ⇒ 客户自助解除受限
+   * 从 2026-08-04 起在 dev / OL 静默全废，直到有人手点那个按钮才发现。
+   *
+   * 类型写 `string` 而非 `'dev' | 'ol'` 是刻意的：要拦的是**漏传**，不是传了个坏值。
+   * 坏值仍由下面的运行期判别 fail-closed 接住，而测试也仍需要构造得出那一路。
+   */
+  executionTarget: string;
 }
 
 export interface RiskCommandHttpClientOptions {
@@ -81,7 +92,7 @@ function recoveryArgs(
 export function registerRiskCommandRoutes(
   server: InternalHttpServer,
   local: RiskCommandPort,
-  options: RiskCommandHttpServerOptions = {},
+  options: RiskCommandHttpServerOptions,
 ): void {
   server.register(RISK_COMMAND_ROUTES.submitSignal, (args) => local.submitSignal(args as SubmitRiskSignalInput));
   server.register(RISK_COMMAND_ROUTES.submitQuotaLevel, (args) =>

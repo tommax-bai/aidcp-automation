@@ -48,7 +48,10 @@ function localPort(calls: string[]): RiskCommandPort {
   };
 }
 
-async function loopback(serverTarget: string | undefined = 'dev') {
+// `serverTarget` 只到 `string`、不再到 `undefined`：注册器的 options 已改成必填，
+// 「整个漏传」现在是编译错误（那正是 2026-08-04 那次事故的形态，见 risk-command-http.ts 的注释）。
+// 这里仍要传得进空串——**坏值**那一路依旧只能靠运行期判别接住，下面第三个用例就是它。
+async function loopback(serverTarget: string = 'dev') {
   const calls: string[] = [];
   const server = new InternalHttpServer();
   registerRiskCommandRoutes(server, localPort(calls), { executionTarget: serverTarget });

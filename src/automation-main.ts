@@ -1764,7 +1764,13 @@ export async function runAutomationMain(
   });
   await pacingConfigStore.init();
   await groupRouteStore.init();
-  registerRiskCommandRoutes(root.internalServer, riskCommandService);
+  // **本机 target 必须传给注册器**，它不是给日志用的：recovery 那两条 route 在转调属主方法**之前**
+  // 拿它跟请求里的目标对一下，对不上就拒收。缺席时 fail-closed ⇒ 提交解除受限与回读结果 100% 失败，
+  // 而接口进程那侧按设计把异常吞成 null、统一答 503 `environment_risk_unavailable`
+  // ——两侧都不打日志，ECS 上看不到任何东西，表现只是「客户端那个按钮点了没反应」。
+  // 拆仓重接线时这个参数被漏掉过一次（automation 65af812，单体 cloud@2d34e06 是传了的），
+  // 客户自助解除受限因此从 2026-08-04 起在 dev / OL 全线必败。现已在注册器签名上改成必填。
+  registerRiskCommandRoutes(root.internalServer, riskCommandService, { executionTarget });
   registerPanelAutomationRoutes(root.internalServer, new PgPanelAutomationRead({ pool: ownerPool }));
   // 宿主层让位判决遥测（change report-host-standby-decisions）：**只读**路由。
   // 本进程是这份事实的唯一写者（边缘回执只到本进程这条 WebSocket），接口进程的面板只能问过来。
