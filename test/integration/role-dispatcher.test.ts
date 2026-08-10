@@ -200,13 +200,15 @@ describe('RoleDispatcher Integration', () => {
     dispatcher.endSession();
   });
 
-  it('facebook: Reels 续刷复用同一个 11s dwellMs 中心', async () => {
+  it('facebook: Reels 续刷走重尾采样 dwellMs（不再复用 11s 平地板）', async () => {
     const commands: EdgeCommand[] = [];
     const dispatcher = new RoleDispatcher({
       soul: mockSoul,
       llm: createMockLlm([]),
       sendCommand: (cmd) => commands.push(cmd),
       accountPlatform: 'facebook',
+      // random 固定 0.5：快划段 15s × 热身 fatigue 1.2 = 18s（确定性验证采样值真进了命令参数）
+      random: () => 0.5,
       facebookRuleModeDecision: () => ({
         mode: 'facebook_rule',
         blocker: null,
@@ -231,7 +233,7 @@ describe('RoleDispatcher Integration', () => {
 
     const scroll = commands.find((c) => c.action === 'scroll' && c.reason === 'rule_unstable_content_key');
     assert.ok(scroll, `Reels 续刷应复用统一 scroll 出口，实际=${JSON.stringify(commands)}`);
-    assert.equal(scroll!.params?.dwellMs, 11_000);
+    assert.equal(scroll!.params?.dwellMs, 18_000);
     dispatcher.endSession();
   });
 

@@ -295,6 +295,55 @@ export function computeFeedFloorMs(input: FeedFloorInput): number {
   return Math.round(clamp(withTempo, 0, floor.maxMs));
 }
 
+/**
+ * Reels 每条观看时长的重尾混合分布（change reels-watch-time-distribution）：
+ * 真人刷短视频多数快划、少数看完、极少数深看——恒定中心值（旧 11s 扫屏地板）是可识别的机械指纹。
+ * 三段加权、段内均匀；权重须和为 1（越界随机值回落末段）。min/max 是采样与最终 clamp 的共同边界：
+ * 90s 上限锚定 `READ.capMs`，结构上 MUST ≪ 空闲看门狗轻推阈值（DEFAULT_IDLE_NUDGE_MS=240s）。
+ */
+export const REELS_WATCH = {
+  minMs: 10_000,
+  maxMs: 90_000,
+  buckets: [
+    { weight: 0.55, minMs: 10_000, maxMs: 20_000 }, // 快划
+    { weight: 0.35, minMs: 20_000, maxMs: 45_000 }, // 正常观看
+    { weight: 0.1, minMs: 45_000, maxMs: 90_000 }, // 深看
+  ],
+} as const;
+
+export interface ReelsWatchInput {
+  status: RiskStatus;
+  /** 账号配额档（运营后台可配）；缺省 normal（对 tempo 无影响）。 */
+  quotaLevel?: RiskQuotaLevel;
+  /** 会话进度 0..1 */
+  progress: number;
+  /** 随机源注入口（测试确定性）；缺省 Math.random。 */
+  random?: () => number;
+}
+
+/**
+ * 采样一条 Reel 的观看时长中心值 dwellMs（边缘照旧叠 lognormal 抖动并保证停留达标）。
+ * 每条命令独立采样；tempo/fatigue 只放慢不加速，最终 clamp [REELS_WATCH.minMs, REELS_WATCH.maxMs]。
+ */
+export function computeReelsWatchMs(input: ReelsWatchInput): number {
+  const random = input.random ?? Math.random;
+  const pick = clamp01(random());
+  let bucket: { weight: number; minMs: number; maxMs: number } =
+    REELS_WATCH.buckets[REELS_WATCH.buckets.length - 1];
+  let acc = 0;
+  for (const candidate of REELS_WATCH.buckets) {
+    acc += candidate.weight;
+    if (pick < acc) {
+      bucket = candidate;
+      break;
+    }
+  }
+  const sampled = bucket.minMs + clamp01(random()) * (bucket.maxMs - bucket.minMs);
+  const withTempo =
+    sampled * effectiveTempo(input.status, input.quotaLevel ?? 'normal') * fatigueMultiplier(input.progress);
+  return Math.round(clamp(withTempo, REELS_WATCH.minMs, REELS_WATCH.maxMs));
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }

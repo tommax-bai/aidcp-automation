@@ -80,7 +80,7 @@ import type { EdgeTaskLease, EdgeTaskLeaseClient } from '../comm/edge-task-lease
 import { isPreemptionReason } from '../comm/preemption.js';
 import type { RoleOptions } from '../agents/base-role.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
-import { computeDwellMs, computeThinkMs, computeFeedFloorMs, effectiveTempo, type PacingFloorProvider } from '../risk/pacing.js';
+import { computeDwellMs, computeThinkMs, computeFeedFloorMs, computeReelsWatchMs, effectiveTempo, type PacingFloorProvider } from '../risk/pacing.js';
 import { SearchFrequencyLimiter } from '../risk/search-frequency-limiter.js';
 import { InteractionGuard, isGuardedInteraction, type GuardAction } from '../risk/interaction-guard.js';
 import { ActionCooldownGate, type CooldownAction } from '../risk/action-cooldown.js';
@@ -433,6 +433,8 @@ export interface RoleDispatcherOptions {
   /** 通知巡视的任务级执行权；缺省仅供旧测试兼容，生产必须注入。 */
   edgeTaskLeases?: Pick<EdgeTaskLeaseClient, 'acquire' | 'release'>;
   clock?: () => number;
+  /** Reels 观看时长采样的随机源（测试确定性注入）；缺省 Math.random。 */
+  random?: () => number;
   /** 外部事件总线（共享 handler 发射的 Edge 上报事件），缺省创建独立实例 */
   eventBus?: EventBus;
   /**
@@ -829,6 +831,8 @@ export class RoleDispatcher {
   private readonly llm: { complete(prompt: string, opts?: LlmCallOpts): Promise<string> };
   private readonly rawSendCommand: (command: EdgeCommand) => void;
   private readonly clock: () => number;
+  /** Reels 观看时长采样的随机源（测试确定性注入）；缺省 Math.random。 */
+  private readonly random?: () => number;
   private readonly getRiskStatus: () => RiskStatus;
   private readonly riskRecoveryAt: () => number | null;
   private readonly getQuotaLevel: () => RiskQuotaLevel;
@@ -1109,6 +1113,7 @@ export class RoleDispatcher {
     this.rawSendCommand = options.sendCommand;
     this.edgeTaskLeases = options.edgeTaskLeases;
     this.clock = options.clock ?? Date.now;
+    this.random = options.random;
     this.getRiskStatus = options.getRiskStatus ?? (() => 'normal');
     this.riskRecoveryAt = options.riskRecoveryAt ?? (() => null);
     this.getQuotaLevel = options.getQuotaLevel ?? (() => 'normal');
@@ -2514,6 +2519,24 @@ export class RoleDispatcher {
     return dwellMs > 0 ? { dwellMs } : undefined;
   }
 
+  /**
+   * Reels 面每条观看时长（change reels-watch-time-distribution）：重尾采样中心值（10–90s），
+   * 不再吃 feed 的扫屏平地板——恒定 11s 是可识别的机械指纹。传入 floorMs 仍取 max（上游算好的
+   * 地板不被静默吞）；边缘照旧叠抖动并锚定上屏内容到达时刻，重复下发不叠加停留。
+   */
+  private reelsScrollDwellParams(floorMs: number): Record<string, unknown> {
+    const dwellMs = Math.max(
+      floorMs,
+      computeReelsWatchMs({
+        status: this.getRiskStatus(),
+        quotaLevel: this.getQuotaLevel(),
+        progress: this.progress(),
+        random: this.random,
+      }),
+    );
+    return { dwellMs };
+  }
+
   private allowScrollForViewQuota(): boolean {
     if (this.viewQuotaSleeping) return true;
     const decision = this.explainView();
@@ -2541,8 +2564,9 @@ export class RoleDispatcher {
     // content.valuable/open_note 前检查，导致连续 content.no_valuable（Reels 外语/不匹配最常见）可以绕过
     // view 上限无限滚。已经处于休眠时仍让命令进入 sendCommand，由既有节流日志记录 suppressed 事实。
     if (!this.allowScrollForViewQuota()) return false;
-    const params = this.scrollDwellParams(floorMs);
     const resolved = surface ?? this.currentScrollSurface();
+    const params =
+      resolved === 'reels' ? this.reelsScrollDwellParams(floorMs) : this.scrollDwellParams(floorMs);
     return this.sendCommand(
       params
         ? { action: 'scroll', reason, surface: resolved, params }

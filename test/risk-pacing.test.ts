@@ -4,6 +4,8 @@ import {
   computeDwellMs,
   computeThinkMs,
   computeFeedFloorMs,
+  computeReelsWatchMs,
+  REELS_WATCH,
   tempoForStatus,
   tempoForQuotaLevel,
   effectiveTempo,
@@ -172,4 +174,44 @@ test('缺省 quotaLevel（不传）→ 退化为 tempoForStatus（向后兼容�
   const without = computeDwellMs({ textLen: 500, mode: 'read', status: 'normal', progress: 0.4 });
   const withNormal = computeDwellMs({ textLen: 500, mode: 'read', status: 'normal', quotaLevel: 'normal', progress: 0.4 });
   assert.equal(without, withNormal, '不传 quotaLevel 与传 normal 一致');
+});
+
+// ── computeReelsWatchMs（change reels-watch-time-distribution）────────────────
+
+/** 依序回放给定随机值的确定性随机源（耗尽后回绕）。 */
+function seqRandom(values: number[]): () => number {
+  let i = 0;
+  return () => values[i++ % values.length];
+}
+
+test('computeReelsWatchMs：随机源全域输出均落在 [10s, 90s]（0 与趋近 1）', () => {
+  const low = computeReelsWatchMs({ status: 'normal', progress: 0.3, random: () => 0 });
+  const high = computeReelsWatchMs({ status: 'normal', progress: 0.3, random: () => 0.999999 });
+  assert.equal(low, REELS_WATCH.minMs, `全 0 随机 → 快划段下界（${low}）`);
+  assert.ok(high >= REELS_WATCH.minMs && high <= REELS_WATCH.maxMs, `趋近 1 随机 → 深看段且不越 90s（${high}）`);
+  assert.ok(high > 80_000, `趋近 1 随机应落深看段尾部（${high}）`);
+});
+
+test('computeReelsWatchMs：确定性随机源下段选择与段内取值可复现', () => {
+  // pick=0.3 → 快划段（<0.55）；within=0.5 → 10s + 0.5×10s = 15s（normal/中段无缩放）
+  const quick = computeReelsWatchMs({ status: 'normal', progress: 0.3, random: seqRandom([0.3, 0.5]) });
+  assert.equal(quick, 15_000);
+  // pick=0.6 → 正常观看段（0.55–0.90）；within=0.5 → 20s + 0.5×25s = 32.5s
+  const mid = computeReelsWatchMs({ status: 'normal', progress: 0.3, random: seqRandom([0.6, 0.5]) });
+  assert.equal(mid, 32_500);
+  // pick=0.95 → 深看段（≥0.90）；within=0.5 → 45s + 0.5×45s = 67.5s
+  const deep = computeReelsWatchMs({ status: 'normal', progress: 0.3, random: seqRandom([0.95, 0.5]) });
+  assert.equal(deep, 67_500);
+});
+
+test('computeReelsWatchMs：tempo 只放慢不加速，深看段被 90s 上限截断', () => {
+  const random = () => 0.5; // pick=0.5 快划段、within=0.5 → 基准 15s
+  const normal = computeReelsWatchMs({ status: 'normal', progress: 0.3, random });
+  const warned = computeReelsWatchMs({ status: 'warned', progress: 0.3, random });
+  assert.ok(warned > normal, `warned(${warned}) 应 > normal(${normal})`);
+  const aggressive = computeReelsWatchMs({ status: 'normal', quotaLevel: 'aggressive', progress: 0.3, random });
+  assert.equal(aggressive, normal, '激进档不提速');
+  // restricted(1.6) × 深看段尾部 → 超 90s 必须截断
+  const clamped = computeReelsWatchMs({ status: 'restricted', progress: 0.9, random: seqRandom([0.95, 0.9]) });
+  assert.equal(clamped, REELS_WATCH.maxMs);
 });

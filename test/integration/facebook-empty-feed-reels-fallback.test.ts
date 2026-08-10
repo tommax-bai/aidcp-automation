@@ -222,7 +222,8 @@ for (const reason of [
 ] as const) {
   test(`Facebook Reels terminal scroll (${reason}) 不依赖 sticky confirmed，立即经正常 dwell 闸继续`, () => {
     const commands: EdgeCommand[] = [];
-    const dispatcher = new RoleDispatcher({ soul, llm, accountPlatform: 'facebook', sendCommand: (command) => commands.push(command) });
+    // random 固定 0.5：快划段 15s × 热身 fatigue 1.2 = 18s（reels 面停留改为重尾采样，不再吃 11s 平地板）
+    const dispatcher = new RoleDispatcher({ soul, llm, accountPlatform: 'facebook', random: () => 0.5, sendCommand: (command) => commands.push(command) });
     dispatcher.setup();
     dispatcher.startSession();
 
@@ -244,7 +245,7 @@ for (const reason of [
         && command.reason === `continue_after_${reason}`,
     );
     assert.equal(continuation.length, 1);
-    assert.equal(continuation[0]?.params?.dwellMs, 11_000);
+    assert.equal(continuation[0]?.params?.dwellMs, 18_000);
     dispatcher.endSession('test');
   });
 }
