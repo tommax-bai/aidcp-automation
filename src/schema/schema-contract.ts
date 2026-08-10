@@ -46,7 +46,7 @@ import { compareVersions } from './migration-plan.js';
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
 // start-up contract is narrowed to its own scope. Machine-derived on every sync by
 // scripts/sync-split-repos:derived_schema_version — do not hand-edit.
-export const REQUIRED_SCHEMA_VERSION = '0113_panel_hardening_indexes_content';
+export const REQUIRED_SCHEMA_VERSION = '0119_facebook_rule_batch_includes_join';
 
 /**
  * 本构建认识的最高迁移版本 id，等于本构建 `migrations/` 目录里的最大版本。
@@ -256,7 +256,7 @@ export const REQUIRED_SCHEMA_VERSION = '0113_panel_hardening_indexes_content';
 // Derived automation checkout: this repo only ships automation-owned migrations, so the
 // start-up contract is narrowed to its own scope. 原为 scripts/sync-split-repos 每次同步机器派生；
 // 事实源翻转（change invert-split-fact-source）后重放已双重封死、本仓即自身事实源，故改为手工维护。
-export const KNOWN_MAX_SCHEMA_VERSION = '0116_restricted_policy_config';
+export const KNOWN_MAX_SCHEMA_VERSION = '0119_facebook_rule_batch_includes_join';
 
 export type SchemaGateMode = 'warn' | 'enforce';
 

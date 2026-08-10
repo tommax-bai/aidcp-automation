@@ -11,6 +11,11 @@ import type {
   RecordFacebookConsumptionViewResult,
   SettleFacebookConsumptionActionResult,
 } from './facebook-consumption-mode-types.js';
+import {
+  resolveFacebookCadenceMode,
+  facebookCadenceProbabilisticHit,
+  type FacebookCadenceMode,
+} from './facebook-cadence-mode.js';
 
 export interface FacebookConsumptionCounters {
   confirmedNewLikesSinceJoin: number;
@@ -67,6 +72,10 @@ export function sameFacebookConsumptionPolicySnapshot(
 /**
  * Pure counter reducer used inside the store transaction. Non-confirmed and
  * already-state receipts intentionally fall through with no credit.
+ *
+ * change facebook-cadence-probability-mode：`cadenceMode='probabilistic'` 时,
+ * 每个确认事件独立掷 1/N 决定是否触发下游;计数器仍推进供观测,但不驱动触发。
+ * 缺省 fixed（未传 cadenceMode/random）= 既有精确计数,零回归。
  */
 export function advanceFacebookConsumptionCounters(input: {
   actionType: FacebookConsumptionActionType;
@@ -74,14 +83,24 @@ export function advanceFacebookConsumptionCounters(input: {
   snapshot: FacebookConsumptionPolicySnapshot;
   counters: FacebookConsumptionCounters;
   downstreamEnabled: boolean;
+  cadenceMode?: FacebookCadenceMode;
+  random?: () => number;
 }): FacebookConsumptionCounterTransition {
   const counters = { ...input.counters };
   if (!input.downstreamEnabled) return { counters, nextActionType: null };
+  const cadenceMode = resolveFacebookCadenceMode(input.cadenceMode);
+  const random = input.random ?? Math.random;
 
   if (input.actionType === 'like' && input.outcome === 'confirmed_new_like') {
     const next = counters.confirmedNewLikesSinceJoin + 1;
-    if (next >= input.snapshot.confirmedLikesPerJoin) {
-      counters.confirmedNewLikesSinceJoin = next - input.snapshot.confirmedLikesPerJoin;
+    const hit = cadenceMode === 'probabilistic'
+      ? facebookCadenceProbabilisticHit(input.snapshot.confirmedLikesPerJoin, random)
+      : next >= input.snapshot.confirmedLikesPerJoin;
+    if (hit) {
+      // fixed：溢出量结转（next-N）；probabilistic：命中即清零（无「攒够」语义）。
+      counters.confirmedNewLikesSinceJoin = cadenceMode === 'probabilistic'
+        ? 0
+        : next - input.snapshot.confirmedLikesPerJoin;
       return { counters, nextActionType: 'join' };
     }
     counters.confirmedNewLikesSinceJoin = next;
@@ -89,9 +108,13 @@ export function advanceFacebookConsumptionCounters(input: {
 
   if (input.actionType === 'join' && input.outcome === 'confirmed_new_join') {
     const next = counters.confirmedNewJoinsSinceComment + 1;
-    if (next >= input.snapshot.confirmedJoinsPerComment) {
-      counters.confirmedNewJoinsSinceComment =
-        next - input.snapshot.confirmedJoinsPerComment;
+    const hit = cadenceMode === 'probabilistic'
+      ? facebookCadenceProbabilisticHit(input.snapshot.confirmedJoinsPerComment, random)
+      : next >= input.snapshot.confirmedJoinsPerComment;
+    if (hit) {
+      counters.confirmedNewJoinsSinceComment = cadenceMode === 'probabilistic'
+        ? 0
+        : next - input.snapshot.confirmedJoinsPerComment;
       return { counters, nextActionType: 'comment' };
     }
     counters.confirmedNewJoinsSinceComment = next;

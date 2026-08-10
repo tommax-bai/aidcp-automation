@@ -805,6 +805,11 @@
     "note": "§4.7：content-scheduler.ts 归 api，其余归 automation"
   },
   {
+    "path": "src/orchestrator/facebook-cadence-mode.ts",
+    "layer": "automation",
+    "note": "§4.7：content-scheduler.ts 归 api，其余归 automation"
+  },
+  {
     "path": "src/orchestrator/facebook-consumption-mode-coordinator.ts",
     "layer": "automation",
     "note": "change add-configurable-facebook-consumption-mode：消费模式的 like/join/comment 单飞编排、提交前复核与恢复直接驱动真实平台动作，归 automation"

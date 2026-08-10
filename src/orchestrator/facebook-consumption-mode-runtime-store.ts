@@ -14,6 +14,11 @@ import {
   sameFacebookConsumptionPolicySnapshot,
   validateFacebookConsumptionPolicy,
 } from './facebook-consumption-mode.js';
+import {
+  resolveFacebookCadenceMode,
+  facebookCadenceProbabilisticHit,
+  type FacebookCadenceMode,
+} from './facebook-cadence-mode.js';
 import type {
   ApplyFacebookConsumptionViewResult,
   ClaimFacebookConsumptionActionResult,
@@ -189,6 +194,8 @@ export interface FacebookConsumptionModeRuntimeStoreOptions {
   executionTarget: DeploymentTarget;
   schemaProber: SchemaProber;
   clock?: () => number;
+  /** 概率节奏掷骰的随机源（测试确定性注入）；缺省 Math.random。 */
+  random?: () => number;
 }
 
 export interface BindFacebookConsumptionActionTargetInput {
@@ -378,12 +385,14 @@ export class FacebookConsumptionModeRuntimeStore {
   private readonly executionTarget: DeploymentTarget;
   private readonly schemaProber: SchemaProber;
   private readonly clock: () => number;
+  private readonly random: () => number;
   private readonly ownedPool?: pg.Pool;
 
   constructor(options: FacebookConsumptionModeRuntimeStoreOptions) {
     this.executionTarget = options.executionTarget;
     this.schemaProber = options.schemaProber;
     this.clock = options.clock ?? Date.now;
+    this.random = options.random ?? Math.random;
     let pool = options.runtimePool ?? options.pool;
     if (!pool) {
       pool = new Pool({
@@ -495,7 +504,10 @@ export class FacebookConsumptionModeRuntimeStore {
     contentUrl: string;
     sourceDedupeKey: string;
     occurredAt: number;
+    /** 全局节奏模式（change facebook-cadence-probability-mode）；缺省 fixed。 */
+    cadenceMode?: FacebookCadenceMode;
   }): Promise<ApplyFacebookConsumptionViewResult> {
+    const cadenceMode = resolveFacebookCadenceMode(input.cadenceMode);
     const accountId = normalizedRequired(input.accountId, 'account_id');
     const contentKey = normalizedRequired(input.contentKey, 'content_key');
     const contentUrl = normalizedRequired(input.contentUrl, 'content_url');
@@ -644,7 +656,12 @@ export class FacebookConsumptionModeRuntimeStore {
       }
 
       const nextCount = currentCount + 1;
-      if (nextCount < input.policy.snapshot.viewsPerLike) {
+      // fixed：数到 viewsPerLike 起首个点赞意图。probabilistic：每次确认 view 独立掷 1/viewsPerLike。
+      // views_since_like 仍累加供观测,但概率模式下不驱动触发。
+      const startLike = cadenceMode === 'probabilistic'
+        ? facebookCadenceProbabilisticHit(input.policy.snapshot.viewsPerLike, this.random)
+        : nextCount >= input.policy.snapshot.viewsPerLike;
+      if (!startLike) {
         await client.query(
           `UPDATE facebook_consumption_progress
               SET views_since_like=$4, updated_at=now()
@@ -1342,6 +1359,8 @@ export class FacebookConsumptionModeRuntimeStore {
           },
           downstreamEnabled:
             row.downstream_enabled === true && progress.revision_state === 'active',
+          cadenceMode: resolveFacebookCadenceMode(input.cadenceMode),
+          random: this.random,
         });
         if (transition.nextActionType) {
           // 积压上限：同账号同策略号下同类义务至多一份。让位之后点赞段会继续跑，

@@ -44,6 +44,8 @@ function startDispatcher(options: {
   mode?: 'persona' | 'slow_start' | 'facebook_rule' | 'consumption' | 'blocked';
   modeRef?: { current: 'persona' | 'slow_start' | 'facebook_rule' | 'consumption' | 'blocked' };
   reelCadence?: { viewsPerLike?: number; viewsPerFollow: number };
+  cadenceMode?: 'fixed' | 'probabilistic';
+  random?: () => number;
 } = {}) {
   const commands: EdgeCommand[] = [];
   let llmCalls = 0;
@@ -52,6 +54,7 @@ function startDispatcher(options: {
     llm: { complete: async () => { llmCalls++; return '{"verdict":"skip","reason":"test"}'; } },
     accountPlatform: options.platform ?? 'facebook',
     randomFn: options.randomFn,
+    random: options.random,
     canInteract: options.canInteract,
     hasReelFollow: () => options.hasReelFollow ?? false,
     cooldownGate: options.cooldownGate,
@@ -62,6 +65,7 @@ function startDispatcher(options: {
       return {
         mode,
         blocker: mode === 'blocked' ? 'test_blocked' : null,
+        ...(options.cadenceMode ? { cadenceMode: options.cadenceMode } : {}),
         reelCadence: options.reelCadence ?? (
           mode === 'persona'
             ? { viewsPerLike: 4, viewsPerFollow: 10 }
@@ -102,6 +106,43 @@ test('普通人设 Reel: 默认每 4 个唯一 Reel 只在第 4 个下发 note-s
   assert.equal(likes.length, 1);
   assert.equal(likes[0]?.reason, 'facebook_reel_persona_cadence_hit');
   assert.equal(likes[0]?.params?.noteId, 'https://www.facebook.com/reel/4');
+  dispatcher.endSession('test');
+});
+
+test('普通人设 Reel(概率模式): 每条 Reel 独立掷 1/viewsPerLike,不是固定第 N 个', () => {
+  // 每条 Reel 依次消费两次 draw：先 like（viewsPerLike=4→阈值0.25）再 follow（viewsPerFollow=100→阈值0.01）。
+  // follow 恒给 0.99 永不中；like 在第 1、3 条给命中值 → 证明触发点不再固定在第 4 个。
+  const draws = [
+    0.1, 0.99, // reel 1: like 命中
+    0.9, 0.99, // reel 2: like 不中
+    0.2, 0.99, // reel 3: like 命中
+    0.9, 0.99, // reel 4: like 不中
+  ];
+  let i = 0;
+  const { dispatcher, commands } = startDispatcher({
+    cadenceMode: 'probabilistic',
+    reelCadence: { viewsPerLike: 4, viewsPerFollow: 100 },
+    random: () => draws[i++ % draws.length],
+  });
+  for (let id = 1; id <= 4; id += 1) reportReel(dispatcher, String(id), `Author ${id}`);
+  const likes = commands.filter((command) => command.action === 'like');
+  assert.equal(likes.length, 2, `概率模式应按掷骰命中,实际=${JSON.stringify(likes.map((l) => l.params?.noteId))}`);
+  assert.deepEqual(
+    likes.map((l) => l.params?.noteId),
+    ['https://www.facebook.com/reel/1', 'https://www.facebook.com/reel/3'],
+    '触发点由每条独立掷骰决定,非固定第 4 个',
+  );
+  dispatcher.endSession('test');
+});
+
+test('普通人设 Reel(概率模式): 全程不中则一次 like 都不发（无固定保底）', () => {
+  const { dispatcher, commands } = startDispatcher({
+    cadenceMode: 'probabilistic',
+    reelCadence: { viewsPerLike: 4, viewsPerFollow: 100 },
+    random: () => 0.99, // 恒不中
+  });
+  for (let id = 1; id <= 12; id += 1) reportReel(dispatcher, String(id), `Author ${id}`);
+  assert.equal(commands.filter((command) => command.action === 'like').length, 0);
   dispatcher.endSession('test');
 });
 

@@ -1,3 +1,5 @@
+import type { FacebookCadenceMode } from './facebook-cadence-mode.js';
+
 export const FACEBOOK_CONSUMPTION_ACTION_TYPES = ['like', 'join', 'comment'] as const;
 export type FacebookConsumptionActionType =
   (typeof FACEBOOK_CONSUMPTION_ACTION_TYPES)[number];
@@ -184,6 +186,8 @@ export interface FacebookConsumptionConfirmedViewInput {
   contentUrl: string;
   sourceDedupeKey: string;
   occurredAt: number;
+  /** 全局节奏模式（change facebook-cadence-probability-mode）；缺省 fixed。 */
+  cadenceMode?: FacebookCadenceMode;
 }
 
 export type RecordFacebookConsumptionViewResult =
@@ -204,6 +208,8 @@ export interface FacebookConsumptionActionReceiptInput {
   expectedGroupKey?: string | null;
   expectedGroupUrl?: string | null;
   evidence?: Record<string, unknown> | null;
+  /** 全局节奏模式（change facebook-cadence-probability-mode）；缺省 fixed。 */
+  cadenceMode?: FacebookCadenceMode;
 }
 
 export interface FacebookConsumptionRuntimeStorePort {

@@ -128,6 +128,11 @@ import {
   type FacebookRuleModeDecision,
 } from './facebook-rule-mode.js';
 import {
+  resolveFacebookCadenceMode,
+  facebookCadenceProbabilisticHit,
+  type FacebookCadenceMode,
+} from './facebook-cadence-mode.js';
+import {
   classifyFacebookConsumptionLikeReceipt,
 } from './facebook-consumption-mode.js';
 import type {
@@ -526,6 +531,8 @@ export interface RoleDispatcherOptions {
     sourceDedupeKey: string;
     occurredAt: number;
     policy?: FacebookRuleRuntimePolicy;
+    /** 全局节奏模式（change facebook-cadence-probability-mode）；缺省 fixed。 */
+    cadenceMode?: FacebookCadenceMode;
   }) => Promise<ApplyFacebookRuleViewResult>;
   /** 规则批次动作终态持久化。缺失时规则模式 fail-closed。 */
   updateFacebookRuleBatch?: (
@@ -561,6 +568,8 @@ export interface RoleDispatcherOptions {
     contentUrl: string;
     sourceDedupeKey: string;
     occurredAt: number;
+    /** 全局节奏模式（change facebook-cadence-probability-mode）；缺省 fixed。 */
+    cadenceMode?: FacebookCadenceMode;
   }) => Promise<ApplyFacebookConsumptionViewResult>;
   /** Lease one durable consumption action before authorizing its platform write. */
   claimFacebookConsumptionAction?: (input: {
@@ -1391,6 +1400,7 @@ export class RoleDispatcher {
         policyRevision: decision.policyRevision,
         snapshot: decision.rulePolicy,
       },
+      cadenceMode: resolveFacebookCadenceMode(decision.cadenceMode),
     });
     if (applied.kind !== 'batch_created') {
       if (applied.kind !== 'batch_active') {
@@ -1462,6 +1472,7 @@ export class RoleDispatcher {
       contentUrl: payload.noteId,
       sourceDedupeKey: payload.sourceDedupeKey,
       occurredAt: payload.occurredAt,
+      cadenceMode: resolveFacebookCadenceMode(decision.cadenceMode),
     });
     if (applied.kind === 'counted' || applied.kind === 'duplicate') {
       // 让了位的下游义务在这里继续推进——本轮没有点赞要发，驱动它不会与在途写抢浏览器。
@@ -4201,13 +4212,21 @@ export class RoleDispatcher {
       console.warn(`[interaction_appraiser] skip reason=facebook_reel_cadence_policy_invalid mode=${mode} note=${noteId}`);
       return;
     }
+    // ordinal 照常推进（可观测 / 日志）；概率模式下它不驱动触发,仅固定模式用 ordinal % N。
     const ordinal = (this.facebookReelVisitCountByMode.get(mode) ?? 0) + 1;
     this.facebookReelVisitCountByMode.set(mode, ordinal);
+    const cadenceMode = resolveFacebookCadenceMode(decision.cadenceMode);
+    const likeHit = cadenceMode === 'probabilistic'
+      ? facebookCadenceProbabilisticHit(Number(viewsPerLike), this.random ?? Math.random)
+      : ordinal % Number(viewsPerLike) === 0;
+    const followHit = cadenceMode === 'probabilistic'
+      ? facebookCadenceProbabilisticHit(Number(viewsPerFollow), this.random ?? Math.random)
+      : ordinal % Number(viewsPerFollow) === 0;
 
-    if (hasLikeCadence && ordinal % Number(viewsPerLike) === 0) {
+    if (hasLikeCadence && likeHit) {
       this.dispatchFacebookModeReelLike(noteId, mode, ordinal, Number(viewsPerLike));
     }
-    if (ordinal % Number(viewsPerFollow) === 0) {
+    if (followHit) {
       this.dispatchFacebookModeReelFollow(
         noteId,
         String(card.author ?? '').replace(/\s+/g, ' ').trim(),

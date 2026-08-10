@@ -4,6 +4,7 @@ import type {
   FacebookRulePolicySnapshot,
 } from 'aidcp-kernel/kernel/facebook-rule-mode-types.js';
 import type { FacebookConsumptionPolicySnapshot } from './facebook-consumption-mode-types.js';
+import type { FacebookCadenceMode } from './facebook-cadence-mode.js';
 import { facebookPostKey, hasObviousHighRiskFacebookCaption } from '../platform/facebook-presented-video.js';
 
 export type { FacebookBrowseMode } from 'aidcp-kernel/kernel/facebook-rule-mode-types.js';
@@ -11,6 +12,11 @@ export type { FacebookBrowseMode } from 'aidcp-kernel/kernel/facebook-rule-mode-
 export interface FacebookRuleModeDecision {
   mode: FacebookBrowseMode;
   blocker: string | null;
+  /**
+   * 全局节奏解释模式（change facebook-cadence-probability-mode）。缺省视为 `fixed`
+   * （旧投影 / 未接线时的安全缺省）。统管全部 N 次 A→1 次 B 数值的解释方式。
+   */
+  cadenceMode?: FacebookCadenceMode;
   /** Environment authority pinned by the dispatcher when the browse session starts. */
   primarySurface?: 'feed' | 'reels';
   surfaceRevision?: number;

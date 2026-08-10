@@ -19,6 +19,11 @@ import {
   classifySchemaCapability,
   type SchemaProber,
 } from 'aidcp-kernel/kernel/schema-capability-contract.js';
+import {
+  resolveFacebookCadenceMode,
+  facebookCadenceProbabilisticHit,
+  type FacebookCadenceMode,
+} from './facebook-cadence-mode.js';
 
 const { Pool } = pg;
 
@@ -58,6 +63,7 @@ const FACEBOOK_RULE_RUNTIME_REQUIREMENT = {
       'policy_snapshot',
       'sequence',
       'trigger_content_key',
+      'includes_join',
       'like_state',
       'join_state',
       'comment_state',
@@ -78,6 +84,7 @@ interface BatchDbRow {
   policy_snapshot: unknown;
   sequence: number | string;
   trigger_content_key: string;
+  includes_join: boolean | null;
   like_state: FacebookRuleActionState;
   join_state: FacebookRuleActionState;
   comment_state: FacebookRuleActionState;
@@ -102,6 +109,8 @@ export interface FacebookRuleModeRuntimeStoreOptions {
   password?: string;
   executionTarget: DeploymentTarget;
   schemaProber: SchemaProber;
+  /** 概率节奏掷骰的随机源（测试确定性注入）；缺省 Math.random。 */
+  random?: () => number;
 }
 
 function normalizePolicy(
@@ -152,7 +161,11 @@ function batchFromDb(row: BatchDbRow): FacebookRuleModeBatchView {
     policyRevision: Number(row.policy_revision),
     policySnapshot,
     sequence,
-    includesJoin: facebookRuleRoundIncludesJoin(sequence, policySnapshot.joinEveryNRounds),
+    // 持久化的「本轮含加群」优先（概率模式创建时掷一次落库,防反复读取重掷）;
+    // NULL = 旧行,回落固定派生（sequence % joinEveryNRounds）。
+    includesJoin: typeof row.includes_join === 'boolean'
+      ? row.includes_join
+      : facebookRuleRoundIncludesJoin(sequence, policySnapshot.joinEveryNRounds),
     triggerContentKey: row.trigger_content_key,
     likeState: row.like_state,
     joinState: row.join_state,
@@ -165,18 +178,20 @@ function batchFromDb(row: BatchDbRow): FacebookRuleModeBatchView {
 }
 
 const BATCH_SELECT = `batch_id, policy_revision, policy_snapshot, sequence,
-  trigger_content_key, like_state, join_state, comment_state, terminal, blocker,
+  trigger_content_key, includes_join, like_state, join_state, comment_state, terminal, blocker,
   created_at, updated_at`;
 
 export class FacebookRuleModeRuntimeStore {
   private readonly runtimePool: pg.Pool;
   private readonly executionTarget: DeploymentTarget;
   private readonly schemaProber: SchemaProber;
+  private readonly random: () => number;
   private readonly ownedPool?: pg.Pool;
 
   constructor(options: FacebookRuleModeRuntimeStoreOptions) {
     this.executionTarget = options.executionTarget;
     this.schemaProber = options.schemaProber;
+    this.random = options.random ?? Math.random;
     let pool = options.runtimePool ?? options.pool;
     if (!pool) {
       pool = new Pool({
@@ -278,8 +293,11 @@ export class FacebookRuleModeRuntimeStore {
     sourceDedupeKey: string;
     occurredAt: number;
     policy?: FacebookRuleRuntimePolicy;
+    /** 全局节奏模式（change facebook-cadence-probability-mode）；缺省 fixed。 */
+    cadenceMode?: FacebookCadenceMode;
   }): Promise<ApplyFacebookRuleViewResult> {
     const policy = normalizePolicy(input.policy);
+    const cadenceMode = resolveFacebookCadenceMode(input.cadenceMode);
     const client = await this.runtimePool.connect();
     try {
       await client.query('BEGIN');
@@ -368,7 +386,12 @@ export class FacebookRuleModeRuntimeStore {
         return { kind: 'duplicate', viewCount: currentCount };
       }
       const nextCount = currentCount + 1;
-      if (nextCount < policy.snapshot.viewsPerLike) {
+      // fixed：数到 viewsPerLike 起批。probabilistic：每次确认 view 独立掷 1/viewsPerLike,
+      // 掷中即起批;view_count 仍累加供观测,但不驱动触发。
+      const startBatch = cadenceMode === 'probabilistic'
+        ? facebookCadenceProbabilisticHit(policy.snapshot.viewsPerLike, this.random)
+        : nextCount >= policy.snapshot.viewsPerLike;
+      if (!startBatch) {
         await client.query(
           `UPDATE facebook_rule_progress
               SET view_count=$6, updated_at=now()
@@ -386,12 +409,16 @@ export class FacebookRuleModeRuntimeStore {
         await client.query('COMMIT');
         return { kind: 'counted', viewCount: nextCount };
       }
+      // 本轮是否含加群：创建时掷一次落库（概率模式必须落,否则反复读取重掷会漂移）。
+      const includesJoin = cadenceMode === 'probabilistic'
+        ? facebookCadenceProbabilisticHit(policy.snapshot.joinEveryNRounds, this.random)
+        : facebookRuleRoundIncludesJoin(sequence, policy.snapshot.joinEveryNRounds);
       const batchId = randomUUID();
       const created = await client.query<BatchDbRow>(
         `INSERT INTO facebook_rule_batch
            (batch_id, account_id, execution_target, definition_id, definition_version,
-            policy_revision, policy_snapshot, sequence, trigger_content_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)
+            policy_revision, policy_snapshot, sequence, trigger_content_key, includes_join)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10)
          ON CONFLICT (
            account_id, execution_target, definition_id, definition_version, policy_revision, sequence
          )
@@ -407,6 +434,7 @@ export class FacebookRuleModeRuntimeStore {
           JSON.stringify(policy.snapshot),
           sequence,
           input.contentKey,
+          includesJoin,
         ],
       );
       const actualBatch = created.rows[0]!;

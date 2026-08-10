@@ -51,6 +51,7 @@ import {
   type RoleDispatcherOptions,
 } from './orchestrator/role-dispatcher.js';
 import { decideFacebookBrowseMode } from './orchestrator/facebook-rule-mode.js';
+import { resolveFacebookCadenceMode, type FacebookCadenceMode } from './orchestrator/facebook-cadence-mode.js';
 // 版本偏斜闸比对的能力名 MUST 取自协议侧常量，MUST NOT 手抄字面量：这几个名字带 `_v1` 后缀，
 // 抄漏后缀不报错、typecheck 也看不见（两侧都是裸 string），只是该能力对**所有**边缘恒判为「没有」，
 // 于是新边端被静默降级成老边端。已实测发生过：切流后 Reel 自动关注 / 免导航身份读全线消失。
@@ -74,6 +75,7 @@ export type FacebookOperationDecision =
       rulePolicy: FacebookRuleOperationParameters;
       consumptionPolicy: FacebookConsumptionOperationParameters;
       reelCadence?: Record<string, number>;
+      cadenceMode?: FacebookCadenceMode;
     });
 
 
@@ -408,6 +410,8 @@ export function createAutomationDispatcherFactory(
         policyRevision: policy.policyRevision,
         rulePolicy: policy.rule,
         consumptionPolicy: policy.consumption,
+        // 全局节奏模式统管三组触发点；缺省 fixed（旧投影安全缺省）。
+        cadenceMode: resolveFacebookCadenceMode(policy.cadenceMode),
         ...(reelCadence ? { reelCadence: { ...reelCadence } } : {}),
       } as FacebookOperationDecision;
     };
@@ -514,8 +518,18 @@ export function createAutomationDispatcherFactory(
               consumption.port.claimAction(input),
             markFacebookConsumptionActionDispatched: (input: unknown) =>
               consumption.port.markDispatched(input),
-            settleFacebookConsumptionAction: (input: unknown) =>
-              consumption.port.settleAction(input),
+            // 结算落地的下游计数由 reducer 按当前全局节奏模式判定（change facebook-cadence-probability-mode）。
+            // 在此单点注入 cadenceMode（按账号现读决策）覆盖 role-dispatcher 全部结算调用点,不逐点漏加。
+            settleFacebookConsumptionAction: (input: unknown) => {
+              const receipt = input as { accountId?: string };
+              const decision = resolveFacebookOperationDecision(String(receipt.accountId ?? ''));
+              return consumption.port.settleAction({
+                ...(receipt as object),
+                cadenceMode: resolveFacebookCadenceMode(
+                  'cadenceMode' in decision ? decision.cadenceMode : undefined,
+                ),
+              });
+            },
             triggerFacebookConsumptionAction: async (action: unknown) => {
               // 缺协调器时**具名 throw**（单体逐字同形）：静默 no-op 会让消费模式看着在跑、其实一步没动。
               if (coordinator.state !== 'wired') {
