@@ -103,6 +103,7 @@ import {
   type ResumeConfigProvider,
 } from '../risk/resume-limits.js';
 import type { ResumeGateVerdict } from '../comm/browser-standby.js';
+import { STANDBY_NOT_READY_REASONS } from '../comm/browser-standby.js';
 import type { RiskStatus, RiskQuotaLevel } from '../risk/types.js';
 import type { ConceptPool } from 'aidcp-kernel/kernel/concept-pool.js';
 import type { ConceptPoolPort } from 'aidcp-kernel/kernel/concept-pool-port.js';
@@ -309,6 +310,43 @@ const START_GATE_VERDICT_RECOVERABLE: Record<Exclude<SessionStartVerdict, 'ok'>,
   // 纳入复判等于让全局停机在任一连接上被自动解除，那是另一件事，不在本 change 的问题域内。
   dispatch_inactive: false,
 };
+
+/**
+ * 会话启动裁决 → 待机提示里的具名「尚未就绪」子原因（change release-browser-slot-on-stalled-blocker）。
+ *
+ * 这五种此前共用裸字符串 `not_ready` 一个名字下发给宿主层，而宿主层要据它决定**要不要终止这个
+ * 环境并收回它的浏览器槽位**。两种截然不同的东西挤在同一个名字里：
+ *
+ * - **账号级**（`needs_persona_setup`）——人去绑一下人设就好，滞留超限终止它是对的；
+ * - **全局级**（`dispatch_inactive` ＝运营显式停机）——**每一个**环境都会报它，照单终止即整机清场，
+ *   而且没有任何受益人：所有环境都停了，腾出的槽位无人可用，运营恢复时反倒要逐个手动重启；
+ * - **会自愈**（两种副本陈旧）——等副本追上即解除，无人可「处理」，终止纯属误伤；
+ * - **该平台常态**（`platform_no_browse`）——该账号不做自动浏览是正常的，但它很可能正在跑排期
+ *   发帖 / 评论，终止它等于把那些一并停掉。
+ *
+ * 与上面那张表同样写成穷举 `Record`：新增一种裁决结论时这里不具名就编译不过。写成 Set 或 switch
+ * 默认分支，新结论会默默继承某个已有名字的处置授权——那正是本仓「跨层翻译 MUST NOT 有兜底桶」
+ * 所说的终局判决。
+ */
+const NOT_READY_REASON_BY_VERDICT: Record<Exclude<SessionStartVerdict, 'ok'>, string> = {
+  needs_persona_setup: STANDBY_NOT_READY_REASONS.personaUnbound,
+  [PERSONA_UNAVAILABLE_REASON]: STANDBY_NOT_READY_REASONS.personaUnavailable,
+  [CONFIG_MIRROR_STALE_REASON]: STANDBY_NOT_READY_REASONS.configStale,
+  platform_no_browse: STANDBY_NOT_READY_REASONS.platformNoBrowse,
+  dispatch_inactive: STANDBY_NOT_READY_REASONS.dispatchHalted,
+};
+
+/**
+ * 取该裁决对应的具名子原因。
+ *
+ * `ok` 在调用点不可达（那里已判定「未就绪」）。真走到这里说明两个读数在同一跳里矛盾了，此时
+ * MUST NOT 猜一个账号级原因——回落到显式的「未分类」，它**不在宿主层终止白名单内**，因此这种
+ * 矛盾的代价上限只是多占一会儿槽位，绝不会变成误关一个健康环境。
+ */
+function notReadyReasonForVerdict(verdict: SessionStartVerdict): string {
+  if (verdict === 'ok') return STANDBY_NOT_READY_REASONS.unclassified;
+  return NOT_READY_REASON_BY_VERDICT[verdict];
+}
 
 /**
  * 复判退避节奏（ms）。首跳 2s 覆盖补人设竞态（dev 实测窗口 0.1~0.8s，两个数量级余量）；
@@ -3901,16 +3939,23 @@ export class RoleDispatcher {
    * 恢复时刻（自动恢复扫描器已接活）。调用方 MUST NOT 对缺省者伪造一个恢复时刻，见 browser-standby.ts
    * 的「回访」语义。
    *
-   * `not_ready`（调度未开 / 人设未绑 / 无续场配置提供者）**不是「没活干」**，而是「还没准备好」——它 MUST NOT
-   * 产出待机提示（人设绑定等动作可能要用到浏览器）。
+   * `not_ready:*`（调度未开 / 人设未绑 / 副本陈旧 / 平台不做浏览 / 无续场配置提供者）**不是「没活干」**，
+   * 而是「还没准备好」——它 MUST NOT 产出待机提示（人设绑定等动作可能要用到浏览器）。
+   *
+   * 这几种以**具名子原因**下发、MUST NOT 共用裸 `not_ready`：宿主层要据它分辨账号级与全局级，
+   * 见 `NOT_READY_REASON_BY_VERDICT`。
    */
   private resumeGate(account: string, now: number, announce: boolean): ResumeGateVerdict {
     // announce 区分两类调用方（change standby-captcha-must-not-yield）：
     //  - 真的在尝试续场（canAutoResume）→ true：未绑人设时照旧告警 + 发「需要设置人设」信号，行为零变化。
     //  - 只读裁决（resumeGateSnapshot，被 ~60s 周期链每跳调用）→ false：**绝不能**每分钟刷一行告警、
     //    更不能每分钟触发一次「会话被拒」回调。一个只读方法不该有这种脉冲。
-    const ready = announce ? this.canStartSession() : this.sessionStartVerdict() === 'ok';
-    if (!ready) return { blocked: true, reason: 'not_ready' };
+    // 具名子原因取自同一次裁决（change release-browser-slot-on-stalled-blocker）：宿主层要据它
+    // 分辨「这一个账号缺人设」与「整台机器被全局停机 / 没开续场特性」，而后两者照单终止即全场清光。
+    // `sessionStartVerdict()` 是纯读，announce 分支下 canStartSession() 内部会再算一次，二者恒同结论。
+    const verdict = this.sessionStartVerdict();
+    const ready = announce ? this.canStartSession() : verdict === 'ok';
+    if (!ready) return { blocked: true, reason: notReadyReasonForVerdict(verdict) };
     const weekMask = this.effectiveActiveWeekMask(account);
     if (!isWeekActiveAt(weekMask, new Date(now))) {
       // 「可活跃时间」周历闸（全局，change weekly-active-window）。整周全关 → msUntilNextActive 回 null（无恢复时刻）。
@@ -3929,7 +3974,9 @@ export class RoleDispatcher {
         : { blocked: true, reason: 'risk_state' };
     }
     if (risk === 'frozen') return { blocked: true, reason: 'risk_state' };
-    if (!this.resumeConfigProvider) return { blocked: true, reason: 'not_ready' }; // 无提供者 = 特性关
+    // 无提供者 = 该部署没开续场特性。这是**全局**状态、与本账号无关，故必须与账号级的
+    // 「人设未绑」异名——同名会让一次部署级误配把整机环境逐个终止掉。
+    if (!this.resumeConfigProvider) return { blocked: true, reason: STANDBY_NOT_READY_REASONS.featureOff };
     const win = this.resumeConfigProvider.activeWindow();
     if (!isWithinActiveWindow(this.minuteOfDay(now), win)) {
       // 过活跃时段窗口（全局，旧每日窗口）。

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_BROWSER_STANDBY_MIN_WAIT_MS,
   DEFAULT_BROWSER_STANDBY_WARMUP_MS,
+  STANDBY_HARD_BLOCKER_REASONS,
+  STANDBY_NOT_READY_REASONS,
   buildBrowserStandbyHint,
   resolveBrowserStandbyConfig,
   type BrowserStandbyRiskSource,
@@ -114,7 +116,8 @@ test('browser-standby: 未知的非配额阻塞 MUST NOT 让位（兜底：不�
   for (const reason of ['some_unknown_blocker', 'ratio:like_view']) {
     const hint = buildBrowserStandbyHint(source({ reason }), { now: 1_000, config: CFG });
     assert.equal(hint.eligible, false, `${reason} 绝不能让位`);
-    assert.equal(hint.reason, 'hard_blocker');
+    // 补集与验证码一票否决**必须异名**：宿主层的终止白名单只收录后者。
+    assert.equal(hint.reason, STANDBY_HARD_BLOCKER_REASONS.riskUnclassified);
     assert.equal(hint.waitMs, 0);
   }
 });
@@ -133,7 +136,7 @@ test('browser-standby: 边缘卡在验证码上 → MUST NOT 让位（哪怕 res
     needsBrowserToUnblock: true, // 云端权威事实：这个边缘正卡在验证码上
   });
   assert.equal(hint.eligible, false, '绝不能关掉运维正要去解验证码的那个浏览器');
-  assert.equal(hint.reason, 'hard_blocker');
+  assert.equal(hint.reason, STANDBY_HARD_BLOCKER_REASONS.overlayPause);
   assert.equal(hint.waitMs, 0);
 });
 
@@ -153,7 +156,7 @@ test('browser-standby: 验证码期间任何停工原因都不让位（闸压在
       needsBrowserToUnblock: true,
     });
     assert.equal(hint.eligible, false, `${label} + 验证码 → 绝不让位`);
-    assert.equal(hint.reason, 'hard_blocker');
+    assert.equal(hint.reason, STANDBY_HARD_BLOCKER_REASONS.overlayPause);
   }
   // 配额耗尽走的是另一条分支，同样必须被压住。
   const quota = buildBrowserStandbyHint(source({ waits: { hour: 42 * 60_000 } }), {
@@ -162,7 +165,7 @@ test('browser-standby: 验证码期间任何停工原因都不让位（闸压在
     needsBrowserToUnblock: true,
   });
   assert.equal(quota.eligible, false, '配额耗尽 + 验证码 → 绝不让位');
-  assert.equal(quota.reason, 'hard_blocker');
+  assert.equal(quota.reason, STANDBY_HARD_BLOCKER_REASONS.overlayPause);
 });
 
 test('browser-standby: 验证码解除后恢复正常让位（闸不得永久禁用让位）', () => {
@@ -262,10 +265,10 @@ test('browser-standby: 「还没准备好」MUST NOT 让位（人设未绑等动
   const hint = buildBrowserStandbyHint(source({ allowed: true }), {
     now: 1_000,
     config: CFG,
-    resumeGate: { blocked: true, reason: 'not_ready' },
+    resumeGate: { blocked: true, reason: STANDBY_NOT_READY_REASONS.personaUnbound },
   });
   assert.equal(hint.eligible, false);
-  assert.equal(hint.reason, 'not_ready');
+  assert.equal(hint.reason, STANDBY_NOT_READY_REASONS.personaUnbound);
   assert.equal(hint.waitMs, 0);
 });
 
@@ -338,7 +341,7 @@ test('browser-standby: 受限 + 验证码暂停中 → 一票否决仍压过定�
     { now: 1_000, config: CFG, needsBrowserToUnblock: true },
   );
   assert.equal(hint.eligible, false, '绝不能关掉运维正要去解弹窗的浏览器');
-  assert.equal(hint.reason, 'hard_blocker');
+  assert.equal(hint.reason, STANDBY_HARD_BLOCKER_REASONS.overlayPause);
 });
 
 test('browser-standby: frozen 维持回访语义（续场闸无 resumeAt，扫描器刻意不碰 frozen）', () => {
@@ -363,4 +366,40 @@ test('browser-standby: ui.push_snapshot 待机载荷字段零增减（本 change
   ].sort();
   assert.deepEqual(Object.keys(timed).sort(), expectedKeys, '受限定时让位不得增删载荷字段');
   assert.deepEqual(Object.keys(legacy).sort(), expectedKeys, '与既有配额路径字段集完全一致');
+});
+
+// ─── 兜底桶拆分（change release-browser-slot-on-stalled-blocker）──────────────────────────
+//
+// 这几条守的是同一个不变量：**处置不同的原因不得共用一个名字**。宿主层要据这个名字决定
+// 「滞留超限后要不要终止这个环境、收回它的浏览器槽位」，而其中有的是账号级（终止它是对的）、
+// 有的是全局级（照单终止即整机清场）。共名 = 后者自动继承前者的处置授权。
+
+test('browser-standby: 「尚未就绪」的每个子原因都原样透传，MUST NOT 压回裸 not_ready', () => {
+  for (const [key, reason] of Object.entries(STANDBY_NOT_READY_REASONS)) {
+    const hint = buildBrowserStandbyHint(source({ allowed: true }), {
+      now: 1_000,
+      config: CFG,
+      resumeGate: { blocked: true, reason },
+    });
+    assert.equal(hint.eligible, false, `${key} 绝不让位`);
+    assert.equal(hint.reason, reason, `${key} 必须原样透传：压回裸 not_ready 等于在最后一跳把刚拆开的桶重新封上`);
+    assert.equal(hint.waitMs, 0);
+  }
+});
+
+test('browser-standby: 全部具名原因两两互不相等', () => {
+  const all = [
+    ...Object.values(STANDBY_NOT_READY_REASONS),
+    ...Object.values(STANDBY_HARD_BLOCKER_REASONS),
+  ];
+  assert.equal(new Set(all).size, all.length, '任意两个原因同名，宿主层就无法只终止其中一个');
+});
+
+test('browser-standby: 阻断浮层暂停 MUST NOT 与风控补集同名', () => {
+  // 前者是宿主层终止白名单的成员，后者是「取反得来、内容未知」的补集。同名会让补集里将来
+  // 落进的任何新原因自动继承「可以终止环境」这项授权——而那正是本 change 要消灭的形状。
+  assert.notEqual(
+    STANDBY_HARD_BLOCKER_REASONS.overlayPause,
+    STANDBY_HARD_BLOCKER_REASONS.riskUnclassified,
+  );
 });

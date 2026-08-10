@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { RoleDispatcher, type EdgeCommand } from '../../src/orchestrator/role-dispatcher.js';
 import type { Soul } from 'aidcp-kernel/kernel/soul-types.js';
 import type { PersonaBinding } from 'aidcp-kernel/kernel/persona-binding.js';
+import { STANDBY_NOT_READY_REASONS } from '../../src/comm/browser-standby.js';
 
 const mockSoul: Soul = {
   identity: { name: 'T', role: 'r', background: 'b', tone: 't' },
@@ -301,4 +302,70 @@ test('绑定不可解析（人设副本陈旧）+ 规则模式启用 → 仍走 
   assert.equal(d.active, false);
   assert.deepEqual(rejected, [{ accountId: 'fb-stale', reason: 'persona_unavailable' }]);
   d.endSession();
+});
+
+// ─── 「尚未就绪」的具名子原因（change release-browser-slot-on-stalled-blocker）─────────────
+//
+// 这几条钉的是**分辨力**，不是取值本身：宿主层要据这个原因决定「滞留超限后要不要终止这个环境、
+// 收回它的浏览器槽位」。人设未绑是**账号级**（终止它是对的，人去绑一下就好）；全局停机与特性
+// 未开是**全局级**（每一个环境都报它，照单终止即整机清场，且没有任何受益人）。
+// 二者此前共用裸 `not_ready` 一个名字——那时宿主层无论如何都分不出该关哪个。
+
+test('resumeGateSnapshot: 未绑人设 → not_ready:persona_unbound（账号级，可终止）', () => {
+  const { d } = make({ personaBinding: () => 'unbound' });
+  const v = d.resumeGateSnapshot();
+  assert.equal(v.blocked, true);
+  assert.equal(v.reason, STANDBY_NOT_READY_REASONS.personaUnbound);
+  d.endSession();
+});
+
+test('resumeGateSnapshot: 人设副本陈旧 → not_ready:persona_unavailable（会自愈，MUST NOT 终止）', () => {
+  // 「云端此刻读不到」不是「这个号没设人设」：副本追上即解除，没有任何人可以去「处理」它。
+  const { d } = make({ personaBinding: () => 'unknown' });
+  const v = d.resumeGateSnapshot();
+  assert.equal(v.blocked, true);
+  assert.equal(v.reason, STANDBY_NOT_READY_REASONS.personaUnavailable);
+  assert.notEqual(v.reason, STANDBY_NOT_READY_REASONS.personaUnbound, '未知 ≠ 未绑，同名即误关');
+  d.endSession();
+});
+
+test('resumeGateSnapshot: 运营显式全局停机 → not_ready:dispatch_halted（全局级，MUST NOT 终止）', () => {
+  const { d } = make({ isDispatchActive: () => false });
+  const v = d.resumeGateSnapshot();
+  assert.equal(v.blocked, true);
+  assert.equal(v.reason, STANDBY_NOT_READY_REASONS.dispatchHalted);
+  assert.notEqual(
+    v.reason,
+    STANDBY_NOT_READY_REASONS.personaUnbound,
+    '全局停机时每个环境都报这条；与账号级同名 = 一次停机把整机环境逐个终止',
+  );
+  d.endSession();
+});
+
+test('resumeGateSnapshot: 该部署没开续场特性 → not_ready:feature_off（全局级，MUST NOT 终止）', () => {
+  // 就绪、周历与风控三闸全过，卡在「没有续场配置提供者」这一支上。
+  const { d } = make({});
+  const v = d.resumeGateSnapshot();
+  assert.equal(v.blocked, true);
+  assert.equal(v.reason, STANDBY_NOT_READY_REASONS.featureOff);
+  d.endSession();
+});
+
+test('会话启动裁决的每一种结论都映射到互不相同的具名原因', () => {
+  // 编译器只保证穷举表**有值**（新增结论不具名就编译不过），保证不了**取值互不相同**。
+  // 而两种结论共用一个名字，与当初共用 `not_ready` 是同一个缺陷——宿主层照样分不出该关哪个。
+  const observed = [
+    make({ personaBinding: () => 'unbound' }),
+    make({ personaBinding: () => 'unknown' }),
+    make({ isDispatchActive: () => false }),
+    make({}),
+  ].map(({ d }) => {
+    const reason = d.resumeGateSnapshot().reason;
+    d.endSession();
+    return reason;
+  });
+  assert.equal(new Set(observed).size, observed.length, `具名原因出现重复：${observed.join(', ')}`);
+  for (const reason of observed) {
+    assert.ok(reason && reason.startsWith('not_ready:'), `${reason} 必须是具名子原因，绝不能是裸 not_ready`);
+  }
 });

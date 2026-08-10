@@ -31,6 +31,59 @@ export const DEFAULT_BROWSER_STANDBY_REVISIT_MS = 6 * 3_600_000;
 const WAIT_WINDOWS: RiskWindow[] = ['minute', 'hour', 'day'];
 const STANDBY_ACTION: RiskAction = 'view';
 
+/**
+ * 「尚未就绪」的具名子原因（change release-browser-slot-on-stalled-blocker）。
+ *
+ * 此前这六种情形共用裸字符串 `not_ready` 一个名字，而它们的**处置完全不同**：
+ *
+ * | 子原因 | 谁能解除 | 宿主层可否据此终止环境 |
+ * | --- | --- | --- |
+ * | `persona_unbound` | 运营去绑人设 | **可以**（人来了就能解决，且此刻确实在白占一格槽） |
+ * | `persona_unavailable` | 只读副本自己追上 | 不可——无人可「处理」 |
+ * | `config_stale` | 同上 | 不可 |
+ * | `platform_no_browse` | 无从解除，该平台常态 | 不可——该账号很可能正在跑排期发帖 / 评论 |
+ * | `dispatch_halted` | 运营重开调度（**全局**） | 不可——全体环境共有，照单终止即全场清光且无受益人 |
+ * | `feature_off` | 部署方配上续场特性（**全局**） | 不可——同上 |
+ *
+ * 把它们折进同一个名字，正是本仓「跨层翻译 MUST NOT 有兜底桶」所说的那种终局判决：宿主层拿到
+ * 三个字，分不出这是一个账号的事还是整台机器的事。
+ *
+ * **取值形状是 `not_ready:<sub>`**：前缀保留使既有「以 not_ready 判定不让位」的逻辑照旧成立，
+ * 冒号后的部分才是新增的可分辨信息。
+ */
+export const STANDBY_NOT_READY_REASONS = {
+  personaUnbound: 'not_ready:persona_unbound',
+  personaUnavailable: 'not_ready:persona_unavailable',
+  configStale: 'not_ready:config_stale',
+  platformNoBrowse: 'not_ready:platform_no_browse',
+  dispatchHalted: 'not_ready:dispatch_halted',
+  featureOff: 'not_ready:feature_off',
+  /**
+   * 防御性回落：裁决结论与「是否就绪」这两个读数在同一跳里出现了矛盾（结构上不应发生）。
+   *
+   * 它**不是**兜底桶——兜底桶的问题是把**已知且处置不同**的原因折进一个名字；这里相反，它是一个
+   * 显式的「我不知道」，且**永远不会进宿主层的终止白名单**。见到它就是逻辑有 bug，而不是某种阻塞。
+   */
+  unclassified: 'not_ready:unclassified',
+} as const;
+
+/** 「尚未就绪」的原因前缀。判定不让位只看前缀，具体子原因只服务诊断与宿主层白名单。 */
+export const STANDBY_NOT_READY_PREFIX = 'not_ready';
+
+/**
+ * 「需要浏览器才能解除」的具名子原因（change release-browser-slot-on-stalled-blocker）。
+ *
+ * - `overlayPause`：该边缘正处于**阻断浮层暂停态**。检出的阻断分「认得出的验证码」与「认不出的
+ *   未知弹窗」两类载荷，**两类都会把该分身置为暂停**，因此这一个取值同时覆盖二者。
+ * - `riskUnclassified`：风控拦住、原因既不是配额也不是 frozen / restricted 的**取反补集**。
+ *   对 `view` 动作今天这一支实际不可达（记账背压与发布 / 点赞专属原因都不作用于 view），
+ *   它是防御性分支——但**正因为无人知道将来会落进什么，它 MUST NOT 与 overlayPause 共名**。
+ */
+export const STANDBY_HARD_BLOCKER_REASONS = {
+  overlayPause: 'hard_blocker:overlay_pause',
+  riskUnclassified: 'hard_blocker:risk_unclassified',
+} as const;
+
 export interface BrowserStandbyConfig {
   enabled: boolean;
   minWaitMs: number;
@@ -57,7 +110,12 @@ export interface BrowserStandbyRiskSource {
  */
 export interface ResumeGateVerdict {
   blocked: boolean;
-  /** `'week' | 'active_window' | 'daily_sessions' | 'daily_minutes' | 'risk_state' | 'not_ready'` */
+  /**
+   * `'week' | 'active_window' | 'daily_sessions' | 'daily_minutes' | 'risk_state'`，
+   * 或 `STANDBY_NOT_READY_REASONS` 里那六个 `not_ready:<sub>` 具名取值之一。
+   *
+   * 「尚未就绪」MUST NOT 再以裸 `'not_ready'` 下发——见该常量表的说明。
+   */
   reason?: string;
   /** 恢复时刻（绝对 ms）。缺省 = 算不出（冻结 / 整周全关）。 */
   resumeAt?: number;
@@ -150,7 +208,7 @@ export function buildBrowserStandbyHint(
   // 根本没人问过「这个边缘是不是正卡在验证码上」。所以闸必须压在最前面，而不是补在 restricted 那一支。
   //
   // 权威事实由云端持有（ws-server 的验证码暂停集合，检测到即置位、解除 / 人工恢复才清），不依赖边缘自报。
-  if (options.needsBrowserToUnblock) return payload('hard_blocker', 0, false);
+  if (options.needsBrowserToUnblock) return payload(STANDBY_HARD_BLOCKER_REASONS.overlayPause, 0, false);
 
   const decision = source.explain(STANDBY_ACTION);
   if (!decision.allowed) {
@@ -171,7 +229,9 @@ export function buildBrowserStandbyHint(
       return payload(eligible ? 'risk_state:restricted' : 'short_wait', waitMs, eligible, 'risk');
     }
     // 需要浏览器才能解除的阻塞（验证码 / 登录 / 人工介入 / 未知）→ 绝不让位，保持既有诚实告警。
-    if (!reason.startsWith('quota:')) return payload('hard_blocker', 0, false);
+    // 这是取反得来的补集，与上面那道验证码一票否决**必须异名**：宿主层的终止白名单只收录后者，
+    // 补集里将来落进什么无人知道，同名会让一个未知原因自动继承「可以终止环境」这项授权。
+    if (!reason.startsWith('quota:')) return payload(STANDBY_HARD_BLOCKER_REASONS.riskUnclassified, 0, false);
     return quotaHint();
   }
 
@@ -180,7 +240,9 @@ export function buildBrowserStandbyHint(
   if (gate?.blocked) {
     const reason = gate.reason ?? '';
     // 「还没准备好」≠「没活干」：调度未开 / 人设未绑 / 无续场配置。人设绑定等动作可能要用浏览器 → 不让位。
-    if (reason === 'not_ready') return payload('not_ready', 0, false);
+    // **原样透传具名子原因**，MUST NOT 在这里压回裸 `not_ready`：压回去等于在最后一跳把刚拆开的桶
+    // 重新封上，宿主层照样分不出这是一个账号的事还是整台机器的事。
+    if (reason.startsWith(STANDBY_NOT_READY_PREFIX)) return payload(reason, 0, false);
     if (reason === 'risk_state') {
       const status = source.getState?.().status;
       // 续场闸带真实恢复时刻（restricted，change restricted-policy-global-config）→ 定时让位；
