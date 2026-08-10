@@ -118,6 +118,13 @@ export interface AutomationRiskAccounting {
   /** 写入前判定 + 记账，**全系统唯一入口**。漏斗未启用时回落改动前的路径，行为逐位一致。 */
   recordRiskFact(accountId: string, action: RiskAction, dedupeKey: string): Promise<boolean>;
   /**
+   * 立即 apply 一轮 outbox（互动观测订阅用：回执处理已把事实同步落 outbox，这里把
+   * 「事实落库」与「内存计数递增」的窗口压到不可观测；轮询只作崩溃恢复兜底）。
+   * 漏斗没起来时答 `false`，调用方回落进程内 `controller.record`——与单体订阅的
+   * `if (riskAccounting) applyNow else record` 分支逐位同形。
+   */
+  applyNow(): Promise<boolean>;
+  /**
    * 边缘回执处理器要的那一口（「**先落 outbox 再 emit**」）。
    *
    * **漏斗没起来时如实答 `undefined`**，而不是给一个会静默吞掉的空壳 —— 那正是消费方
@@ -323,6 +330,11 @@ export async function createAutomationRiskAccounting(
         return verdict.allowed;
       }
       return (await options.registry.getControllerForAccounting(accountId)).record(action);
+    },
+    applyNow: async () => {
+      if (!accounting) return false;
+      await accounting.applyNow();
+      return true;
     },
     // **就是上面那个漏斗实例本身**（`RiskAccounting` 的两个方法逐字同形）；
     // 没起来时如实缺席，见接口处那段注释。

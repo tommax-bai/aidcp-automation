@@ -74,6 +74,7 @@ import {
   createAutomationRiskAccounting,
   type AutomationRiskAccounting,
 } from './automation-risk-accounting.js';
+import { createAutomationInteractionLedger } from './automation-interaction-ledger.js';
 import { createAutomationFacebookRuntime } from './automation-facebook-runtime.js';
 import { createAutomationBusinessConfigPorts } from './automation-business-config.js';
 import { createAutomationCommentApprovalPorts } from './automation-comment-approval.js';
@@ -955,6 +956,22 @@ export async function runAutomationMain(
     logger,
   });
 
+  // ── 5c. 互动观测台账订阅（单体 segC 漏搬回填，2026-08-10） ─────────────────
+  // 每连接私有总线 tee 到全局观测总线的设计意图就是「跨连接的风控记账与观测账本订阅这里」；
+  // tee 一直在、订阅拆进程时整段丢失——interaction_feed / liked_notes / 精选语料 markBotAction
+  // 全部停摆且零报错。四段订阅与人工评论标记见模块头。
+  const interactionLedger = createAutomationInteractionLedger({
+    eventBus,
+    riskRegistry: riskFoundation.riskRegistry,
+    riskAccounting,
+    riskStore: riskFoundation.riskStore,
+    likedNoteStore: riskFoundation.likedNoteStore,
+    interactionFeedStore: riskFoundation.interactionFeedStore,
+    curatedWrite,
+    alertStore: riskFoundation.alertStore,
+    logger,
+  });
+
   // ── 6. 配置面审计中继（定时器留到 start()） ────────────────────────────────
   const auditRelay = createAutomationConfigAuditRelay({
     pool: ownerPool,
@@ -1047,6 +1064,8 @@ export async function runAutomationMain(
     automationConfigCommands: apiClients.automationConfigCommands,
     deliverStructuredNotification,
     businessConfig,
+    // 人工评论标记（互动观测台账）：真 commit 期间抑制该账号 comment 的节奏饱和告警；配额账照记。
+    manualCommentMarker: interactionLedger.manualCommentMarker,
     facebookStores: {
       targets: facebookGroupTargets,
       memberships: facebookGroupMemberships,

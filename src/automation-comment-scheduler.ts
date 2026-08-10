@@ -147,6 +147,12 @@ export interface AutomationCommentSchedulerOptions {
   automationConfigCommands: AutomationCommentConfigCommandsPort;
   /** 结构化通知出口（api 客户端），与批 G 第二片同一个。 */
   deliverStructuredNotification(payload: unknown, idempotencyKey: string): Promise<unknown>;
+  /**
+   * 人工评论标记（互动观测台账的回调对）：真 commit 期间把账号并入人工来源集合，
+   * 只抑制该账号 comment 的节奏饱和告警——配额账照记（手动跳过的是闸不是账）。
+   * 可选：缺席时标记为 no-op（单测/旧装配），告警不抑制、其余行为不变。
+   */
+  manualCommentMarker?: { onStart(accountId: string): void; onEnd(accountId: string): void };
   /** 两个业务配置取值口（步骤 1 / 2 的同一族，批 H 从同步读镜像 + kernel 判定喂进来）。 */
   businessConfig: Pick<
     AutomationBusinessConfigPorts,
@@ -266,6 +272,13 @@ export function createAutomationCommentSchedulerPorts(
     options.createJoinScheduler ?? ((deps) => new FacebookGroupJoinScheduler(deps));
 
   const commentScheduler = buildCommentScheduler({
+    // 人工评论标记透传（互动观测台账）：缺席即不传，withManualCommitMarker 的可选回调自然 no-op。
+    ...(options.manualCommentMarker
+      ? {
+          onTakeoverStart: options.manualCommentMarker.onStart,
+          onTakeoverEnd: options.manualCommentMarker.onEnd,
+        }
+      : {}),
     onScheduledTaskNotStarted: (accountId, action, reason) =>
       options.scheduledTaskFeedback.state === 'wired'
         ? options.scheduledTaskFeedback.port.reportNotStarted(accountId, action, reason)
